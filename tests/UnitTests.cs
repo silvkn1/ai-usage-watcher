@@ -514,6 +514,31 @@ namespace Tests
             }
         }
 
+        public static void Test_Real_Antigravity_Brain_Classification()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.ScanClaude = true;
+            sc.ScanGemini = true;
+            sc.Roots = delegate
+            {
+                List<string> r = new List<string>();
+                if (Directory.Exists(Paths.AntigravityBrainDir)) r.Add(Paths.AntigravityBrainDir);
+                return r;
+            };
+            sc.Scan();
+            UsageSnapshot snap = sc.Snapshot();
+
+            // When only Antigravity Brain is scanned, ClaudeToday must be 0!
+            // Even if Antigravity ran claude-opus-4-6-thinking or claude-3-7-sonnet!
+            Assert.Equal(0L, snap.ClaudeToday.Total, "ClaudeToday must be 0 when scanning Antigravity brain");
+            Assert.Equal(0L, snap.ClaudeWeek.Total, "ClaudeWeek must be 0 when scanning Antigravity brain");
+            Assert.True(snap.AntigravityToday.Total > 0, "AntigravityToday must have tokens from Antigravity activity");
+
+            // Verify opus-4-6-thinking is in TodayAntigravity, NOT in TodayClaude!
+            Assert.False(snap.TodayClaude.ContainsKey("claude-opus-4-6-thinking"), "claude-opus-4-6-thinking must NEVER be in TodayClaude when run in Antigravity");
+        }
+
         public static void Test_Antigravity_Alert_Engine()
         {
             AlertEngine engine = new AlertEngine();
