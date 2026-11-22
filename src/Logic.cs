@@ -104,10 +104,17 @@ namespace ClaudeUsageWidget
         public List<Alert> Evaluate(RateLimitSnapshot snap, int[] thresholds, bool resetNotify)
         {
             List<Alert> r = new List<Alert>();
-            if (snap == null || !snap.FileFound) return r;
+            if (snap == null) return r;
             bool silent = !_baselined;
-            Check("five_hour", snap.FiveHour, thresholds, resetNotify, silent, r);
-            Check("seven_day", snap.SevenDay, thresholds, resetNotify, silent, r);
+            if (snap.FileFound)
+            {
+                Check("five_hour", snap.FiveHour, thresholds, resetNotify, silent, r);
+                Check("seven_day", snap.SevenDay, thresholds, resetNotify, silent, r);
+            }
+            if (snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
+                Check("antigravity_five_hour", snap.AntigravityFiveHour, thresholds, resetNotify, silent, r);
+            if (snap.AntigravitySevenDay != null && snap.AntigravitySevenDay.Available)
+                Check("antigravity_seven_day", snap.AntigravitySevenDay, thresholds, resetNotify, silent, r);
             _baselined = true;
             return r;
         }
@@ -225,6 +232,12 @@ namespace ClaudeUsageWidget
         public static void IconSpec(RateLimitSnapshot limits, out string text, out Color badge, out bool weekly)
         {
             LimitWindow w5 = limits.FiveHour, w7 = limits.SevenDay;
+            if ((!w5.Available || w5.IsStale) && limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available)
+            {
+                w5 = limits.AntigravityFiveHour;
+                if (limits.AntigravitySevenDay != null && limits.AntigravitySevenDay.Available)
+                    w7 = limits.AntigravitySevenDay;
+            }
             weekly = w7.Available && !w7.IsStale && Math.Round(w7.UsedPercent) >= 100;
             LimitWindow w = weekly ? w7 : w5;
             bool show = w.Available && !w.IsStale;

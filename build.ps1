@@ -12,6 +12,17 @@ if (-not (Test-Path $csc)) { throw 'csc.exe .NET Framework 4.x tidak ditemukan.'
 
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $dist | Out-Null
+
+$targetExe = Join-Path $dist 'AIUsageWatcher.exe'
+if (Test-Path $targetExe) {
+    try { Remove-Item $targetExe -Force -ErrorAction Stop }
+    catch {
+        $old = Join-Path $dist "AIUsageWatcher.exe.old"
+        if (Test-Path $old) { try { Remove-Item $old -Force -ErrorAction SilentlyContinue } catch {} }
+        Move-Item $targetExe $old -Force
+    }
+}
+
 $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
 
 & $csc /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `

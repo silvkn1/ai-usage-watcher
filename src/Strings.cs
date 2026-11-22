@@ -78,6 +78,8 @@ namespace ClaudeUsageWidget
             { "lastchat",       new[] { "last chat {0}", "chat terakhir {0}" } },
             { "limit5",         new[] { "Claude 5-hour limit", "Limit 5 jam Claude" } },
             { "limit7",         new[] { "Claude weekly limit", "Limit mingguan Claude" } },
+            { "limit5.ag",      new[] { "Antigravity 5-hour limit", "Limit 5 jam Antigravity" } },
+            { "limit7.ag",      new[] { "Antigravity weekly limit", "Limit mingguan Antigravity" } },
             { "nostatusline",   new[] { "Limit: statusline not installed", "Limit: statusline belum dipasang" } },
             { "snapshot",       new[] { "Limit snapshot: {0} · source: {1}", "Snapshot limit: {0} · sumber: {1}" } },
             { "src.probe",      new[] { "CLI probe", "probe CLI" } },

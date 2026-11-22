@@ -116,6 +116,8 @@ namespace ClaudeUsageWidget
         public Tally AntigravityWeek = new Tally();
         public Dictionary<string, Tally> TodayProjects = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekProjects = new Dictionary<string, Tally>();
+        public LimitWindow AntigravityFiveHour = new LimitWindow();
+        public LimitWindow AntigravitySevenDay = new LimitWindow();
         public long SkippedLines;
         public DateTime LastRecord = DateTime.MinValue;
         public DateTime ScannedAt = DateTime.MinValue;
@@ -167,7 +169,7 @@ namespace ClaudeUsageWidget
             {
                 if (TrackProjects == on) return;
                 TrackProjects = on;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _proj.Clear(); _recentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -182,7 +184,10 @@ namespace ClaudeUsageWidget
         private DateTime _lastContextTime = DateTime.MinValue;
         private string _lastActiveCwd;
         private string _lastActiveProject;
+        public long AntigravityQuota5hTokens = 1000000;
+        public long AntigravityQuota7dTokens = 10000000;
         private readonly List<KeyValuePair<DateTime, long>> _recentTokens = new List<KeyValuePair<DateTime, long>>();
+        private readonly List<KeyValuePair<DateTime, long>> _antigravityRecentTokens = new List<KeyValuePair<DateTime, long>>();
 
         public UsageScanner(Pricing pricing)
         {
@@ -201,7 +206,7 @@ namespace ClaudeUsageWidget
             lock (_gate)
             {
                 _pricing = pricing;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _proj.Clear(); _recentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -554,6 +559,7 @@ namespace ClaudeUsageWidget
                 _lastContextTime = local;
             }
             _recentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
+            _antigravityRecentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
         }
 
         private void Prune()
@@ -573,6 +579,8 @@ namespace ClaudeUsageWidget
             }
             DateTime minRecent = DateTime.Now.AddMinutes(-20);
             _recentTokens.RemoveAll(delegate(KeyValuePair<DateTime, long> x) { return x.Key < minRecent; });
+            DateTime minRecentAg = DateTime.Now.AddHours(-6);
+            _antigravityRecentTokens.RemoveAll(delegate(KeyValuePair<DateTime, long> x) { return x.Key < minRecentAg; });
         }
 
         public static bool IsAntigravityModel(string model)
@@ -635,6 +643,36 @@ namespace ClaudeUsageWidget
                     if (_recentTokens[i].Key >= cut10) t10 += _recentTokens[i].Value;
                 }
                 s.TokensLast10m = t10;
+
+                DateTime cut5h = DateTime.Now.AddHours(-5);
+                long agTokens5h = 0;
+                DateTime oldest5h = DateTime.MaxValue;
+                for (int i = 0; i < _antigravityRecentTokens.Count; i++)
+                {
+                    if (_antigravityRecentTokens[i].Key >= cut5h)
+                    {
+                        agTokens5h += _antigravityRecentTokens[i].Value;
+                        if (_antigravityRecentTokens[i].Key < oldest5h)
+                            oldest5h = _antigravityRecentTokens[i].Key;
+                    }
+                }
+
+                if (agTokens5h > 0 || s.AntigravityWeek.Total > 0)
+                {
+                    long q5 = AntigravityQuota5hTokens > 0 ? AntigravityQuota5hTokens : 1000000;
+                    s.AntigravityFiveHour.Available = true;
+                    s.AntigravityFiveHour.UsedPercent = Math.Min(100.0, Math.Max(0.0, (double)agTokens5h / q5 * 100.0));
+                    if (agTokens5h > 0 && oldest5h != DateTime.MaxValue)
+                        s.AntigravityFiveHour.ResetsAt = oldest5h.AddHours(5);
+                    else
+                        s.AntigravityFiveHour.ResetsAt = DateTime.Now.AddHours(5);
+
+                    long q7 = AntigravityQuota7dTokens > 0 ? AntigravityQuota7dTokens : 10000000;
+                    s.AntigravitySevenDay.Available = true;
+                    s.AntigravitySevenDay.UsedPercent = Math.Min(100.0, Math.Max(0.0, (double)s.AntigravityWeek.Total / q7 * 100.0));
+                    s.AntigravitySevenDay.ResetsAt = DateTime.Today.AddDays(1);
+                }
+
                 return s;
             }
         }

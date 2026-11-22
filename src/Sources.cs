@@ -24,12 +24,14 @@ namespace ClaudeUsageWidget
     {
         public LimitWindow FiveHour = new LimitWindow();
         public LimitWindow SevenDay = new LimitWindow();
+        public LimitWindow AntigravityFiveHour = new LimitWindow();
+        public LimitWindow AntigravitySevenDay = new LimitWindow();
         public DateTime CapturedAt = DateTime.MinValue;
         public bool FileFound;
         public string Source = "statusline";
     }
 
-    /// <summary>Membaca snapshot rate_limits yang ditulis skrip statusline (cuw-statusline.sh).</summary>
+    /// <summary>Membaca snapshot rate_limits yang ditulis skrip statusline (cuw-statusline.sh) atau Antigravity.</summary>
     internal static class RateLimitReader
     {
         public static RateLimitSnapshot Read()
@@ -38,20 +40,35 @@ namespace ClaudeUsageWidget
             try
             {
                 string file = Paths.RateLimitsReadFile;
-                if (!File.Exists(file)) return s;
-                string txt;
-                using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
-                    txt = r.ReadToEnd();
-                Dictionary<string, object> o = J.Parse(txt);
-                s.FileFound = true;
-                double cap = J.Num(o, "captured_at");
-                s.CapturedAt = double.IsNaN(cap) ? File.GetLastWriteTime(file) : Fmt.FromUnix(cap);
-                string src = J.Str(o, "source");
-                if (!string.IsNullOrEmpty(src)) s.Source = src;
-                Dictionary<string, object> rl = J.Obj(o, "rate_limits");
-                s.FiveHour = Window(J.Obj(rl, "five_hour"));
-                s.SevenDay = Window(J.Obj(rl, "seven_day"));
+                if (File.Exists(file))
+                {
+                    string txt;
+                    using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
+                        txt = r.ReadToEnd();
+                    Dictionary<string, object> o = J.Parse(txt);
+                    s.FileFound = true;
+                    double cap = J.Num(o, "captured_at");
+                    s.CapturedAt = double.IsNaN(cap) ? File.GetLastWriteTime(file) : Fmt.FromUnix(cap);
+                    string src = J.Str(o, "source");
+                    if (!string.IsNullOrEmpty(src)) s.Source = src;
+                    Dictionary<string, object> rl = J.Obj(o, "rate_limits");
+                    s.FiveHour = Window(J.Obj(rl, "five_hour"));
+                    s.SevenDay = Window(J.Obj(rl, "seven_day"));
+                }
+
+                string agFile = Paths.AntigravityRateLimitsFile;
+                if (File.Exists(agFile))
+                {
+                    string txt;
+                    using (FileStream fs = new FileStream(agFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
+                        txt = r.ReadToEnd();
+                    Dictionary<string, object> o = J.Parse(txt);
+                    Dictionary<string, object> rl = J.Obj(o, "rate_limits");
+                    s.AntigravityFiveHour = Window(J.Obj(rl, "five_hour"));
+                    s.AntigravitySevenDay = Window(J.Obj(rl, "seven_day"));
+                }
             }
             catch (Exception ex) { Log.Write("ratelimits.read", ex); }
             return s;

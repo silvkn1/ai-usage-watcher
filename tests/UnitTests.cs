@@ -360,6 +360,79 @@ namespace Tests
             Assert.False(UsageScanner.IsAntigravityModel("claude-3-5-sonnet"));
             Assert.False(UsageScanner.IsAntigravityModel("claude-opus-4-6"));
         }
+
+        public static void Test_Antigravity_RateLimits_Calculation()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.AntigravityQuota5hTokens = 1000000;
+            sc.AntigravityQuota7dTokens = 10000000;
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_ag_limits_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string jsonl = Path.Combine(tempDir, "sample_ag.jsonl");
+                string nowUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+                string line = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-2.5-flash\",\"created_at\":\"{0}\",\"step_index\":1,\"input_tokens\":50000,\"output_tokens\":2000,\"cache_read_tokens\":10000}}",
+                    nowUtc
+                );
+
+                File.WriteAllLines(jsonl, new[] { line });
+
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.True(snap.AntigravityFiveHour.Available, "AntigravityFiveHour must be available");
+                Assert.True(snap.AntigravitySevenDay.Available, "AntigravitySevenDay must be available");
+
+                // Total tokens = 50000 + 2000 + 10000 = 62000
+                // 5h = 62000 / 1000000 * 100% = 6.2%
+                Assert.Equal(6.2, Math.Round(snap.AntigravityFiveHour.UsedPercent, 1), "5h used percent should match quota calculation");
+                // 7d = 62000 / 10000000 * 100% = 0.62%
+                Assert.Equal(0.62, Math.Round(snap.AntigravitySevenDay.UsedPercent, 2), "7d used percent should match quota calculation");
+
+                Assert.True(snap.AntigravityFiveHour.ResetsAt > DateTime.Now, "5h resetsAt should be in the future");
+                Assert.True(snap.AntigravitySevenDay.ResetsAt > DateTime.Now, "7d resetsAt should be in the future");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_Antigravity_Alert_Engine()
+        {
+            AlertEngine engine = new AlertEngine();
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.AntigravityFiveHour.Available = true;
+            rl.AntigravityFiveHour.UsedPercent = 30; // Baseline pass
+            engine.Evaluate(rl, new[] { 80, 95 }, false);
+
+            rl.AntigravityFiveHour.UsedPercent = 88;
+            List<Alert> alerts = engine.Evaluate(rl, new[] { 80, 95 }, false);
+            Assert.Equal(1, alerts.Count, "Alert should fire for Antigravity 5h limit");
+            Assert.Equal("antigravity_five_hour", alerts[0].Window);
+            Assert.Equal(80, alerts[0].Threshold);
+        }
+
+        public static void Test_Antigravity_TrayText_IconSpec()
+        {
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.FiveHour.Available = false;
+            rl.AntigravityFiveHour.Available = true;
+            rl.AntigravityFiveHour.UsedPercent = 75;
+
+            string text;
+            Color badge;
+            bool weekly;
+            TrayText.IconSpec(rl, out text, out badge, out weekly);
+            Assert.Equal("75", text, "Tray icon should display Antigravity limit when Claude limit unavailable");
+            Assert.Equal(TrayIconPainter.StatusColor(75), badge);
+        }
     }
 
     public static class TestRunner

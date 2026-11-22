@@ -80,6 +80,8 @@ namespace ClaudeUsageWidget
 
         // Pindai log Google Antigravity / Gemini (~/.gemini/antigravity)
         public bool ScanGemini { get; set; }
+        public long AntigravityQuota5hTokens { get; set; }
+        public long AntigravityQuota7dTokens { get; set; }
 
         public AppConfig()
         {
@@ -113,6 +115,8 @@ namespace ClaudeUsageWidget
             WebhookUrl = "";
             ShowInTaskbar = false;
             ScanGemini = true;
+            AntigravityQuota5hTokens = 1000000;
+            AntigravityQuota7dTokens = 10000000;
         }
 
         public static AppConfig Load()

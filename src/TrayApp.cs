@@ -78,6 +78,8 @@ namespace ClaudeUsageWidget
             _scanner = new UsageScanner(_pricing);
             _scanner.Roots = ProjectRoots;
             _scanner.SetTrackProjects(_cfg.ShowProjects);
+            _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
+            _scanner.AntigravityQuota7dTokens = _cfg.AntigravityQuota7dTokens;
             _history = HistoryStore.Load();
             Opts.ShowRemaining = _cfg.ShowRemaining;
 
@@ -367,7 +369,12 @@ namespace ClaudeUsageWidget
             int[] th = AlertEngine.ParseThresholds(_cfg.AlertThresholds) ?? new[] { 80, 95 };
             foreach (Alert a in _alerts.Evaluate(_limits, th, _cfg.ResetNotify))
             {
-                string name = L.T(a.Window == "five_hour" ? "limit5" : "limit7");
+                string name;
+                if (a.Window == "five_hour") name = L.T("limit5");
+                else if (a.Window == "seven_day") name = L.T("limit7");
+                else if (a.Window == "antigravity_five_hour") name = L.T("limit5.ag");
+                else if (a.Window == "antigravity_seven_day") name = L.T("limit7.ag");
+                else name = a.Window;
                 string text;
                 if (a.IsReset) text = L.T("alert.reset", name);
                 else
@@ -872,6 +879,11 @@ namespace ClaudeUsageWidget
         private void ReloadLimits()
         {
             _limits = RateLimitReader.Read();
+            if (!_limits.AntigravityFiveHour.Available && _usage != null && _usage.AntigravityFiveHour != null && _usage.AntigravityFiveHour.Available)
+            {
+                _limits.AntigravityFiveHour = _usage.AntigravityFiveHour;
+                _limits.AntigravitySevenDay = _usage.AntigravitySevenDay;
+            }
             Refresh();
             RunAlerts();
         }
@@ -898,7 +910,21 @@ namespace ClaudeUsageWidget
                     catch (Exception ex) { Log.Write("scan", ex); }
                     UsageSnapshot snap = _scanner.Snapshot();
                     if (snap.Ready) _history.Merge(snap.Days);   // hanya setelah pindai lengkap (bukan saat hitung ulang)
-                    _ui.Post(delegate { _usage = snap; Refresh(); MaybeProbe(false); RunBudget(); CheckBurnRate(); CheckContextAlert(); }, null);
+                    _ui.Post(delegate
+                    {
+                        _usage = snap;
+                        if (!_limits.AntigravityFiveHour.Available && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
+                        {
+                            _limits.AntigravityFiveHour = snap.AntigravityFiveHour;
+                            _limits.AntigravitySevenDay = snap.AntigravitySevenDay;
+                        }
+                        Refresh();
+                        MaybeProbe(false);
+                        RunBudget();
+                        CheckBurnRate();
+                        CheckContextAlert();
+                        RunAlerts();
+                    }, null);
                 } while (_scanAgain);
                 Interlocked.Exchange(ref _scanBusy, 0);
                 // Sekali saja setelah scan awal (yang membaca ratusan MB): bersihkan buffer besar & kembalikan memori ke OS.

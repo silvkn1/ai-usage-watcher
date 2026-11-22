@@ -309,7 +309,9 @@ namespace ClaudeUsageWidget
 
             if (ShowCompact)
             {
-                string line = L.T("compact", PctShort(rl.FiveHour), PctShort(rl.SevenDay), Fmt.UsdShort(u.TodayTotal.Cost));
+                LimitWindow c5 = rl.FiveHour.Available ? rl.FiveHour : rl.AntigravityFiveHour;
+                LimitWindow c7 = rl.SevenDay.Available ? rl.SevenDay : rl.AntigravitySevenDay;
+                string line = L.T("compact", PctShort(c5), PctShort(c7), Fmt.UsdShort(u.TodayTotal.Cost));
                 Row r = new Row(Kind.Text, line, null);
                 rows.Add(r);
                 return rows;
@@ -321,8 +323,12 @@ namespace ClaudeUsageWidget
             bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
             AddLimit(rows, L.T("limit5"), rl.FiveHour, rl.CapturedAt, Pace.FiveHourSecs, stale);
             AddLimit(rows, L.T("limit7"), rl.SevenDay, rl.CapturedAt, Pace.SevenDaySecs, stale);
-            if (!rl.FileFound) rows.Add(new Row(Kind.Small, L.T("nostatusline"), null));
-            else rows.Add(new Row(Kind.Small, L.T("snapshot", Fmt.Clock(rl.CapturedAt),
+            if (rl.AntigravityFiveHour != null && rl.AntigravityFiveHour.Available)
+                AddLimit(rows, L.T("limit5.ag"), rl.AntigravityFiveHour, rl.CapturedAt == DateTime.MinValue ? DateTime.Now : rl.CapturedAt, Pace.FiveHourSecs, false, Palette.AntigravityColor);
+            if (rl.AntigravitySevenDay != null && rl.AntigravitySevenDay.Available)
+                AddLimit(rows, L.T("limit7.ag"), rl.AntigravitySevenDay, rl.CapturedAt == DateTime.MinValue ? DateTime.Now : rl.CapturedAt, Pace.SevenDaySecs, false, Palette.AntigravityColor);
+            if (!rl.FileFound && (!rl.AntigravityFiveHour.Available)) rows.Add(new Row(Kind.Small, L.T("nostatusline"), null));
+            else if (rl.FileFound) rows.Add(new Row(Kind.Small, L.T("snapshot", Fmt.Clock(rl.CapturedAt),
                 rl.Source == "cli-probe" ? L.T("src.probe") : L.T("src.statusline")) + (stale ? L.T("snapshot.stale") : ""), null));
             if (!string.IsNullOrEmpty(vm.ProbeStatus)) rows.Add(new Row(Kind.Small, vm.ProbeStatus, null));
 
@@ -465,7 +471,7 @@ namespace ClaudeUsageWidget
             return Opts.ShowRemaining ? L.T("pct.left", 100 - used) : used + "%";
         }
 
-        private static void AddLimit(List<Row> rows, string label, LimitWindow w, DateTime captured, double windowSecs, bool stale)
+        private static void AddLimit(List<Row> rows, string label, LimitWindow w, DateTime captured, double windowSecs, bool stale, Color? customColor = null)
         {
             if (!w.Available) { Row na = new Row(Kind.Text, label, L.T("unavailable")); na.Color = Palette.Dim; rows.Add(na); return; }
             if (w.IsStale)
@@ -477,7 +483,7 @@ namespace ClaudeUsageWidget
             Row r = new Row(Kind.Bar, Opts.ShowRemaining ? L.T("limit.left", label, 100 - used) : label + "  " + used + "%",
                 w.ResetsAt == DateTime.MinValue ? "" : L.T("resetin.at", Fmt.Until(w.ResetsAt), Fmt.Clock(w.ResetsAt)));
             r.Percent = Opts.ShowRemaining ? 100 - w.UsedPercent : w.UsedPercent;   // isi bar mengikuti mode
-            r.Color = Palette.ForPercent(w.UsedPercent);                              // warna tetap menurut % terpakai
+            r.Color = (w.UsedPercent >= 80) ? Palette.Red : (w.UsedPercent >= 50 ? Palette.Amber : (customColor.HasValue ? customColor.Value : Palette.Green));
             r.Faded = stale;
             double e = Pace.ElapsedAt(w, DateTime.Now, windowSecs);
             if (!double.IsNaN(e)) r.Marker = Opts.ShowRemaining ? 1 - e : e;          // penanda ikut arah isi bar

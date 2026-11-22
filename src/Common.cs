@@ -86,6 +86,7 @@ namespace ClaudeUsageWidget
         }
         public static string AntigravityBrainDir { get { return Path.Combine(AntigravityDir, "brain"); } }
         public static string RateLimitsFile { get { return Path.Combine(AppDir, "ratelimits.json"); } }
+        public static string AntigravityRateLimitsFile { get { return Path.Combine(AppDir, "antigravity_ratelimits.json"); } }
         public static string ConfigFile { get { return Path.Combine(AppDir, "config.json"); } }
         public static string PricingFile { get { return Path.Combine(AppDir, "pricing.json"); } }
         public static string LogFile { get { return Path.Combine(AppDir, "widget.log"); } }
