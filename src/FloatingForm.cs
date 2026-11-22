@@ -56,6 +56,9 @@ namespace ClaudeUsageWidget
             if (p >= 50) return Amber;
             return Green;
         }
+
+        public static Color ClaudeColor { get { return IsLight ? Color.FromArgb(198, 90, 55) : Color.FromArgb(217, 119, 87); } }
+        public static Color AntigravityColor { get { return IsLight ? Color.FromArgb(24, 115, 232) : Color.FromArgb(66, 133, 244); } }
     }
 
     /// <summary>Jendela mengambang: tanpa border, TopMost, semi transparan, bisa digeser, opsi klik-tembus.</summary>
@@ -343,9 +346,45 @@ namespace ClaudeUsageWidget
             }
 
             rows.Add(new Row(Kind.Text, L.T("today", Fmt.Tokens(u.TodayTotal.Total)), "≈" + Fmt.Usd(u.TodayTotal.Cost)));
-            AddModels(rows, u.Today, 3);
+
+            // Bar Claude Usage (Terakota / Oranye Khas Claude)
+            double cPct = 0;
+            if (vm.BudgetDaily > 0)
+                cPct = Math.Min(100, (u.ClaudeToday.Cost / vm.BudgetDaily) * 100.0);
+            else if (u.TodayTotal.Total > 0)
+                cPct = Math.Max(u.ClaudeToday.Total > 0 ? 3 : 0, Math.Min(100, (double)u.ClaudeToday.Total / u.TodayTotal.Total * 100.0));
+            else if (u.ClaudeToday.Total > 0)
+                cPct = 100;
+
+            Row rClaude = new Row(Kind.Bar, "   " + L.T("usage.claude", Fmt.Tokens(u.ClaudeToday.Total)), "≈" + Fmt.Usd(u.ClaudeToday.Cost));
+            rClaude.Percent = cPct;
+            rClaude.Color = Palette.ClaudeColor;
+            rows.Add(rClaude);
+            if (u.TodayClaude.Count > 0) AddModels(rows, u.TodayClaude, 2);
+
+            // Bar Antigravity Usage (Biru Khas Google / Antigravity)
+            double agPct = 0;
+            if (vm.BudgetDaily > 0)
+                agPct = Math.Min(100, (u.AntigravityToday.Cost / vm.BudgetDaily) * 100.0);
+            else if (u.TodayTotal.Total > 0)
+                agPct = Math.Max(u.AntigravityToday.Total > 0 ? 3 : 0, Math.Min(100, (double)u.AntigravityToday.Total / u.TodayTotal.Total * 100.0));
+            else if (u.AntigravityToday.Total > 0)
+                agPct = 100;
+
+            Row rAg = new Row(Kind.Bar, "   " + L.T("usage.antigravity", Fmt.Tokens(u.AntigravityToday.Total)), "≈" + Fmt.Usd(u.AntigravityToday.Cost));
+            rAg.Percent = agPct;
+            rAg.Color = Palette.AntigravityColor;
+            rows.Add(rAg);
+            if (u.TodayAntigravity.Count > 0) AddModels(rows, u.TodayAntigravity, 2);
+
+            rows.Add(new Row(Kind.Sep, null, null));
             rows.Add(new Row(Kind.Text, L.T("week", Fmt.Tokens(u.WeekTotal.Total)), "≈" + Fmt.Usd(u.WeekTotal.Cost)));
-            AddModels(rows, u.Week, 3);
+            if (u.ClaudeWeek.Total > 0)
+                rows.Add(new Row(Kind.Small, "   " + L.T("usage.claude.week", Fmt.Tokens(u.ClaudeWeek.Total)), "≈" + Fmt.Usd(u.ClaudeWeek.Cost)) { Color = Palette.ClaudeColor });
+            if (u.AntigravityWeek.Total > 0)
+                rows.Add(new Row(Kind.Small, "   " + L.T("usage.antigravity.week", Fmt.Tokens(u.AntigravityWeek.Total)), "≈" + Fmt.Usd(u.AntigravityWeek.Cost)) { Color = Palette.AntigravityColor });
+            if (u.ClaudeWeek.Total == 0 && u.AntigravityWeek.Total == 0)
+                AddModels(rows, u.Week, 3);
 
             if (u.WeekTotal.InputSide > 0)   // efisiensi cache (estimasi bersih setelah biaya menulis cache)
                 rows.Add(new Row(Kind.Small, L.T("cache.row", (int)Math.Round(u.WeekTotal.CacheHit * 100),

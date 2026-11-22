@@ -104,10 +104,18 @@ namespace ClaudeUsageWidget
     {
         public Dictionary<string, Tally> Today = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> Week = new Dictionary<string, Tally>();
-        public Dictionary<string, Tally> TodayProjects = new Dictionary<string, Tally>();
-        public Dictionary<string, Tally> WeekProjects = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> TodayClaude = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> TodayAntigravity = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> WeekClaude = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> WeekAntigravity = new Dictionary<string, Tally>();
         public Tally TodayTotal = new Tally();
         public Tally WeekTotal = new Tally();
+        public Tally ClaudeToday = new Tally();
+        public Tally AntigravityToday = new Tally();
+        public Tally ClaudeWeek = new Tally();
+        public Tally AntigravityWeek = new Tally();
+        public Dictionary<string, Tally> TodayProjects = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> WeekProjects = new Dictionary<string, Tally>();
         public long SkippedLines;
         public DateTime LastRecord = DateTime.MinValue;
         public DateTime ScannedAt = DateTime.MinValue;
@@ -567,6 +575,13 @@ namespace ClaudeUsageWidget
             _recentTokens.RemoveAll(delegate(KeyValuePair<DateTime, long> x) { return x.Key < minRecent; });
         }
 
+        public static bool IsAntigravityModel(string model)
+        {
+            if (string.IsNullOrEmpty(model)) return false;
+            return model.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase) ||
+                   model.IndexOf("antigravity", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         public UsageSnapshot Snapshot()
         {
             lock (_gate)
@@ -582,7 +597,16 @@ namespace ClaudeUsageWidget
                     foreach (KeyValuePair<string, Tally> m in day.Value)
                     {
                         AddTo(s.Week, m.Key, m.Value); s.WeekTotal.Add(m.Value);
-                        if (day.Key == today) { AddTo(s.Today, m.Key, m.Value); s.TodayTotal.Add(m.Value); }
+                        bool isAg = IsAntigravityModel(m.Key);
+                        if (isAg) { AddTo(s.WeekAntigravity, m.Key, m.Value); s.AntigravityWeek.Add(m.Value); }
+                        else { AddTo(s.WeekClaude, m.Key, m.Value); s.ClaudeWeek.Add(m.Value); }
+
+                        if (day.Key == today)
+                        {
+                            AddTo(s.Today, m.Key, m.Value); s.TodayTotal.Add(m.Value);
+                            if (isAg) { AddTo(s.TodayAntigravity, m.Key, m.Value); s.AntigravityToday.Add(m.Value); }
+                            else { AddTo(s.TodayClaude, m.Key, m.Value); s.ClaudeToday.Add(m.Value); }
+                        }
                     }
                 }
                 if (TrackProjects)

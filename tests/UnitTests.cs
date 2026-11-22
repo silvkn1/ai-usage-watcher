@@ -351,6 +351,15 @@ namespace Tests
             Assert.Equal(1.25, geminiPro.Input);
             Assert.Equal(5.00, geminiPro.Output);
         }
+
+        public static void Test_Split_Usage_Claude_And_Antigravity()
+        {
+            Assert.True(Palette.ClaudeColor != Palette.AntigravityColor, "Claude and Antigravity must have distinct bar colors");
+            Assert.True(UsageScanner.IsAntigravityModel("gemini-2.5-flash"));
+            Assert.True(UsageScanner.IsAntigravityModel("gemini-3.8-pro"));
+            Assert.False(UsageScanner.IsAntigravityModel("claude-3-5-sonnet"));
+            Assert.False(UsageScanner.IsAntigravityModel("claude-opus-4-6"));
+        }
     }
 
     public static class TestRunner

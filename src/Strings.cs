@@ -76,8 +76,8 @@ namespace ClaudeUsageWidget
             { "loading",        new[] { "Loading data...", "Memuat data..." } },
             { "compact",        new[] { "5h {0}  ·  7d {1}  ·  today ≈{2}", "5j {0}  ·  7h {1}  ·  hari ini ≈{2}" } },
             { "lastchat",       new[] { "last chat {0}", "chat terakhir {0}" } },
-            { "limit5",         new[] { "5-hour limit", "Limit 5 jam" } },
-            { "limit7",         new[] { "Weekly limit", "Limit mingguan" } },
+            { "limit5",         new[] { "Claude 5-hour limit", "Limit 5 jam Claude" } },
+            { "limit7",         new[] { "Claude weekly limit", "Limit mingguan Claude" } },
             { "nostatusline",   new[] { "Limit: statusline not installed", "Limit: statusline belum dipasang" } },
             { "snapshot",       new[] { "Limit snapshot: {0} · source: {1}", "Snapshot limit: {0} · sumber: {1}" } },
             { "src.probe",      new[] { "CLI probe", "probe CLI" } },
@@ -319,6 +319,10 @@ namespace ClaudeUsageWidget
             { "set.pricing.fetching",new[] { "Updating...", "Mengambil..." } },
             { "set.pricing.fetch_ok",new[] { "Pricing updated from official sources ({0} models).", "Tabel harga berhasil diperbarui dari sumber resmi ({0} model)." } },
             { "set.pricing.fetch_fail", new[] { "Failed to fetch pricing from official sources. Existing pricing kept.", "Gagal mengambil harga dari sumber resmi. Tabel harga saat ini tetap digunakan." } },
+            { "usage.claude",        new[] { "Claude  {0} tokens", "Claude  {0} token" } },
+            { "usage.antigravity",   new[] { "Antigravity  {0} tokens", "Antigravity  {0} token" } },
+            { "usage.claude.week",   new[] { "Claude 7d  {0} tokens", "Claude 7h  {0} token" } },
+            { "usage.antigravity.week", new[] { "Antigravity 7d  {0} tokens", "Antigravity 7h  {0} token" } },
         };
     }
 }
