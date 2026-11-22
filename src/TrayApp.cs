@@ -383,7 +383,7 @@ namespace ClaudeUsageWidget
                     if (a.IsReset) AudioAlert.PlayNotify();
                     else AudioAlert.PlayWarning();
                 }
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.WebhookUrl, "Claude Usage Alert", text);
+                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.WebhookUrl, "AI Usage Watcher Alert", text);
             }
         }
 

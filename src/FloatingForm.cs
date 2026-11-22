@@ -93,7 +93,7 @@ namespace ClaudeUsageWidget
             StartPosition = FormStartPosition.Manual;
             BackColor = Palette.Bg;
             DoubleBuffered = true;
-            Text = "Claude Usage";
+            Text = L.AppName;
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
         }
 

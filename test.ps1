@@ -1,4 +1,4 @@
-# Test runner script for Claude Usage Widget
+# Test runner script for AI Usage Watcher
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 

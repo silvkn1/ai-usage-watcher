@@ -329,7 +329,7 @@ namespace Tests
         public static void Main()
         {
             Console.WriteLine("============================================================");
-            Console.WriteLine("   Claude Usage Widget - Automated Unit Test Suite (.NET 4.8) ");
+            Console.WriteLine("   AI Usage Watcher - Automated Unit Test Suite (.NET 4.8) ");
             Console.WriteLine("============================================================");
             Console.WriteLine();
 

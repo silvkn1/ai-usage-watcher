@@ -1,11 +1,12 @@
-# Claude Usage Widget (Windows native)
+# AI Usage Watcher (Windows native)
 
-Widget kecil untuk memantau pemakaian Claude: **ikon angka di taskbar** + **jendela mengambang**.
-C# WinForms di .NET Framework 4.8 (bawaan Windows 10/11): satu exe sekitar 63 KB, tanpa install runtime, tanpa NuGet.
+Widget kecil untuk memantau pemakaian AI (Claude Code & Google Gemini Antigravity): **ikon angka di taskbar** + **jendela mengambang**.
+C# WinForms di .NET Framework 4.8 (bawaan Windows 10/11): satu exe sekitar 200 KB, tanpa install runtime, tanpa NuGet.
 
 | Sumber | Isi | Kapan update |
 |---|---|---|
-| Log lokal Claude Code (`~/.claude/projects/**/*.jsonl`) | Token hari ini & 7 hari per model, estimasi biaya | Saat file log berubah, plus tiap 1 menit |
+| Log lokal Claude Code (`~/.claude/projects/**/*.jsonl`) | Token hari ini & 7 hari per model, estimasi biaya Claude | Saat file log berubah, plus tiap 1 menit |
+| Log lokal Gemini Antigravity (`~/.gemini/antigravity/brain/**/transcript.jsonl`) | Token hari ini & 7 hari model Gemini Flash/Pro, estimasi biaya | Real-time file watcher & saat berkas log berubah |
 | Statusline Claude Code CLI (`rate_limits`) | Sisa limit 5 jam & mingguan + waktu reset (Pro/Max/Ultra) | Saat Claude Code CLI dipakai; jam snapshot ditampilkan |
 | Probe CLI (opsional) | Limit yang sama, saat Anda memakai Claude Code **desktop** | Saat ada chat baru, maksimal 1x per 10 menit (bisa diatur) |
 | Admin API (opsional, **mati secara default**) | Biaya org bulan ini per model | 1x/jam |
@@ -16,22 +17,22 @@ Ketiga sumber ditampilkan **terpisah dan tidak dijumlah**, karena token Claude C
 
 **Syarat**
 - Windows 10 versi 1903 ke atas atau Windows 11 (.NET Framework 4.8 sudah bawaan).
-- Claude Code: CLI, atau cukup Claude desktop app. Probe bisa memakai Claude Code yang dibundel desktop app.
-- Untuk angka limit: login **langganan Pro/Max/Ultra**. Pengguna API key hanya mendapat token & estimasi biaya.
+- Claude Code / Google Antigravity: CLI, atau cukup Claude/Antigravity desktop app.
+- Untuk angka limit Claude: login **langganan Pro/Max/Ultra**. Pengguna API key hanya mendapat token & estimasi biaya.
 
 **Langkah**
-1. Ambil `ClaudeUsageWidget-<versi>.zip` (dibuat dengan `build.ps1 -Package`), lalu ekstrak.
+1. Ambil `AIUsageWatcher-<versi>.zip` (dibuat dengan `build.ps1 -Package`), lalu ekstrak.
 2. Jalankan:
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Statusline
    ```
    Opsi: `-Autostart` (jalan saat Windows mulai), `-NoLaunch`, `-InstallDir <path>`.
-   - Program dipasang ke `%LOCALAPPDATA%\Programs\ClaudeUsageWidget` dan diberi shortcut Start Menu.
+   - Program dipasang ke `%LOCALAPPDATA%\Programs\AIUsageWatcher` dan diberi shortcut Start Menu.
    - `-Statusline` memasang pembungkus statusline (lihat di bawah). `settings.json` di-backup dulu.
 3. Pengguna desktop app: buka *Pengaturan* lalu aktifkan **probe CLI** agar limit ikut update saat chat di desktop. Probe memakai sedikit kuota, jadi default-nya mati.
 4. Melepas: `uninstall.ps1` (tambahkan `-RemoveData` untuk menghapus config & data).
 
-**Default untuk pengguna baru**: probe CLI, salinan ke file lain (Windhawk), Admin API, pemindaian WSL, dan hotkey semuanya **mati**. Yang aktif: pemindaian log lokal, notifikasi ambang 80%/95%, selalu di atas, dan sembunyi saat layar penuh.
+**Default untuk pengguna baru**: probe CLI, salinan ke file lain (Windhawk), Admin API, pemindaian WSL, dan hotkey semuanya **mati**. Yang aktif: pemindaian log lokal Claude & Gemini, notifikasi ambang 80%/95%, selalu di atas, dan sembunyi saat layar penuh.
 
 **Catatan IT**: exe tidak bertanda tangan digital, jadi SmartScreen/antivirus bisa memperingatkan saat zip diunduh. Jangan diakali (misalnya dengan `Unblock-File`). Perlu diketahui: perintah pasang memakai `-ExecutionPolicy Bypass` untuk proses itu saja, sehingga pemeriksaan file unduhan untuk skrip ikut terlewati. Karena itu, persetujuan tim IT atas paket ini yang menjadi pengaman sebenarnya. Minta tim IT menandatangani dengan sertifikat perusahaan atau mendistribusikannya lewat jalur resmi. Alternatifnya, build sendiri dari sumber dengan `build.ps1`. Kebijakan ExecutionPolicy dari GPO tetap berlaku.
 
@@ -40,7 +41,7 @@ Ketiga sumber ditampilkan **terpisah dan tidak dijumlah**, karena token Claude C
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 ```
-Hasil: `dist\ClaudeUsageWidget.exe`, skrip, zip paket, dan `SHA256SUMS.txt` (hash zip dan exe untuk dicantumkan di catatan rilis; ini checksum, bukan tanda tangan penerbit). Memakai `csc.exe` bawaan `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`. Manifest winget baru bisa dibuat setelah ada URL rilis publik.
+Hasil: `dist\AIUsageWatcher.exe`, skrip, zip paket, dan `SHA256SUMS.txt` (hash zip dan exe untuk dicantumkan di catatan rilis; ini checksum, bukan tanda tangan penerbit). Memakai `csc.exe` bawaan `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\`. Manifest winget baru bisa dibuat setelah ada URL rilis publik.
 
 ## Statusline (limit dari Claude Code CLI)
 
@@ -48,10 +49,10 @@ Hasil: `dist\ClaudeUsageWidget.exe`, skrip, zip paket, dan `SHA256SUMS.txt` (has
 powershell -NoProfile -ExecutionPolicy Bypass -File install-statusline.ps1 [-Shell auto|bash|powershell] [-Uninstall]
 ```
 - Wrapper dipilih seperti aturan Claude Code di Windows: **Git Bash** bila terpasang (`cuw-statusline.sh`, sekitar 0,8 detik), selain itu **PowerShell** (`cuw-statusline.ps1`, sekitar 2,5 detik).
-- Statusline lama **tetap jalan**. Perintahnya disimpan di `%LOCALAPPDATA%\ClaudeUsageWidget\statusline-chain.txt` dan diberi input yang sama persis (diuji byte demi byte, termasuk teks non-ASCII).
+- Statusline lama **tetap jalan**. Perintahnya disimpan di `%LOCALAPPDATA%\AIUsageWatcher\statusline-chain.txt` dan diberi input yang sama persis (diuji byte demi byte, termasuk teks non-ASCII).
 - Yang disimpan hanya objek `rate_limits` dan waktu tangkap.
 
-**Ikon selalu terlihat (Win 11):** Settings → Personalization → Taskbar → *Other system tray icons* → aktifkan **ClaudeUsageWidget**.
+**Ikon selalu terlihat (Win 11):** Settings → Personalization → Taskbar → *Other system tray icons* → aktifkan **AIUsageWatcher**.
 
 ## Pemakaian
 

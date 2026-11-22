@@ -27,7 +27,7 @@ namespace ClaudeUsageWidget
             }
 
             bool created;
-            using (Mutex mutex = new Mutex(true, @"Local\ClaudeUsageWidget.SingleInstance", out created))
+            using (Mutex mutex = new Mutex(true, @"Local\AIUsageWatcher.SingleInstance", out created))
             {
                 if (!created) return;   // sudah berjalan (mis. autostart + buka manual)
 

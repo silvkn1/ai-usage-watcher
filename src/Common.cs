@@ -8,8 +8,8 @@ using System.Text;
 using System.Web.Script.Serialization;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
-[assembly: System.Reflection.AssemblyTitle("Claude Usage Widget")]
-[assembly: System.Reflection.AssemblyProduct("Claude Usage Widget")]
+[assembly: System.Reflection.AssemblyTitle("AI Usage Watcher")]
+[assembly: System.Reflection.AssemblyProduct("AI Usage Watcher")]
 [assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
 
 namespace ClaudeUsageWidget
@@ -20,9 +20,17 @@ namespace ClaudeUsageWidget
         public static readonly string ExeDir = DetectExeDir();
         public static readonly bool Portable = File.Exists(Path.Combine(ExeDir, "portable.flag"));
         /// <summary>Lokasi data standar (dipakai juga oleh pembungkus statusline, bahkan saat mode portabel).</summary>
-        public static readonly string StandardDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeUsageWidget");
+        public static readonly string StandardDir = DetectStandardDir();
         public static readonly string AppDir = Portable ? Path.Combine(ExeDir, "data") : StandardDir;
+
+        private static string DetectStandardDir()
+        {
+            string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string newDir = Path.Combine(localApp, "AIUsageWatcher");
+            string oldDir = Path.Combine(localApp, "ClaudeUsageWidget");
+            if (!Directory.Exists(newDir) && Directory.Exists(oldDir)) return oldDir;
+            return newDir;
+        }
 
         private static string DetectExeDir()
         {
@@ -36,7 +44,13 @@ namespace ClaudeUsageWidget
         {
             get
             {
-                if (!Portable) return RateLimitsFile;
+                if (!Portable)
+                {
+                    if (File.Exists(RateLimitsFile)) return RateLimitsFile;
+                    string legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeUsageWidget", "ratelimits.json");
+                    if (File.Exists(legacy)) return legacy;
+                    return RateLimitsFile;
+                }
                 string a = RateLimitsFile, b = Path.Combine(StandardDir, "ratelimits.json");
                 bool ea = File.Exists(a), eb = File.Exists(b);
                 if (ea && eb) return File.GetLastWriteTimeUtc(a) >= File.GetLastWriteTimeUtc(b) ? a : b;

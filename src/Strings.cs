@@ -8,8 +8,8 @@ namespace ClaudeUsageWidget
 {
     internal static class L
     {
-        public const string AppName = "Claude Usage";            // satu tempat untuk nama produk (rename menyusul)
-        public const string AppFullName = "Claude Usage Widget";
+        public const string AppName = "AI Usage";
+        public const string AppFullName = "AI Usage Watcher";
 
         public static string Lang = "en";
         public static bool IsId { get { return Lang == "id"; } }
@@ -143,7 +143,7 @@ namespace ClaudeUsageWidget
             { "aerr.both",         new[] { "{0} / legacy: {1}", "{0} / legacy: {1}" } },
 
             // ---- pengaturan ----
-            { "set.title",        new[] { "Settings - Claude Usage Widget", "Pengaturan - Claude Usage Widget" } },
+            { "set.title",        new[] { "Settings - AI Usage Watcher", "Pengaturan - AI Usage Watcher" } },
             { "tab.display",      new[] { "Display", "Tampilan" } },
             { "tab.behavior",     new[] { "Behavior", "Perilaku" } },
             { "tab.alerts",       new[] { "Alerts", "Notifikasi" } },

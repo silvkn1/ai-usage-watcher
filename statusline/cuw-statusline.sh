@@ -1,7 +1,7 @@
 #!/bin/bash
-# Claude Usage Widget - pembungkus statusline Claude Code.
+# AI Usage Watcher - pembungkus statusline Claude Code.
 # 1) Menyimpan HANYA objek rate_limits (+ waktu tangkap) ke
-#    %LOCALAPPDATA%\ClaudeUsageWidget\ratelimits.json (tulis atomik).
+#    %LOCALAPPDATA%\AIUsageWatcher\ratelimits.json (tulis atomik).
 # 2) Meneruskan input yang sama, byte demi byte, ke perintah statusline lama
 #    (disimpan di statusline-chain.txt oleh installer), lalu mencetak outputnya.
 # Tidak ada data yang dikirim ke mana pun. Hanya builtin bash agar cepat.
@@ -10,7 +10,13 @@ IFS= read -r -d '' input
 
 base="${LOCALAPPDATA:-$HOME/AppData/Local}"
 base="${base//\\//}"                       # C:\Users\x -> C:/Users/x
-dir="$base/ClaudeUsageWidget"
+if [ -d "$base/AIUsageWatcher" ]; then
+  dir="$base/AIUsageWatcher"
+elif [ -d "$base/ClaudeUsageWidget" ]; then
+  dir="$base/ClaudeUsageWidget"
+else
+  dir="$base/AIUsageWatcher"
+fi
 
 # Objek rate_limits (berisi objek satu tingkat: five_hour, seven_day, dst).
 flat="${input//[$'\r\n']/}"

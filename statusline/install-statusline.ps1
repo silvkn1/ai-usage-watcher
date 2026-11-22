@@ -1,5 +1,5 @@
 <#
-  Memasang / melepas pembungkus statusline Claude Usage Widget.
+  Memasang / melepas pembungkus statusline AI Usage Watcher.
   - Backup settings.json dulu (settings.json.bak-cuw-<waktu>).
   - Perintah statusline lama disimpan ke statusline-chain.txt dan tetap dijalankan dengan input yang sama.
   - Wrapper dipilih seperti aturan Claude Code di Windows: Git Bash bila terpasang, selain itu PowerShell.
@@ -13,7 +13,10 @@ $ErrorActionPreference = 'Stop'
 
 $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
 $settings  = Join-Path $claudeDir 'settings.json'
-$appDir    = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
+$appDir    = Join-Path $env:LOCALAPPDATA 'AIUsageWatcher'
+if (-not (Test-Path $appDir) -and (Test-Path (Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'))) {
+    $appDir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
+}
 $chainFile = Join-Path $appDir 'statusline-chain.txt'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 

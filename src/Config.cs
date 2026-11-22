@@ -188,7 +188,8 @@ namespace ClaudeUsageWidget
     internal static class Autostart
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string Name = "ClaudeUsageWidget";
+        private const string Name = "AIUsageWatcher";
+        private const string LegacyName = "ClaudeUsageWidget";
 
         public static bool IsEnabled
         {
@@ -196,7 +197,7 @@ namespace ClaudeUsageWidget
             {
                 if (Paths.Portable) return false;   // mode portabel tidak menulis registry
                 using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKey, false))
-                    return k != null && k.GetValue(Name) != null;
+                    return k != null && (k.GetValue(Name) != null || k.GetValue(LegacyName) != null);
             }
         }
 
@@ -205,8 +206,16 @@ namespace ClaudeUsageWidget
             if (Paths.Portable) return;
             using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
             {
-                if (on) k.SetValue(Name, "\"" + System.Windows.Forms.Application.ExecutablePath + "\"");
-                else if (k.GetValue(Name) != null) k.DeleteValue(Name);
+                if (on)
+                {
+                    k.SetValue(Name, "\"" + System.Windows.Forms.Application.ExecutablePath + "\"");
+                    if (k.GetValue(LegacyName) != null) k.DeleteValue(LegacyName);
+                }
+                else
+                {
+                    if (k.GetValue(Name) != null) k.DeleteValue(Name);
+                    if (k.GetValue(LegacyName) != null) k.DeleteValue(LegacyName);
+                }
             }
         }
     }

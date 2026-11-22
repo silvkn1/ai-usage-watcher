@@ -105,7 +105,8 @@ namespace ClaudeUsageWidget
     internal static class HookInstaller
     {
         private static readonly string[][] Events = { new[] { "UserPromptSubmit", "prompt" }, new[] { "Stop", "stop" }, new[] { "Notification", "input" } };
-        private const string ExeName = "ClaudeUsageWidget";
+        private const string ExeName = "AIUsageWatcher";
+        private const string LegacyExeName = "ClaudeUsageWidget";
 
         public static string SettingsPath { get { return Path.Combine(Paths.ClaudeDir, "settings.json"); } }
 
@@ -116,7 +117,7 @@ namespace ClaudeUsageWidget
             if (h == null) return false;
             string cmd = J.Str(h, "command");
             IList args = J.Arr(h, "args");
-            return cmd != null && cmd.IndexOf(ExeName, StringComparison.OrdinalIgnoreCase) >= 0
+            return cmd != null && (cmd.IndexOf(ExeName, StringComparison.OrdinalIgnoreCase) >= 0 || cmd.IndexOf(LegacyExeName, StringComparison.OrdinalIgnoreCase) >= 0)
                    && args != null && args.Count > 0 && Convert.ToString(args[0]) == "--notify";
         }
 

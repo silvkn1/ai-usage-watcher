@@ -1,6 +1,6 @@
-# Claude Usage Widget - pembungkus statusline untuk PC TANPA Git Bash
+# AI Usage Watcher - pembungkus statusline untuk PC TANPA Git Bash
 # (Claude Code di Windows menjalankan statusline lewat PowerShell bila Git Bash tidak ada).
-# 1) Simpan HANYA objek rate_limits (+ waktu tangkap) ke %LOCALAPPDATA%\ClaudeUsageWidget\ratelimits.json.
+# 1) Simpan HANYA objek rate_limits (+ waktu tangkap) ke %LOCALAPPDATA%\AIUsageWatcher\ratelimits.json.
 # 2) Teruskan input yang sama byte demi byte ke perintah statusline lama (statusline-chain.txt),
 #    dan salin output-nya apa adanya. Tidak lewat pipeline string PowerShell (mencegah rusaknya UTF-8).
 $ErrorActionPreference = 'SilentlyContinue'
@@ -10,7 +10,10 @@ $ms = New-Object System.IO.MemoryStream
 $bytes = $ms.ToArray()
 $text = [System.Text.Encoding]::UTF8.GetString($bytes)
 
-$dir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
+$dir = Join-Path $env:LOCALAPPDATA 'AIUsageWatcher'
+if (-not (Test-Path $dir) -and (Test-Path (Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'))) {
+    $dir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
+}
 $flat = $text -replace "[`r`n]", ''
 $m = [regex]::Match($flat, '"rate_limits":\s*\{(\s*"[a-z_]+":\s*\{[^{}]*\}\s*,?)*\s*\}')
 if ($m.Success) {

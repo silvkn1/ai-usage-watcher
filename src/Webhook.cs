@@ -25,7 +25,7 @@ namespace ClaudeUsageWidget
                 {
                     Dictionary<string, object> d = new Dictionary<string, object>();
                     d["content"] = "**[" + title + "]** " + message;
-                    d["username"] = "Claude Usage";
+                    d["username"] = "AI Usage Watcher";
                     string json = J.Ser.Serialize(d);
                     StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
                     Http.PostAsync(url, content).GetAwaiter().GetResult();
