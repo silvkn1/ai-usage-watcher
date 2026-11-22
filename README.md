@@ -65,9 +65,11 @@ Mode minimalis untuk produktivitas tanpa gangguan: hanya berupa bilah kapsul ram
 
 ### 📊 Pemantauan Multi-Provider AI (Claude Code + Google Antigravity)
 - **Log Lokal Claude Code (`~/.claude/projects/**/*.jsonl`)**: Pindai token prompt, output, serta cache secara inkremental dan dedup lintas file dengan waktu lokal.
-- **Log Lokal Antigravity (`~/.gemini/antigravity/brain/**/transcript.jsonl`)**: Pemantau *real-time* transkrip Google Antigravity untuk menghitung token model Gemini 2.5/3.0 Pro & Flash.
+- **Log Lokal Antigravity (`~/.gemini/antigravity/brain/**/transcript.jsonl`)**: Pemantau *real-time* transkrip Google Antigravity untuk menghitung token model Gemini 2.5/3.0 Pro & Flash serta model pihak ketiga (Claude Opus/Sonnet di Antigravity).
+- **Rate Limits Resmi via Connect-RPC**: Mengambil persentase sisa kuota resmi Antigravity langsung dari background Language Server (`RetrieveUserQuotaSummary`) melalui deteksi otomatis berkas daemon `hub_*.json` pada loopback `127.0.0.1`.
 - **Rate Limits 5 Jam & 7 Hari**: Menghitung konsumsi kuota berjalan 5 jam (*rolling 5-hour window*) dan mingguan untuk Claude maupun Antigravity, lengkap dengan countdown waktu dan jam reset pasti.
 - **Penanda Laju (Pacing Marker)**: Garis putih pada bar menunjukkan rasio waktu yang telah berlalu dibanding persentase kuota yang terpakai. Peringatan otomatis jika laju pemakaian diprediksi menghabiskan kuota sebelum waktu reset.
+- **Seleksi Provider Fleksibel**: Pengguna dapat mengaktifkan atau menonaktifkan pemantauan Claude, Gemini/Antigravity, atau Admin API secara independen melalui tab Pengaturan Data. Tampilan widget otomatis beradaptasi menjadi Single Card saat hanya 1 provider aktif, atau Dual Cards saat keduanya aktif.
 
 ### 🌐 Pengambilan Harga Resmi & Kurs Otomatis
 - **Official Pricing Auto-Fetcher**: Mengambil harga list resmi per juta token langsung dari dokumentasi [Anthropic Pricing Docs](https://platform.claude.com/docs/en/about-claude/pricing) dan [Google AI Studio Pricing Docs](https://ai.google.dev/gemini-api/docs/pricing).
@@ -125,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Kompilasi paket distribusi rilis lengkap (.zip + SHA256)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Menjalankan 18 automated unit test suite
+# Menjalankan 22 automated unit test suite
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -148,7 +150,7 @@ ai-usage-watcher/
 │   └── Usage.cs           # Pemindai log lokal inkremental Claude Code & Antigravity
 ├── statusline/            # Pembungkus statusline untuk Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs       # 18 automated unit tests (.NET 4.8 test runner mandiri)
+│   └── UnitTests.cs       # 22 automated unit tests (.NET 4.8 test runner mandiri)
 ├── docs/img/              # Tangkapan layar fitur untuk dokumentasi
 ├── app.manifest           # Manifest DPI awareness dan hak eksekusi Windows
 ├── pricing.json           # Tabel harga token resmi bawaan aplikasi
