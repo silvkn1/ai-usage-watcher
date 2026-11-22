@@ -149,7 +149,13 @@ namespace ClaudeUsageWidget
         public bool Compact
         {
             get { return _compact; }
-            set { _compact = value; Relayout(); }
+            set
+            {
+                _compact = value;
+                _expanded = false;
+                EnsureHoverTimer();
+                Relayout();
+            }
         }
 
         public bool ClickThrough
@@ -161,16 +167,29 @@ namespace ClaudeUsageWidget
         private void ApplyClickThrough()
         {
             if (!IsHandleCreated) return;
-            bool on = _clickThrough && !_dockTop;   // mode tepi atas butuh hover, jadi klik-tembus diabaikan
+            bool on = _clickThrough && !_dockTop && !(_compact && !_expanded);   // mode tepi atas & mode pill butuh hover
             int ex = GetWindowLong(Handle, GWL_EXSTYLE);
             ex = on ? (ex | WS_EX_TRANSPARENT | WS_EX_LAYERED) : (ex & ~WS_EX_TRANSPARENT);
             SetWindowLong(Handle, GWL_EXSTYLE, ex);
         }
 
-        // ---------- mode tempel di tepi atas: ringkas, lengkap saat kursor di atasnya ----------
+        // ---------- mode tempel di tepi atas & mode pill: ringkas, lengkap saat kursor di atasnya ----------
         private bool _dockTop, _expanded;
         private Timer _hoverTimer;
         private DateTime _outsideSince = DateTime.MinValue;
+
+        private void EnsureHoverTimer()
+        {
+            bool needHover = _dockTop || _compact;
+            if (needHover && _hoverTimer == null)
+            {
+                _hoverTimer = new Timer();
+                _hoverTimer.Interval = 120;
+                _hoverTimer.Tick += delegate { CheckHover(); };
+            }
+            if (_hoverTimer != null) _hoverTimer.Enabled = needHover;
+            ApplyClickThrough();
+        }
 
         /// <summary>Titik tengah horizontal widget saat menempel di tepi atas (koordinat layar).</summary>
         public int DockCenterX { get; set; }
@@ -184,33 +203,43 @@ namespace ClaudeUsageWidget
                 if (value && !_dockTop && DockCenterY == 0) DockCenterY = Top + Height / 2;
                 _dockTop = value;
                 _expanded = false;
-                if (_hoverTimer == null)
-                {
-                    _hoverTimer = new Timer();
-                    _hoverTimer.Interval = 120;
-                    _hoverTimer.Tick += delegate { CheckHover(); };
-                }
-                _hoverTimer.Enabled = value;
-                ApplyClickThrough();
+                EnsureHoverTimer();
                 Relayout();
             }
         }
 
-        private bool ShowCompact { get { return !_popup && (_compact || (_dockTop && !_expanded)); } }
+        private bool ShowCompact { get { return !_popup && ((_compact || _dockTop) && !_expanded); } }
 
         protected override void OnMouseEnter(EventArgs e)
         {
             base.OnMouseEnter(e);
-            if (_dockTop && !_expanded) { _expanded = true; _outsideSince = DateTime.MinValue; Relayout(); }
+            if ((_dockTop || _compact) && !_expanded)
+            {
+                _expanded = true;
+                _outsideSince = DateTime.MinValue;
+                Relayout();
+            }
         }
 
         private void CheckHover()
         {
-            if (!_dockTop || !_expanded) return;
+            if ((!_dockTop && !_compact) || !_expanded) return;
             bool menuOpen = ContextMenuStrip != null && ContextMenuStrip.Visible;
-            if (menuOpen || Bounds.Contains(Cursor.Position) || MouseButtons != MouseButtons.None) { _outsideSince = DateTime.MinValue; return; }
-            if (_outsideSince == DateTime.MinValue) { _outsideSince = DateTime.Now; return; }
-            if ((DateTime.Now - _outsideSince).TotalMilliseconds >= 400) { _expanded = false; Relayout(); }
+            if (menuOpen || Bounds.Contains(Cursor.Position) || MouseButtons != MouseButtons.None)
+            {
+                _outsideSince = DateTime.MinValue;
+                return;
+            }
+            if (_outsideSince == DateTime.MinValue)
+            {
+                _outsideSince = DateTime.Now;
+                return;
+            }
+            if ((DateTime.Now - _outsideSince).TotalMilliseconds >= 400)
+            {
+                _expanded = false;
+                Relayout();
+            }
         }
 
         /// <summary>Tepi tempel: "top", "bottom", "left", atau "right". Widget menempel rata pada tepi area kerja monitor tempel.</summary>
@@ -284,7 +313,19 @@ namespace ClaudeUsageWidget
         }
 
         // ---------- tata letak sebagai daftar baris ----------
-        private enum Kind { Title, Text, Bar, Small, Sep, Spark }
+        private enum Kind { Title, Text, Bar, Small, Sep, Spark, Pill, DualCards }
+
+        private class CardCol
+        {
+            public string Title;
+            public Color TitleColor;
+            public LimitWindow Limit5;
+            public LimitWindow Limit7;
+            public DateTime CapturedAt;
+            public bool Stale;
+            public Tally Today;
+            public Dictionary<string, Tally> Models;
+        }
 
         private class Row
         {
@@ -295,7 +336,8 @@ namespace ClaudeUsageWidget
             public double Marker = -1;          // posisi penanda laju (0..1) searah dengan isi bar
             public bool Warn, Faded;
             public double[] Series;             // untuk Kind.Spark
-            public DayStat[] Days;              // data harian di balik Series (untuk teks saat kursor di atas batang)
+            public DayStat[] Days;              // data harian di balik Series
+            public CardCol LeftCol, RightCol;   // untuk Kind.DualCards dan Kind.Pill
             public Row(Kind k, string l, string r) { Kind = k; Left = l; Right = r; }
         }
 
@@ -307,98 +349,83 @@ namespace ClaudeUsageWidget
             RateLimitSnapshot rl = vm.Limits ?? new RateLimitSnapshot();
             UsageSnapshot u = vm.Usage;
 
+            bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
+
+            CardCol leftCol = new CardCol();
+            leftCol.Title = "Claude Code";
+            leftCol.TitleColor = Palette.ClaudeColor;
+            leftCol.Limit5 = rl.FiveHour;
+            leftCol.Limit7 = rl.SevenDay;
+            leftCol.CapturedAt = rl.CapturedAt;
+            leftCol.Stale = stale;
+            leftCol.Today = u.ClaudeToday;
+            leftCol.Models = u.TodayClaude;
+
+            CardCol rightCol = new CardCol();
+            rightCol.Title = "Antigravity";
+            rightCol.TitleColor = Palette.AntigravityColor;
+            rightCol.Limit5 = rl.AntigravityFiveHour;
+            rightCol.Limit7 = rl.AntigravitySevenDay;
+            rightCol.CapturedAt = rl.CapturedAt == DateTime.MinValue ? DateTime.Now : rl.CapturedAt;
+            rightCol.Stale = false;
+            rightCol.Today = u.AntigravityToday;
+            rightCol.Models = u.TodayAntigravity;
+
             if (ShowCompact)
             {
-                LimitWindow c5 = rl.FiveHour.Available ? rl.FiveHour : rl.AntigravityFiveHour;
-                LimitWindow c7 = rl.SevenDay.Available ? rl.SevenDay : rl.AntigravitySevenDay;
-                string line = L.T("compact", PctShort(c5), PctShort(c7), Fmt.UsdShort(u.TodayTotal.Cost));
-                Row r = new Row(Kind.Text, line, null);
-                rows.Add(r);
+                Row pill = new Row(Kind.Pill, null, null);
+                pill.LeftCol = leftCol;
+                pill.RightCol = rightCol;
+                rows.Add(pill);
                 return rows;
             }
 
-            // Jam pesan Claude terakhir yang tercatat di log (CLI maupun desktop): bukti widget ikut refresh tiap chat.
+            // 1. Header
             rows.Add(new Row(Kind.Title, L.AppName, L.T("lastchat", Fmt.Clock(u.LastRecord))));
-            // Basi = ada chat setelah snapshot ditangkap (bukan sekadar lama: malam hari tanpa chat tidak basi).
-            bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
-            AddLimit(rows, L.T("limit5"), rl.FiveHour, rl.CapturedAt, Pace.FiveHourSecs, stale);
-            AddLimit(rows, L.T("limit7"), rl.SevenDay, rl.CapturedAt, Pace.SevenDaySecs, stale);
-            if (rl.AntigravityFiveHour != null && rl.AntigravityFiveHour.Available)
-                AddLimit(rows, L.T("limit5.ag"), rl.AntigravityFiveHour, rl.CapturedAt == DateTime.MinValue ? DateTime.Now : rl.CapturedAt, Pace.FiveHourSecs, false, Palette.AntigravityColor);
-            if (rl.AntigravitySevenDay != null && rl.AntigravitySevenDay.Available)
-                AddLimit(rows, L.T("limit7.ag"), rl.AntigravitySevenDay, rl.CapturedAt == DateTime.MinValue ? DateTime.Now : rl.CapturedAt, Pace.SevenDaySecs, false, Palette.AntigravityColor);
-            if (!rl.FileFound && (!rl.AntigravityFiveHour.Available)) rows.Add(new Row(Kind.Small, L.T("nostatusline"), null));
-            else if (rl.FileFound) rows.Add(new Row(Kind.Small, L.T("snapshot", Fmt.Clock(rl.CapturedAt),
-                rl.Source == "cli-probe" ? L.T("src.probe") : L.T("src.statusline")) + (stale ? L.T("snapshot.stale") : ""), null));
-            if (!string.IsNullOrEmpty(vm.ProbeStatus)) rows.Add(new Row(Kind.Small, vm.ProbeStatus, null));
+
+            // 2. Dual-Column Cards
+            Row dual = new Row(Kind.DualCards, null, null);
+            dual.LeftCol = leftCol;
+            dual.RightCol = rightCol;
+            rows.Add(dual);
+
+            // 3. Statusline / snapshot info
+            if (!rl.FileFound && !rl.AntigravityFiveHour.Available)
+                rows.Add(new Row(Kind.Small, L.T("nostatusline"), null));
+            else if (rl.FileFound)
+                rows.Add(new Row(Kind.Small, L.T("snapshot", Fmt.Clock(rl.CapturedAt),
+                    rl.Source == "cli-probe" ? L.T("src.probe") : L.T("src.statusline")) + (stale ? L.T("snapshot.stale") : ""), null));
+            if (!string.IsNullOrEmpty(vm.ProbeStatus))
+                rows.Add(new Row(Kind.Small, vm.ProbeStatus, null));
 
             rows.Add(new Row(Kind.Sep, null, null));
             if (!u.Ready) rows.Add(new Row(Kind.Small, L.T("scanning"), null));
 
+            // 4. Total Today
+            string todayLeft = L.T("today", Fmt.Tokens(u.TodayTotal.Total));
+            string todayRight = "≈" + Fmt.Usd(u.TodayTotal.Cost);
+            rows.Add(new Row(Kind.Text, todayLeft, todayRight));
+
+            // 5. Secondary Metrics (Context, Burn, Cache)
+            List<string> meta = new List<string>();
             if (u.LastContextTokens > 0)
             {
                 double ctxPct = (double)u.LastContextTokens / 200000.0 * 100.0;
-                rows.Add(new Row(Kind.Text, L.T("context.title", Fmt.Tokens(u.LastContextTokens)), string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}%", ctxPct)));
-                Row rCtx = new Row(Kind.Bar, null, null);
-                rCtx.Percent = Math.Min(100, Math.Max(0, ctxPct));
-                rCtx.Color = Palette.ForPercent(ctxPct);
-                rows.Add(rCtx);
-                if (ctxPct >= 75)
-                    rows.Add(new Row(Kind.Small, L.T("context.compact_hint"), null) { Color = Palette.Amber });
+                meta.Add(string.Format("Ctx: {0} ({1:0}%)", Fmt.Tokens(u.LastContextTokens), ctxPct));
             }
             if (u.TokensLast10m > 5000)
-            {
-                rows.Add(new Row(Kind.Small, L.T("burnrate.row", Fmt.Tokens(u.TokensLast10m)), null));
-            }
+                meta.Add(string.Format("Burn: {0}/10m", Fmt.Tokens(u.TokensLast10m)));
+            if (u.WeekTotal.InputSide > 0)
+                meta.Add(string.Format("Cache: {0}%", (int)Math.Round(u.WeekTotal.CacheHit * 100)));
 
-            rows.Add(new Row(Kind.Text, L.T("today", Fmt.Tokens(u.TodayTotal.Total)), "≈" + Fmt.Usd(u.TodayTotal.Cost)));
+            if (meta.Count > 0)
+                rows.Add(new Row(Kind.Small, string.Join("  ·  ", meta.ToArray()), null));
 
-            // Bar Claude Usage (Terakota / Oranye Khas Claude)
-            double cPct = 0;
-            if (vm.BudgetDaily > 0)
-                cPct = Math.Min(100, (u.ClaudeToday.Cost / vm.BudgetDaily) * 100.0);
-            else if (u.TodayTotal.Total > 0)
-                cPct = Math.Max(u.ClaudeToday.Total > 0 ? 3 : 0, Math.Min(100, (double)u.ClaudeToday.Total / u.TodayTotal.Total * 100.0));
-            else if (u.ClaudeToday.Total > 0)
-                cPct = 100;
-
-            Row rClaude = new Row(Kind.Bar, "   " + L.T("usage.claude", Fmt.Tokens(u.ClaudeToday.Total)), "≈" + Fmt.Usd(u.ClaudeToday.Cost));
-            rClaude.Percent = cPct;
-            rClaude.Color = Palette.ClaudeColor;
-            rows.Add(rClaude);
-            if (u.TodayClaude.Count > 0) AddModels(rows, u.TodayClaude, 2);
-
-            // Bar Antigravity Usage (Biru Khas Google / Antigravity)
-            double agPct = 0;
-            if (vm.BudgetDaily > 0)
-                agPct = Math.Min(100, (u.AntigravityToday.Cost / vm.BudgetDaily) * 100.0);
-            else if (u.TodayTotal.Total > 0)
-                agPct = Math.Max(u.AntigravityToday.Total > 0 ? 3 : 0, Math.Min(100, (double)u.AntigravityToday.Total / u.TodayTotal.Total * 100.0));
-            else if (u.AntigravityToday.Total > 0)
-                agPct = 100;
-
-            Row rAg = new Row(Kind.Bar, "   " + L.T("usage.antigravity", Fmt.Tokens(u.AntigravityToday.Total)), "≈" + Fmt.Usd(u.AntigravityToday.Cost));
-            rAg.Percent = agPct;
-            rAg.Color = Palette.AntigravityColor;
-            rows.Add(rAg);
-            if (u.TodayAntigravity.Count > 0) AddModels(rows, u.TodayAntigravity, 2);
-
-            rows.Add(new Row(Kind.Sep, null, null));
-            rows.Add(new Row(Kind.Text, L.T("week", Fmt.Tokens(u.WeekTotal.Total)), "≈" + Fmt.Usd(u.WeekTotal.Cost)));
-            if (u.ClaudeWeek.Total > 0)
-                rows.Add(new Row(Kind.Small, "   " + L.T("usage.claude.week", Fmt.Tokens(u.ClaudeWeek.Total)), "≈" + Fmt.Usd(u.ClaudeWeek.Cost)) { Color = Palette.ClaudeColor });
-            if (u.AntigravityWeek.Total > 0)
-                rows.Add(new Row(Kind.Small, "   " + L.T("usage.antigravity.week", Fmt.Tokens(u.AntigravityWeek.Total)), "≈" + Fmt.Usd(u.AntigravityWeek.Cost)) { Color = Palette.AntigravityColor });
-            if (u.ClaudeWeek.Total == 0 && u.AntigravityWeek.Total == 0)
-                AddModels(rows, u.Week, 3);
-
-            if (u.WeekTotal.InputSide > 0)   // efisiensi cache (estimasi bersih setelah biaya menulis cache)
-                rows.Add(new Row(Kind.Small, L.T("cache.row", (int)Math.Round(u.WeekTotal.CacheHit * 100),
-                    Fmt.Usd(u.TodayTotal.Saved), Fmt.Usd(u.WeekTotal.Saved)), null));
             if (vm.BudgetDaily > 0) AddBudget(rows, "budget.day", u.TodayTotal.Cost, vm.BudgetDaily);
             if (vm.BudgetMonthly > 0) AddBudget(rows, "budget.month", vm.MonthCost, vm.BudgetMonthly);
             if (vm.ShowProjects && u.WeekProjects.Count > 0) AddProjects(rows, u.WeekProjects, 5);
 
+            // 6. Sparkline (7-day history)
             if (vm.History != null && vm.History.Length > 0)
             {
                 double[] ser = new double[vm.History.Length];
@@ -413,6 +440,7 @@ namespace ClaudeUsageWidget
                 }
             }
 
+            // 7. Admin API
             if (vm.AdminEnabled)
             {
                 rows.Add(new Row(Kind.Sep, null, null));
@@ -426,8 +454,7 @@ namespace ClaudeUsageWidget
                     foreach (KeyValuePair<string, double> kv in o.ByModel)
                     {
                         if (n++ >= 3) break;
-                        Row r = new Row(Kind.Small, "   " + ShortModel(kv.Key), Fmt.Usd(kv.Value));
-                        rows.Add(r);
+                        rows.Add(new Row(Kind.Small, "   " + ShortModel(kv.Key), Fmt.Usd(kv.Value)));
                     }
                     rows.Add(new Row(Kind.Small, L.T("org.fetched", o.Endpoint, Fmt.Clock(o.FetchedAt)), null));
                 }
@@ -523,6 +550,8 @@ namespace ClaudeUsageWidget
         {
             switch (r.Kind)
             {
+                case Kind.Pill: return (int)(26 * s);
+                case Kind.DualCards: return (int)(112 * s);
                 case Kind.Title: return (int)(22 * s);
                 case Kind.Bar: return (int)(30 * s);
                 case Kind.Spark: return (int)(50 * s);
@@ -552,14 +581,14 @@ namespace ClaudeUsageWidget
                 foreach (Row r in rows)
                 {
                     h += RowHeight(r, s);
-                    if (r.Kind == Kind.Sep) continue;
+                    if (r.Kind == Kind.Sep || r.Kind == Kind.DualCards || r.Kind == Kind.Pill) continue;
                     Font f = FontFor(r);
                     int lw = TextRenderer.MeasureText(g, r.Left ?? "", f).Width;
                     int rw = string.IsNullOrEmpty(r.Right) ? 0 : TextRenderer.MeasureText(g, r.Right, f).Width + (int)(16 * s);
                     w = Math.Max(w, lw + rw);
                 }
             }
-            int minW = ShowCompact ? 0 : (int)(270 * s);
+            int minW = ShowCompact ? (Opts.CurrencyCustomEnabled ? (int)(380 * s) : (int)(330 * s)) : (int)(390 * s);
             Size = new Size(Math.Max(minW, w + pad * 2), h);
             if (_dockTop) PositionDocked(); else KeepOnScreen();
             Invalidate();
@@ -577,6 +606,156 @@ namespace ClaudeUsageWidget
             if (left != Left || top != Top) Location = new Point(left, top);
         }
 
+        private void DrawPill(Graphics g, Row r, int x, int y, int right, int rh, float s)
+        {
+            int pillW = right - x;
+            Rectangle pillRect = new Rectangle(x, y, pillW, rh);
+
+            using (SolidBrush pb = new SolidBrush(ThemeUtil.Blend(Palette.Track, Palette.Bg, 0.35)))
+                g.FillRectangle(pb, pillRect);
+            using (Pen pp = new Pen(Palette.Border, 1f))
+                g.DrawRectangle(pp, pillRect);
+
+            int segW = pillW / 3;
+            int pad = (int)(4 * s);
+
+            // Segment 1: Claude 5h
+            Rectangle r1 = new Rectangle(x + pad, y, segW - pad * 2, rh);
+            string cVal = (r.LeftCol != null && r.LeftCol.Limit5 != null) ? PctShort(r.LeftCol.Limit5) : "--";
+            string cText = "C 5h: " + cVal;
+            TextRenderer.DrawText(g, cText, _fBody, r1, Palette.ClaudeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+            // Divider 1
+            using (Pen dp = new Pen(Palette.Track, 1f))
+                g.DrawLine(dp, x + segW, y + (int)(4 * s), x + segW, y + rh - (int)(4 * s));
+
+            // Segment 2: Antigravity 5h
+            Rectangle r2 = new Rectangle(x + segW + pad, y, segW - pad * 2, rh);
+            string agVal = (r.RightCol != null && r.RightCol.Limit5 != null) ? PctShort(r.RightCol.Limit5) : "--";
+            string agText = "AG 5h: " + agVal;
+            TextRenderer.DrawText(g, agText, _fBody, r2, Palette.AntigravityColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+            // Divider 2
+            using (Pen dp = new Pen(Palette.Track, 1f))
+                g.DrawLine(dp, x + segW * 2, y + (int)(4 * s), x + segW * 2, y + rh - (int)(4 * s));
+
+            // Segment 3: Total Spend
+            Rectangle r3 = new Rectangle(x + segW * 2 + pad, y, pillW - segW * 2 - pad * 2, rh);
+            string costText = _vm != null && _vm.Usage != null ? Fmt.UsdShort(_vm.Usage.TodayTotal.Cost) : "$0.00";
+            TextRenderer.DrawText(g, costText, _fBody, r3, Palette.Text,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+
+        private void DrawCardCol(Graphics g, CardCol col, Rectangle rect, float s)
+        {
+            using (SolidBrush bg = new SolidBrush(ThemeUtil.Blend(Palette.Track, Palette.Bg, 0.45)))
+                g.FillRectangle(bg, rect);
+            using (Pen border = new Pen(Palette.Border, 1f))
+                g.DrawRectangle(border, rect);
+
+            int pad = (int)(6 * s);
+            int cx = rect.X + pad;
+            int cy = rect.Y + pad;
+            int cw = rect.Width - pad * 2;
+
+            int titleH = (int)(16 * s);
+            Rectangle titleRect = new Rectangle(cx, cy, cw, titleH);
+            TextRenderer.DrawText(g, col.Title ?? "", _fTitle, titleRect, col.TitleColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            cy += titleH + (int)(3 * s);
+
+            DrawMiniLimit(g, "5h", col.Limit5, col.CapturedAt, Pace.FiveHourSecs, col.Stale, col.TitleColor, cx, ref cy, cw, s);
+            DrawMiniLimit(g, "7d", col.Limit7, col.CapturedAt, Pace.SevenDaySecs, col.Stale, col.TitleColor, cx, ref cy, cw, s);
+
+            if (col.Today != null)
+            {
+                int useH = (int)(15 * s);
+                Rectangle useRect = new Rectangle(cx, cy, cw, useH);
+                string leftStr = Fmt.Tokens(col.Today.Total);
+                string rightStr = "≈" + Fmt.Usd(col.Today.Cost);
+                TextRenderer.DrawText(g, leftStr, _fSmall, useRect, Palette.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                TextRenderer.DrawText(g, rightStr, _fSmall, useRect, Palette.Dim,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                cy += useH + (int)(2 * s);
+            }
+
+            if (col.Models != null && col.Models.Count > 0)
+            {
+                string topModelName = null;
+                long topTokens = 0;
+                foreach (KeyValuePair<string, Tally> kv in col.Models)
+                {
+                    if (kv.Value.Total > topTokens)
+                    {
+                        topTokens = kv.Value.Total;
+                        topModelName = kv.Key;
+                    }
+                }
+                if (!string.IsNullOrEmpty(topModelName))
+                {
+                    int modH = (int)(13 * s);
+                    Rectangle modRect = new Rectangle(cx, cy, cw, modH);
+                    string modText = ShortModel(topModelName) + "  " + Fmt.Tokens(topTokens);
+                    TextRenderer.DrawText(g, modText, _fSmall, modRect, Palette.Dim,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                }
+            }
+        }
+
+        private void DrawMiniLimit(Graphics g, string label, LimitWindow w, DateTime captured, double windowSecs, bool stale, Color accent, int cx, ref int cy, int cw, float s)
+        {
+            int lineH = (int)(14 * s);
+            Rectangle tr = new Rectangle(cx, cy, cw, lineH);
+            if (w == null || !w.Available)
+            {
+                TextRenderer.DrawText(g, label + "  " + L.T("na"), _fSmall, tr, Palette.Dim,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                cy += lineH + (int)(6 * s);
+                return;
+            }
+            if (w.IsStale)
+            {
+                TextRenderer.DrawText(g, label + "  " + L.T("reset.short"), _fSmall, tr, Palette.Dim,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                cy += lineH + (int)(6 * s);
+                return;
+            }
+
+            int used = (int)Math.Round(w.UsedPercent);
+            string lStr = label + "  " + (Opts.ShowRemaining ? (100 - used) + "%" : used + "%");
+            string rStr = w.ResetsAt == DateTime.MinValue ? "" : Fmt.Until(w.ResetsAt);
+            TextRenderer.DrawText(g, lStr, _fSmall, tr, Palette.Text,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            if (!string.IsNullOrEmpty(rStr))
+                TextRenderer.DrawText(g, rStr, _fSmall, tr, Palette.Dim,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            cy += lineH;
+
+            int bh = Math.Max(3, (int)(4f * s));
+            int by = cy + (int)(1 * s);
+            using (SolidBrush tb = new SolidBrush(Palette.Track))
+                g.FillRectangle(tb, cx, by, cw, bh);
+
+            int fw = (int)(cw * Math.Max(0, Math.Min(100, Opts.ShowRemaining ? 100 - w.UsedPercent : w.UsedPercent)) / 100.0);
+            Color barCol = (w.UsedPercent >= 80) ? Palette.Red : (w.UsedPercent >= 50 ? Palette.Amber : accent);
+            if (stale) barCol = ThemeUtil.Blend(barCol, Palette.Track, 0.55);
+            using (SolidBrush fb = new SolidBrush(barCol))
+                g.FillRectangle(fb, cx, by, fw, bh);
+
+            double e = Pace.ElapsedAt(w, DateTime.Now, windowSecs);
+            if (!double.IsNaN(e))
+            {
+                double markerPos = Opts.ShowRemaining ? 1 - e : e;
+                int mx = cx + (int)(cw * Math.Max(0, Math.Min(1, markerPos)));
+                using (Pen mp = new Pen(Palette.Text, Math.Max(1.2f, 1.2f * s)))
+                    g.DrawLine(mp, mx, by - 1, mx, by + bh + 1);
+            }
+            cy += bh + (int)(4 * s);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             EnsureFonts();
@@ -591,6 +770,23 @@ namespace ClaudeUsageWidget
             foreach (Row r in BuildRows())
             {
                 int rh = RowHeight(r, s);
+                if (r.Kind == Kind.Pill)
+                {
+                    DrawPill(g, r, x, y, right, rh, s);
+                    y += rh; continue;
+                }
+                if (r.Kind == Kind.DualCards)
+                {
+                    int colGap = (int)(8 * s);
+                    int colW = (right - x - colGap) / 2;
+                    int cardH = rh - (int)(4 * s);
+                    Rectangle leftRect = new Rectangle(x, y + (int)(2 * s), colW, cardH);
+                    Rectangle rightRect = new Rectangle(x + colW + colGap, y + (int)(2 * s), right - (x + colW + colGap), cardH);
+
+                    if (r.LeftCol != null) DrawCardCol(g, r.LeftCol, leftRect, s);
+                    if (r.RightCol != null) DrawCardCol(g, r.RightCol, rightRect, s);
+                    y += rh; continue;
+                }
                 if (r.Kind == Kind.Sep)
                 {
                     using (Pen p = new Pen(Palette.Track, Math.Max(1f, s)))

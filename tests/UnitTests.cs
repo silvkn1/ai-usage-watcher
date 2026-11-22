@@ -433,6 +433,51 @@ namespace Tests
             Assert.Equal("75", text, "Tray icon should display Antigravity limit when Claude limit unavailable");
             Assert.Equal(TrayIconPainter.StatusColor(75), badge);
         }
+
+        public static void Test_DualCards_And_Pill_Layout()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                ViewModel vm = new ViewModel();
+                vm.Usage = new UsageSnapshot();
+                vm.Usage.Ready = true;
+                vm.Usage.TodayTotal.Cost = 1.25;
+                vm.Limits = new RateLimitSnapshot();
+                vm.Limits.FiveHour.Available = true;
+                vm.Limits.FiveHour.UsedPercent = 40;
+                vm.Limits.AntigravityFiveHour.Available = true;
+                vm.Limits.AntigravityFiveHour.UsedPercent = 25;
+
+                f.SetData(vm);
+                MethodInfo mBuild = typeof(FloatingForm).GetMethod("BuildRows", BindingFlags.Instance | BindingFlags.NonPublic);
+
+                // 1. Pill mode (Compact = true)
+                f.Compact = true;
+                var rowsPill = (System.Collections.IList)mBuild.Invoke(f, null);
+                Assert.True(rowsPill.Count == 1, "Pill mode should return exactly 1 row");
+                object r0 = rowsPill[0];
+                object kindPill = r0.GetType().GetField("Kind").GetValue(r0);
+                Assert.Equal("Pill", kindPill.ToString(), "Row kind must be Pill");
+
+                // 2. Dual-Column Cards mode (Compact = false)
+                f.Compact = false;
+                var rowsCards = (System.Collections.IList)mBuild.Invoke(f, null);
+                Assert.True(rowsCards.Count >= 2, "Expanded mode should have header and dual cards");
+                object rDual = rowsCards[1];
+                object kindDual = rDual.GetType().GetField("Kind").GetValue(rDual);
+                Assert.Equal("DualCards", kindDual.ToString(), "Row kind must be DualCards");
+
+                object leftCol = rDual.GetType().GetField("LeftCol").GetValue(rDual);
+                object rightCol = rDual.GetType().GetField("RightCol").GetValue(rDual);
+                Assert.NotNull(leftCol, "LeftCol (Claude) must not be null");
+                Assert.NotNull(rightCol, "RightCol (Antigravity) must not be null");
+
+                string leftTitle = (string)leftCol.GetType().GetField("Title").GetValue(leftCol);
+                string rightTitle = (string)rightCol.GetType().GetField("Title").GetValue(rightCol);
+                Assert.Equal("Claude Code", leftTitle);
+                Assert.Equal("Antigravity", rightTitle);
+            }
+        }
     }
 
     public static class TestRunner
