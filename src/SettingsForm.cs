@@ -47,7 +47,6 @@ namespace ClaudeUsageWidget
         private readonly CheckBox _currencyOn = new CheckBox(), _currencyBoth = new CheckBox();
         private readonly TextBox _currencySymbol = new TextBox();
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
-        private readonly CheckBox _showTaskbar = new CheckBox();
         private readonly CheckBox _scanGemini = new CheckBox();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
         private readonly CheckBox _burnRateOn = new CheckBox();
@@ -71,6 +70,7 @@ namespace ClaudeUsageWidget
             Text = L.T("set.title");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
@@ -210,7 +210,6 @@ namespace ClaudeUsageWidget
 
             AddCheck(t, _compact, L.T("set.compact"), _cfg.Compact);
             AddCheck(t, _click, L.T("set.click"), _cfg.ClickThrough);
-            AddCheck(t, _showTaskbar, L.T("set.taskbar.show"), _cfg.ShowInTaskbar);
 
             AddNote(t, L.T("set.h.currency"), "head");
             AddCheck(t, _currencyOn, L.T("set.currency.enable"), _cfg.CurrencyCustomEnabled);
@@ -218,7 +217,29 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.currency.symbol"), _currencySymbol);
             _currencyRate.DecimalPlaces = 0; _currencyRate.Minimum = 1; _currencyRate.Maximum = 10000000; _currencyRate.Increment = 100; _currencyRate.Width = 110;
             _currencyRate.Value = (decimal)Math.Max(1, Math.Min(10000000, _cfg.CurrencyRate <= 0 ? 16200 : _cfg.CurrencyRate));
-            AddRow(t, L.T("set.currency.rate"), _currencyRate);
+
+            Button fetchGoogle = new Button();
+            fetchGoogle.Text = L.T("set.currency.google");
+            fetchGoogle.AutoSize = true;
+            fetchGoogle.Click += async delegate
+            {
+                fetchGoogle.Enabled = false;
+                double r = await GoogleRateFetcher.FetchRateAsync();
+                if (r > 5000)
+                {
+                    _currencyRate.Value = (decimal)Math.Round(r, 2);
+                    MessageBox.Show(this, L.T("set.currency.google_ok", "Rp " + r.ToString("N0", L.Culture)), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(this, L.T("set.currency.google_fail"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                fetchGoogle.Enabled = true;
+            };
+            FlowLayoutPanel crp = new FlowLayoutPanel();
+            crp.AutoSize = true; crp.WrapContents = false;
+            crp.Controls.Add(_currencyRate); crp.Controls.Add(fetchGoogle);
+            AddRow(t, L.T("set.currency.rate"), crp);
             AddCheck(t, _currencyBoth, L.T("set.currency.both"), _cfg.CurrencyShowBoth);
         }
 
@@ -553,7 +574,7 @@ namespace ClaudeUsageWidget
             _cfg.MirrorEnabled = _mirror.Checked;
             _cfg.MirrorFilePath = _mirrorPath.Text.Trim();
 
-            _cfg.ShowInTaskbar = _showTaskbar.Checked;
+            _cfg.ShowInTaskbar = false;
             _cfg.CurrencyCustomEnabled = _currencyOn.Checked;
             _cfg.CurrencySymbol = _currencySymbol.Text.Trim();
             if (string.IsNullOrEmpty(_cfg.CurrencySymbol)) _cfg.CurrencySymbol = "Rp";

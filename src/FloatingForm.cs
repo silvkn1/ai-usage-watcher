@@ -81,19 +81,6 @@ namespace ClaudeUsageWidget
 
         private readonly bool _popup;          // jendela detail di atas ikon tray: selalu lengkap, bisa aktif, hilang saat kehilangan fokus
         public event EventHandler Dismissed;   // popup ditutup (fokus pindah atau Esc)
-        private bool _showInTaskbar;
-
-        public bool ShowInTaskbarMode
-        {
-            get { return _showInTaskbar; }
-            set
-            {
-                if (_showInTaskbar == value) return;
-                _showInTaskbar = value;
-                ShowInTaskbar = value;
-                if (IsHandleCreated) RecreateHandle();
-            }
-        }
 
         public FloatingForm() : this(false) { }
 
@@ -115,7 +102,7 @@ namespace ClaudeUsageWidget
             get
             {
                 CreateParams cp = base.CreateParams;
-                if (!_showInTaskbar) cp.ExStyle |= WS_EX_TOOLWINDOW; // tidak muncul di Alt-Tab bila bukan mode taskbar
+                cp.ExStyle |= WS_EX_TOOLWINDOW;                      // tidak pernah muncul di taskbar atau Alt-Tab
                 if (!_popup) cp.ExStyle |= WS_EX_NOACTIVATE;         // widget biasa tidak mencuri fokus; popup perlu aktif agar tahu saat fokus pindah
                 if (_clickThrough && !_popup) cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
                 return cp;
@@ -269,10 +256,6 @@ namespace ClaudeUsageWidget
         public void SetData(ViewModel vm)
         {
             _vm = vm;
-            if (_showInTaskbar && IsHandleCreated && vm != null && vm.Limits != null)
-            {
-                TaskbarProgress.Update(Handle, vm.Limits.FiveHour.Available ? vm.Limits.FiveHour.UsedPercent : -1);
-            }
             Relayout();
         }
 

@@ -141,6 +141,7 @@ namespace ClaudeUsageWidget
                         if (c.CurrencyRate <= 0 || double.IsNaN(c.CurrencyRate)) c.CurrencyRate = 16200;
                         if (c.BurnRateThresholdTokens <= 0) c.BurnRateThresholdTokens = 100000;
                         if (c.WebhookUrl == null) c.WebhookUrl = "";
+                        c.ShowInTaskbar = false;
                         return c;
                     }
                 }

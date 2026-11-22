@@ -83,7 +83,6 @@ namespace ClaudeUsageWidget
 
             Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
             _float = new FloatingForm();
-            _float.ShowInTaskbarMode = _cfg.ShowInTaskbar;
             _float.Compact = _cfg.Compact;
             _float.ClickThrough = _cfg.ClickThrough;
             ApplyOpacity();
@@ -138,6 +137,7 @@ namespace ClaudeUsageWidget
             ReloadLimits();
             RequestScan();
             MaybeFetchOrg(false);
+            MaybeFetchGoogleRate(false);
         }
 
         // ---------------- jendela detail di atas ikon tray ----------------
@@ -492,7 +492,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miRemaining);
             m.Items.Add(_miClickThrough);
             m.Items.Add(new ToolStripSeparator());
-            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); });
+            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
@@ -694,7 +694,6 @@ namespace ClaudeUsageWidget
             L.Set(_cfg.Language);
             ApplyCurrencyOpts();
             ApplyLanguage();
-            _float.ShowInTaskbarMode = _cfg.ShowInTaskbar;
             ResetPopup();
             _scanner.SetTrackProjects(_cfg.ShowProjects);   // aktif/nonaktif memicu pindai ulang
             _float.Edge = _cfg.DockEdge;
@@ -809,6 +808,7 @@ namespace ClaudeUsageWidget
             RequestScan();
             MaybeFetchOrg(false);
             MaybeProbe(false);
+            MaybeFetchGoogleRate(false);
         }
 
         /// <summary>
@@ -926,6 +926,19 @@ namespace ClaudeUsageWidget
             catch (Exception ex) { Log.Write("adminapi", ex); }
             finally { _orgBusy = false; _orgNext = DateTime.Now.AddHours(1); }
             Refresh();
+        }
+
+        private async void MaybeFetchGoogleRate(bool force)
+        {
+            if (!_cfg.CurrencyCustomEnabled || !GoogleRateFetcher.ShouldRefresh(force)) return;
+            double rate = await GoogleRateFetcher.FetchRateAsync();
+            if (rate > 5000)
+            {
+                _cfg.CurrencyRate = Math.Round(rate, 2);
+                Opts.CurrencyRate = _cfg.CurrencyRate;
+                _cfg.Save();
+                Refresh();
+            }
         }
 
         private ViewModel BuildVm()

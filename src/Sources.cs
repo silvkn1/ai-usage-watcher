@@ -237,4 +237,56 @@ namespace ClaudeUsageWidget
                 if (kv.Value is IList || kv.Value is Dictionary<string, object>) SumAmounts(kv.Value, m, byModel, res);
         }
     }
+
+    /// <summary>Pengambil kurs USD ke IDR otomatis dari Google Finance.</summary>
+    internal static class GoogleRateFetcher
+    {
+        private static readonly HttpClient Http = new HttpClient();
+        private static DateTime _lastFetch = DateTime.MinValue;
+        private static bool _busy;
+
+        static GoogleRateFetcher()
+        {
+            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+            Http.Timeout = TimeSpan.FromSeconds(10);
+            Http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        }
+
+        public static async Task<double> FetchRateAsync()
+        {
+            if (_busy) return 0;
+            _busy = true;
+            try
+            {
+                string html = await Http.GetStringAsync("https://www.google.com/finance/quote/USD-IDR?hl=en");
+                System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(html, @"""USD-IDR"",""USD / IDR"",([0-9\.]+)");
+                if (!m.Success)
+                    m = System.Text.RegularExpressions.Regex.Match(html, @"""USD / IDR"",\s*\d+,\s*null,\s*\[([0-9\.]+)");
+                if (m.Success)
+                {
+                    double rate;
+                    if (double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate) && rate > 5000)
+                    {
+                        _lastFetch = DateTime.Now;
+                        return rate;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("google.rate", ex);
+            }
+            finally
+            {
+                _busy = false;
+            }
+            return 0;
+        }
+
+        public static bool ShouldRefresh(bool force)
+        {
+            if (force) return (DateTime.Now - _lastFetch).TotalMinutes >= 1;
+            return (DateTime.Now - _lastFetch).TotalHours >= 1;
+        }
+    }
 }
