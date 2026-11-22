@@ -1,0 +1,246 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Text;
+
+namespace ClaudeUsageWidget
+{
+    /// <summary>
+    /// Probe limit: menjalankan Claude Code CLI headless dengan satu pesan kecil ("ok"),
+    /// lalu membaca event 'rate_limit_event' dari output stream-json.
+    /// Terisolasi: hook dimatikan (via file settings), tanpa MCP, tanpa tool, tanpa menyimpan sesi (tidak menulis JSONL).
+    /// Catatan: format event ini tidak terdokumentasi resmi dan bisa berubah. Diuji pada Claude Code 2.1.330.
+    /// </summary>
+    internal static class CliProbe
+    {
+        /// <summary>claude.exe (installer native) atau claude.cmd (npm). Null bila tidak ada.</summary>
+        public static string FindClaude()
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string local = Path.Combine(home, @".local\bin\claude.exe");
+            if (File.Exists(local)) return local;
+            string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (string name in new[] { "claude.exe", "claude.cmd" })
+                foreach (string dir in path.Split(';'))
+                {
+                    try
+                    {
+                        if (dir.Trim().Length == 0) continue;
+                        string p = Path.Combine(dir.Trim(), name);
+                        if (File.Exists(p)) return p;
+                    }
+                    catch { }
+                }
+            string npm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\claude.cmd");
+            if (File.Exists(npm)) return npm;
+            return FindDesktopBundled();
+        }
+
+        /// <summary>Cadangan: Claude Code yang dibundel Claude desktop app
+        /// (%LOCALAPPDATA%\Claude-Data\claude_*\claude-code\&lt;versi&gt;\&lt;hash&gt;\claude.exe), versi terbaru.
+        /// Diuji pada bundel 2.1.326: memakai login langganan yang sama.</summary>
+        private static string FindDesktopBundled()
+        {
+            try
+            {
+                string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Claude-Data");
+                if (!Directory.Exists(root)) return null;
+                string best = null;
+                Version bestV = null;
+                foreach (string pkg in Directory.GetDirectories(root, "claude_*"))
+                {
+                    string cc = Path.Combine(pkg, "claude-code");
+                    if (!Directory.Exists(cc)) continue;
+                    foreach (string verDir in Directory.GetDirectories(cc))
+                    {
+                        Version v;
+                        if (!Version.TryParse(Path.GetFileName(verDir), out v)) continue;
+                        foreach (string hashDir in Directory.GetDirectories(verDir))
+                        {
+                            string exe = Path.Combine(hashDir, "claude.exe");
+                            if (File.Exists(exe) && (bestV == null || v > bestV)) { best = exe; bestV = v; }
+                        }
+                    }
+                }
+                return best;
+            }
+            catch { return null; }
+        }
+
+        private static string SettingsFile()
+        {
+            string f = Path.Combine(Paths.AppDir, "probe-settings.json");
+            if (!File.Exists(f)) File.WriteAllText(f, "{\"disableAllHooks\":true}", new UTF8Encoding(false));
+            return f;
+        }
+
+        /// <summary>Null bila sukses: ratelimits.json ditulis dan rateLimitsJson berisi objek rate_limits
+        /// (format sama dengan statusline). Selain itu pesan error singkat yang menjelaskan penyebab.</summary>
+        public static string Run(string model, out string rateLimitsJson)
+        {
+            rateLimitsJson = null;
+            string exe = FindClaude();
+            if (exe == null) return L.T("perr.notfound");
+            if (string.IsNullOrEmpty(model) || model.IndexOfAny(new[] { ' ', '"', '&', '|', '<', '>', '^', '%' }) >= 0) model = "claude-haiku-5-5";
+
+            string args = "-p ok --settings \"" + SettingsFile() + "\" --strict-mcp-config --tools \"\" --model " + model
+                          + " --output-format stream-json --verbose --no-session-persistence";
+            ProcessStartInfo psi;
+            if (exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+                psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /s /c \"\"" + exe + "\" " + args + "\"");
+            else
+                psi = new ProcessStartInfo(exe, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.RedirectStandardInput = true;
+            psi.StandardOutputEncoding = Encoding.UTF8;
+            psi.WorkingDirectory = Paths.AppDir;
+
+            // Hanya baris yang relevan yang disimpan (bukan isi jawaban model).
+            Dictionary<string, object> windows = null;
+            string authSource = null, version = null, resultError = null;
+            bool sawResult = false;
+            object gate = new object();
+            List<string> keep = new List<string>();
+            using (Process p = new Process())
+            {
+                p.StartInfo = psi;
+                p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
+                {
+                    if (e.Data == null) return;
+                    if (e.Data.IndexOf("\"rate_limit_event\"", StringComparison.Ordinal) >= 0
+                        || e.Data.StartsWith("{\"type\":\"result\"", StringComparison.Ordinal)
+                        || e.Data.IndexOf("\"subtype\":\"init\"", StringComparison.Ordinal) >= 0)
+                        lock (gate) keep.Add(e.Data);
+                };
+                p.ErrorDataReceived += delegate { };
+                try { p.Start(); }
+                catch (Exception ex) { return L.T("perr.start", ex.GetType().Name); }
+                try { p.StandardInput.Close(); } catch { }
+                p.BeginOutputReadLine();
+                p.BeginErrorReadLine();
+                if (!p.WaitForExit(90 * 1000))
+                {
+                    try { p.Kill(); } catch { }
+                    return L.T("perr.timeout");
+                }
+                p.WaitForExit();
+            }
+
+            foreach (string line in keep)
+            {
+                Dictionary<string, object> o;
+                try { o = J.Parse(line); } catch { continue; }
+                string type = J.Str(o, "type");
+                if (type == "rate_limit_event")
+                {
+                    Dictionary<string, object> uw = J.Obj(J.Obj(o, "rate_limit_info"), "unifiedWindows");
+                    if (uw != null) windows = uw;   // ambil event terakhir
+                }
+                else if (type == "system")
+                {
+                    authSource = J.Str(o, "apiKeySource") ?? authSource;
+                    version = J.Str(o, "claude_code_version") ?? version;
+                }
+                else if (type == "result")
+                {
+                    sawResult = true;
+                    object isErr;
+                    if (o.TryGetValue("is_error", out isErr) && isErr is bool && (bool)isErr)
+                        resultError = J.Str(o, "api_error_status") ?? "error";
+                }
+            }
+
+            if (windows == null)
+            {
+                if (!sawResult) return L.T("perr.unrecognized", version ?? "?");
+                if (resultError != null) return L.T("perr.cli", resultError);
+                if (authSource != null && authSource != "none")
+                    return L.T("perr.auth", authSource);
+                return L.T("perr.nolimit", version ?? "?");
+            }
+
+            StringBuilder rl = new StringBuilder("{");
+            foreach (string name in new[] { "five_hour", "seven_day" })
+            {
+                Dictionary<string, object> w = J.Obj(windows, name);
+                double util = J.Num(w, "utilization");
+                if (double.IsNaN(util)) continue;
+                if (rl.Length > 1) rl.Append(',');
+                // Bulatkan seperti statusline (integer) agar format sama bagi pembaca lain (mis. mod Windhawk).
+                rl.Append('"').Append(name).Append("\":{\"used_percentage\":")
+                  .Append(((int)Math.Round(util * 100)).ToString(CultureInfo.InvariantCulture));
+                double reset = J.Num(w, "resetsAt");
+                if (!double.IsNaN(reset)) rl.Append(",\"resets_at\":").Append(((long)reset).ToString(CultureInfo.InvariantCulture));
+                rl.Append('}');
+            }
+            rl.Append('}');
+            if (rl.Length <= 2) return L.T("perr.nowindows");
+            rateLimitsJson = rl.ToString();
+
+            string snapshot = "{\"captured_at\":" + (long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds
+                              + ",\"source\":\"cli-probe\",\"rate_limits\":" + rateLimitsJson + "}";
+            AtomicFile.Write(Paths.RateLimitsFile, snapshot);
+            return null;
+        }
+    }
+
+    internal static class AtomicFile
+    {
+        /// <summary>Tulis ke file sementara di folder yang sama lalu tukar (File.Replace) agar pembaca tidak melihat file setengah jadi.</summary>
+        public static void Write(string path, string content)
+        {
+            string tmp = path + ".cuw.tmp";
+            File.WriteAllText(tmp, content, new UTF8Encoding(false));
+            if (File.Exists(path)) File.Replace(tmp, path, null);
+            else File.Move(tmp, path);
+        }
+    }
+
+    /// <summary>
+    /// Cermin rate_limits ke file JSON lain (mis. file status untuk mod Windhawk) setelah probe berhasil.
+    /// Hanya mengganti nilai "rate_limits" di teks file; sisanya tetap identik byte demi byte.
+    /// File tidak pernah dibuat baru, dan dilewati bila isinya tidak bisa di-parse (mungkin sedang ditulis).
+    /// </summary>
+    internal static class Mirror
+    {
+        public static string Write(string path, string rateLimitsJson)
+        {
+            if (string.IsNullOrEmpty(path)) return "empty path";
+            if (!File.Exists(path)) return "file does not exist";
+            string text;
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader r = new StreamReader(fs, new UTF8Encoding(false), true))
+                text = r.ReadToEnd();
+            try { if (J.Parse(text) == null) return "not a JSON object"; }
+            catch { return "invalid JSON (maybe being written)"; }
+
+            const string Key = "\"rate_limits\":";
+            string updated;
+            int k = text.IndexOf(Key, StringComparison.Ordinal);
+            if (k >= 0)
+            {
+                int v = k + Key.Length;
+                while (v < text.Length && char.IsWhiteSpace(text[v])) v++;
+                int end = UsageScanner.SkipValue(text, v);
+                if (end <= v) return "malformed rate_limits value";
+                updated = text.Substring(0, v) + rateLimitsJson + text.Substring(end);
+            }
+            else
+            {
+                int last = text.LastIndexOf('}');
+                if (last < 0) return "not a JSON object";
+                string before = text.Substring(0, last).TrimEnd();
+                string sep = before.EndsWith("{") ? "" : ",";
+                updated = before + sep + Key + rateLimitsJson + text.Substring(last);
+            }
+            try { J.Parse(updated); } catch { return "spliced result is invalid"; }
+            AtomicFile.Write(path, updated);
+            return null;
+        }
+    }
+}

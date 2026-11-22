@@ -1,0 +1,229 @@
+// Claude Usage Widget - utilitas bersama (C# 5 / .NET Framework 4.8)
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Text;
+using System.Web.Script.Serialization;
+
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
+[assembly: System.Reflection.AssemblyTitle("Claude Usage Widget")]
+[assembly: System.Reflection.AssemblyProduct("Claude Usage Widget")]
+[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
+
+namespace ClaudeUsageWidget
+{
+    internal static class Paths
+    {
+        /// <summary>Folder exe. Bila ada berkas 'portable.flag' di sini, mode portabel: data disimpan di '.\data'.</summary>
+        public static readonly string ExeDir = DetectExeDir();
+        public static readonly bool Portable = File.Exists(Path.Combine(ExeDir, "portable.flag"));
+        /// <summary>Lokasi data standar (dipakai juga oleh pembungkus statusline, bahkan saat mode portabel).</summary>
+        public static readonly string StandardDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeUsageWidget");
+        public static readonly string AppDir = Portable ? Path.Combine(ExeDir, "data") : StandardDir;
+
+        private static string DetectExeDir()
+        {
+            try { return Path.GetDirectoryName(typeof(Paths).Assembly.Location) ?? AppDomain.CurrentDomain.BaseDirectory; }
+            catch { return AppDomain.CurrentDomain.BaseDirectory; }
+        }
+
+        /// <summary>Berkas snapshot limit yang dibaca: di mode portabel, yang terbaru antara folder data portabel dan folder standar
+        /// (pembungkus statusline selalu menulis ke folder standar).</summary>
+        public static string RateLimitsReadFile
+        {
+            get
+            {
+                if (!Portable) return RateLimitsFile;
+                string a = RateLimitsFile, b = Path.Combine(StandardDir, "ratelimits.json");
+                bool ea = File.Exists(a), eb = File.Exists(b);
+                if (ea && eb) return File.GetLastWriteTimeUtc(a) >= File.GetLastWriteTimeUtc(b) ? a : b;
+                return eb ? b : a;
+            }
+        }
+
+        public static string LangDirAppData { get { return Path.Combine(AppDir, "lang"); } }
+        public static string LangDirExe { get { return Path.Combine(ExeDir, "lang"); } }
+        public static string HooksDir { get { return Path.Combine(AppDir, "hooks"); } }
+        public static string NotifyFile { get { return Path.Combine(AppDir, "notify.json"); } }
+
+        public static string ClaudeDir
+        {
+            get
+            {
+                string env = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+                if (!string.IsNullOrEmpty(env)) return env;
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+            }
+        }
+
+        public static string ProjectsDir { get { return Path.Combine(ClaudeDir, "projects"); } }
+        public static string RateLimitsFile { get { return Path.Combine(AppDir, "ratelimits.json"); } }
+        public static string ConfigFile { get { return Path.Combine(AppDir, "config.json"); } }
+        public static string PricingFile { get { return Path.Combine(AppDir, "pricing.json"); } }
+        public static string LogFile { get { return Path.Combine(AppDir, "widget.log"); } }
+
+        public static void Ensure() { Directory.CreateDirectory(AppDir); }
+    }
+
+    /// <summary>Log lokal minimal: hanya jenis kejadian/eksepsi, tanpa isi prompt atau path proyek.</summary>
+    internal static class Log
+    {
+        private static readonly object Gate = new object();
+
+        public static void Write(string context, Exception ex)
+        {
+            Write(context + ": " + (ex == null ? "" : ex.GetType().Name));
+        }
+
+        public static void Write(string message)
+        {
+            try
+            {
+                lock (Gate)
+                {
+                    FileInfo fi = new FileInfo(Paths.LogFile);
+                    if (fi.Exists && fi.Length > 256 * 1024) fi.Delete();
+                    File.AppendAllText(Paths.LogFile,
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + " " + message + Environment.NewLine,
+                        Encoding.UTF8);
+                }
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>Akses aman ke hasil JavaScriptSerializer (Dictionary/ArrayList) - toleran terhadap field hilang/berubah.</summary>
+    internal static class J
+    {
+        private static JavaScriptSerializer _ser;
+        public static JavaScriptSerializer Ser
+        {
+            get
+            {
+                if (_ser == null) { _ser = new JavaScriptSerializer(); _ser.MaxJsonLength = int.MaxValue; _ser.RecursionLimit = 256; }
+                return _ser;
+            }
+        }
+
+        public static Dictionary<string, object> Parse(string json)
+        {
+            return Ser.DeserializeObject(json) as Dictionary<string, object>;
+        }
+
+        public static Dictionary<string, object> Obj(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d != null && d.TryGetValue(key, out v)) return v as Dictionary<string, object>;
+            return null;
+        }
+
+        public static IList Arr(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d != null && d.TryGetValue(key, out v)) return v as IList;
+            return null;
+        }
+
+        public static string Str(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d != null && d.TryGetValue(key, out v) && v != null) return Convert.ToString(v, CultureInfo.InvariantCulture);
+            return null;
+        }
+
+        public static bool Has(Dictionary<string, object> d, string key)
+        {
+            object v;
+            return d != null && d.TryGetValue(key, out v) && v != null;
+        }
+
+        public static long Long(Dictionary<string, object> d, string key)
+        {
+            double x = Num(d, key);
+            return double.IsNaN(x) ? 0 : (long)x;
+        }
+
+        /// <summary>Angka atau string angka; NaN bila tidak ada.</summary>
+        public static double Num(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d == null || !d.TryGetValue(key, out v) || v == null) return double.NaN;
+            return ToNum(v);
+        }
+
+        public static double ToNum(object v)
+        {
+            if (v == null) return double.NaN;
+            if (v is int) return (int)v;
+            if (v is long) return (long)v;
+            if (v is decimal) return (double)(decimal)v;
+            if (v is double) return (double)v;
+            double r;
+            if (double.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out r)) return r;
+            return double.NaN;
+        }
+    }
+
+    internal static class Fmt
+    {
+        public static string Tokens(long n)
+        {
+            CultureInfo c = L.Culture;
+            if (n >= 1000000000) return (n / 1e9).ToString("0.00", c) + " " + L.T("unit.b");
+            if (n >= 1000000) return (n / 1e6).ToString("0.0", c) + " " + L.T("unit.m");
+            if (n >= 1000) return (n / 1e3).ToString("0.0", c) + " " + L.T("unit.k");
+            return n.ToString(c);
+        }
+
+        public static string Usd(double v)
+        {
+            string usd = "$" + v.ToString(v >= 100 ? "N0" : "N2", CultureInfo.InvariantCulture);
+            if (!Opts.CurrencyCustomEnabled || Opts.CurrencyRate <= 0) return usd;
+            double local = v * Opts.CurrencyRate;
+            string sym = string.IsNullOrEmpty(Opts.CurrencySymbol) ? "Rp" : Opts.CurrencySymbol;
+            string localStr = sym + " " + local.ToString(local >= 1000 ? "N0" : "N2", L.Culture);
+            return Opts.CurrencyShowBoth ? usd + " (" + localStr + ")" : localStr;
+        }
+
+        public static string UsdShort(double v)
+        {
+            string usd = "$" + v.ToString(v >= 100 ? "N0" : "N2", CultureInfo.InvariantCulture);
+            if (!Opts.CurrencyCustomEnabled || Opts.CurrencyRate <= 0) return usd;
+            double local = v * Opts.CurrencyRate;
+            string sym = string.IsNullOrEmpty(Opts.CurrencySymbol) ? "Rp" : Opts.CurrencySymbol;
+            return sym + " " + local.ToString(local >= 1000 ? "N0" : "N2", L.Culture);
+        }
+
+        public static string Until(DateTime target)
+        {
+            TimeSpan t = target - DateTime.Now;
+            if (t.TotalSeconds <= 0) return L.T("time.now");
+            if (t.TotalDays >= 1) return L.T("time.dh", (int)t.TotalDays, t.Hours);
+            if (t.TotalHours >= 1) return L.T("time.hm", (int)t.TotalHours, t.Minutes);
+            return L.T("time.m", Math.Max(1, (int)Math.Ceiling(t.TotalMinutes)));
+        }
+
+        /// <summary>Durasi pendek: 45s, 2m 10s, 1h 5m.</summary>
+        public static string Duration(long seconds)
+        {
+            if (seconds < 60) return L.T("dur.s", seconds);
+            if (seconds < 3600) return L.T("dur.ms", seconds / 60, seconds % 60);
+            return L.T("dur.hm", seconds / 3600, (seconds % 3600) / 60);
+        }
+
+        public static string Clock(DateTime dt)
+        {
+            if (dt == DateTime.MinValue) return "-";
+            if (dt.Date == DateTime.Today) return dt.ToString("HH:mm", L.Culture);
+            return dt.ToString("dd MMM HH:mm", L.Culture);
+        }
+
+        public static DateTime FromUnix(double secs)
+        {
+            return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(secs).ToLocalTime();
+        }
+    }
+}

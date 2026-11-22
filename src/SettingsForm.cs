@@ -1,0 +1,576 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace ClaudeUsageWidget
+{
+    /// <summary>Aksi yang disediakan TrayApp untuk tombol di Pengaturan.</summary>
+    internal class SettingsCallbacks
+    {
+        public Action ExportCsv;
+        public Func<string> Diagnostics;
+    }
+
+    /// <summary>
+    /// Dialog Pengaturan bertab dengan tema mengikuti widget (gelap/terang). Tab dibuat sendiri (bukan TabControl)
+    /// agar seluruh permukaan, termasuk tepi dan strip tab, bisa mengikuti palet.
+    /// </summary>
+    internal class SettingsForm : Form
+    {
+        private static readonly string[] Edges = { "top", "bottom", "left", "right" };
+
+        private readonly AppConfig _cfg;
+        private readonly SettingsCallbacks _cb;
+        private readonly TrackBar _opacity = new TrackBar();
+        private readonly Label _opacityLbl = new Label();
+        private readonly CheckBox _showFloat = new CheckBox(), _compact = new CheckBox(), _click = new CheckBox(), _auto = new CheckBox();
+        private readonly CheckBox _admin = new CheckBox(), _probe = new CheckBox();
+        private readonly NumericUpDown _probeMin = new NumericUpDown();
+        private readonly CheckBox _mirror = new CheckBox(), _dock = new CheckBox(), _onTop = new CheckBox(), _hideFs = new CheckBox();
+        private readonly ComboBox _theme = new ComboBox(), _lang = new ComboBox();
+        private readonly ComboBox _histDays = new ComboBox(), _edge = new ComboBox(), _monitor = new ComboBox();
+        private readonly List<string> _langCodes = new List<string>();
+        private readonly List<string> _monitorNames = new List<string>();
+        private readonly CheckBox _remaining = new CheckBox(), _hotkeyOn = new CheckBox(), _alertsOn = new CheckBox(), _resetOn = new CheckBox(), _wsl = new CheckBox();
+        private readonly CheckBox _projects = new CheckBox(), _stopOn = new CheckBox(), _inputOn = new CheckBox();
+        private readonly NumericUpDown _budgetDay = new NumericUpDown(), _budgetMonth = new NumericUpDown(), _stopSecs = new NumericUpDown();
+        private readonly Label _hookState = new Label();
+        private readonly TextBox _hotkeyText = new TextBox(), _alertTh = new TextBox(), _extraDirs = new TextBox();
+        private readonly TextBox _mirrorPath = new TextBox();
+        private readonly TextBox _key = new TextBox(), _keyIds = new TextBox(), _wsIds = new TextBox();
+        private readonly Label _keyState = new Label();
+        private bool _clearKey;
+
+        // Kontrol untuk fitur baru
+        private readonly CheckBox _currencyOn = new CheckBox(), _currencyBoth = new CheckBox();
+        private readonly TextBox _currencySymbol = new TextBox();
+        private readonly NumericUpDown _currencyRate = new NumericUpDown();
+        private readonly CheckBox _showTaskbar = new CheckBox();
+        private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
+        private readonly CheckBox _burnRateOn = new CheckBox();
+        private readonly NumericUpDown _burnRateTokens = new NumericUpDown();
+        private readonly CheckBox _webhookOn = new CheckBox();
+        private readonly TextBox _webhookUrl = new TextBox();
+
+        private readonly FlowLayoutPanel _tabStrip = new FlowLayoutPanel();
+        private readonly Panel _content = new Panel();
+        private readonly List<Button> _tabBtns = new List<Button>();
+        private readonly List<Panel> _pages = new List<Panel>();
+        private int _tab;
+        private Button _saveBtn, _cancelBtn;
+
+        public SettingsForm(AppConfig cfg) : this(cfg, null) { }
+
+        public SettingsForm(AppConfig cfg, SettingsCallbacks callbacks)
+        {
+            _cfg = cfg;
+            _cb = callbacks;
+            Text = L.T("set.title");
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false; MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterScreen;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = new SizeF(96f, 96f);
+            Font = new Font("Segoe UI", 9f);
+            Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+            ClientSize = new Size(700, Math.Min(560, Math.Max(380, wa.Height - 140)));
+
+            // Urutan penambahan menentukan docking: isi (Fill) dulu, lalu bawah, lalu atas.
+            _content.Dock = DockStyle.Fill;
+            Controls.Add(_content);
+
+            FlowLayoutPanel buttons = new FlowLayoutPanel();
+            buttons.FlowDirection = FlowDirection.RightToLeft; buttons.AutoSize = true; buttons.Dock = DockStyle.Bottom;
+            buttons.Padding = new Padding(12, 8, 12, 10);
+            _cancelBtn = new Button(); _cancelBtn.Text = L.T("set.cancel"); _cancelBtn.DialogResult = DialogResult.Cancel; _cancelBtn.AutoSize = true;
+            _saveBtn = new Button(); _saveBtn.Text = L.T("set.save"); _saveBtn.AutoSize = true; _saveBtn.Click += OnSave;
+            buttons.Controls.Add(_cancelBtn); buttons.Controls.Add(_saveBtn);
+            Controls.Add(buttons);
+
+            _tabStrip.Dock = DockStyle.Top; _tabStrip.Height = 40; _tabStrip.WrapContents = false;
+            _tabStrip.Padding = new Padding(10, 4, 10, 0);
+            _tabStrip.Paint += delegate(object s, PaintEventArgs e)
+            {
+                using (Pen p = new Pen(Palette.Border)) e.Graphics.DrawLine(p, 0, _tabStrip.Height - 1, _tabStrip.Width, _tabStrip.Height - 1);
+            };
+            Controls.Add(_tabStrip);
+
+            BuildDisplay(AddPage(L.T("tab.display")));
+            BuildBehavior(AddPage(L.T("tab.behavior")));
+            BuildAlerts(AddPage(L.T("tab.alerts")));
+            BuildData(AddPage(L.T("tab.data")));
+            BuildProbe(AddPage(L.T("tab.probe")));
+            BuildAdmin(AddPage(L.T("tab.admin")));
+
+            AcceptButton = _saveBtn; CancelButton = _cancelBtn;
+            ApplyTheme();
+            SelectTab(0);
+        }
+
+        // ---------------- tab ----------------
+        private TableLayoutPanel AddPage(string title)
+        {
+            Panel page = new Panel();
+            page.Dock = DockStyle.Fill; page.AutoScroll = true; page.Padding = new Padding(16, 12, 16, 8); page.Visible = false;
+            page.HandleCreated += delegate { DarkUi.ControlTheme(page.Handle, !Palette.IsLight); };   // scrollbar mengikuti tema
+            TableLayoutPanel t = new TableLayoutPanel();
+            t.ColumnCount = 2; t.AutoSize = true; t.AutoSizeMode = AutoSizeMode.GrowAndShrink; t.Dock = DockStyle.Top;
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
+            page.Controls.Add(t);
+            _content.Controls.Add(page);
+            _pages.Add(page);
+
+            Button b = new Button();
+            b.Text = title; b.AutoSize = true; b.Margin = new Padding(0, 0, 2, 0); b.Padding = new Padding(8, 3, 8, 3);
+            b.FlatStyle = FlatStyle.Flat; b.FlatAppearance.BorderSize = 0; b.Font = new Font("Segoe UI", 9.5f);
+            int index = _tabBtns.Count;
+            b.Click += delegate { SelectTab(index); };
+            b.Paint += delegate(object s, PaintEventArgs e)
+            {
+                if (_tabBtns.IndexOf((Button)s) != _tab) return;
+                using (SolidBrush br = new SolidBrush(Palette.Accent)) e.Graphics.FillRectangle(br, 6, ((Button)s).Height - 3, ((Button)s).Width - 12, 3);
+            };
+            _tabBtns.Add(b);
+            _tabStrip.Controls.Add(b);
+            return t;
+        }
+
+        private void SelectTab(int i)
+        {
+            _tab = i;
+            for (int k = 0; k < _pages.Count; k++)
+            {
+                _pages[k].Visible = k == i;
+                _tabBtns[k].ForeColor = k == i ? Palette.Text : Palette.Dim;
+                _tabBtns[k].Invalidate();
+            }
+        }
+
+        // ---------------- isi tab ----------------
+        private void BuildDisplay(TableLayoutPanel t)
+        {
+            _lang.DropDownStyle = ComboBoxStyle.DropDownList; _lang.Width = 160;
+            _lang.Items.Add("English"); _langCodes.Add("en");               // nama asli bahasa, tidak diterjemahkan
+            _lang.Items.Add("Bahasa Indonesia"); _langCodes.Add("id");
+            foreach (LangPackInfo p in LangPacks.Discover()) { _lang.Items.Add(p.Name); _langCodes.Add(p.Code); }   // paket bahasa JSON
+            int li = _langCodes.IndexOf(_cfg.Language);
+            _lang.SelectedIndex = li >= 0 ? li : 0;
+            AddRow(t, L.T("set.language"), _lang);
+
+            Button exp = new Button(); exp.Text = L.T("set.lang.export"); exp.AutoSize = true;
+            exp.Click += delegate { ExportTemplate(); };
+            Button folder = new Button(); folder.Text = L.T("set.lang.folder"); folder.AutoSize = true;
+            folder.Click += delegate
+            {
+                try { System.IO.Directory.CreateDirectory(Paths.LangDirAppData); Process.Start("explorer.exe", "\"" + Paths.LangDirAppData + "\""); } catch { }
+            };
+            FlowLayoutPanel lp = new FlowLayoutPanel(); lp.AutoSize = true; lp.WrapContents = false;
+            lp.Controls.Add(exp); lp.Controls.Add(folder);
+            t.Controls.Add(new Label()); t.Controls.Add(lp);
+
+            _theme.DropDownStyle = ComboBoxStyle.DropDownList; _theme.Width = 160;
+            _theme.Items.Add(L.T("set.theme.dark")); _theme.Items.Add(L.T("set.theme.light")); _theme.Items.Add(L.T("set.theme.system"));
+            _theme.SelectedIndex = _cfg.Theme == "light" ? 1 : (_cfg.Theme == "system" ? 2 : 0);
+            AddRow(t, L.T("set.theme"), _theme);
+
+            _opacity.Minimum = 30; _opacity.Maximum = 100; _opacity.TickFrequency = 10; _opacity.Width = 250;
+            _opacity.Value = Math.Max(30, Math.Min(100, _cfg.OpacityPercent));
+            _opacity.ValueChanged += delegate { _opacityLbl.Text = L.T("set.opacity", _opacity.Value); };
+            _opacityLbl.Text = L.T("set.opacity", _opacity.Value); _opacityLbl.AutoSize = true; _opacityLbl.Anchor = AnchorStyles.Left;
+            t.Controls.Add(_opacityLbl); t.Controls.Add(_opacity);
+
+            AddCheck(t, _remaining, L.T("set.remaining"), _cfg.ShowRemaining);
+
+            _histDays.DropDownStyle = ComboBoxStyle.DropDownList; _histDays.Width = 160;
+            _histDays.Items.Add(L.T("set.days14")); _histDays.Items.Add(L.T("set.days30"));
+            _histDays.SelectedIndex = _cfg.HistoryDays == 30 ? 1 : 0;
+            AddRow(t, L.T("set.histdays"), _histDays);
+
+            AddCheck(t, _dock, L.T("set.dock"), _cfg.DockTop);
+            _edge.DropDownStyle = ComboBoxStyle.DropDownList; _edge.Width = 160;
+            _edge.Items.Add(L.T("edge.top")); _edge.Items.Add(L.T("edge.bottom")); _edge.Items.Add(L.T("edge.left")); _edge.Items.Add(L.T("edge.right"));
+            int ei = Array.IndexOf(Edges, _cfg.DockEdge);
+            _edge.SelectedIndex = ei >= 0 ? ei : 0;
+            AddRow(t, L.T("set.dock.edge"), _edge);
+
+            _monitor.DropDownStyle = ComboBoxStyle.DropDownList; _monitor.Width = 260;
+            _monitor.Items.Add(L.T("monitor.primary")); _monitorNames.Add("");
+            foreach (Screen s in Screen.AllScreens)
+            {
+                _monitor.Items.Add(L.T("monitor.item", s.DeviceName.TrimStart('\\', '.'), s.Bounds.Width, s.Bounds.Height));
+                _monitorNames.Add(s.DeviceName);
+            }
+            int mi = string.IsNullOrEmpty(_cfg.DockMonitor) ? 0 : _monitorNames.IndexOf(_cfg.DockMonitor);
+            _monitor.SelectedIndex = mi >= 0 ? mi : 0;
+            AddRow(t, L.T("set.dock.monitor"), _monitor);
+
+            AddCheck(t, _compact, L.T("set.compact"), _cfg.Compact);
+            AddCheck(t, _click, L.T("set.click"), _cfg.ClickThrough);
+            AddCheck(t, _showTaskbar, L.T("set.taskbar.show"), _cfg.ShowInTaskbar);
+
+            AddNote(t, L.T("set.h.currency"), "head");
+            AddCheck(t, _currencyOn, L.T("set.currency.enable"), _cfg.CurrencyCustomEnabled);
+            _currencySymbol.Width = 80; _currencySymbol.Text = _cfg.CurrencySymbol ?? "Rp";
+            AddRow(t, L.T("set.currency.symbol"), _currencySymbol);
+            _currencyRate.DecimalPlaces = 0; _currencyRate.Minimum = 1; _currencyRate.Maximum = 10000000; _currencyRate.Increment = 100; _currencyRate.Width = 110;
+            _currencyRate.Value = (decimal)Math.Max(1, Math.Min(10000000, _cfg.CurrencyRate <= 0 ? 16200 : _cfg.CurrencyRate));
+            AddRow(t, L.T("set.currency.rate"), _currencyRate);
+            AddCheck(t, _currencyBoth, L.T("set.currency.both"), _cfg.CurrencyShowBoth);
+        }
+
+        private void ExportTemplate()
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(Paths.LangDirAppData);
+                string path = System.IO.Path.Combine(Paths.LangDirAppData, "template.json");
+                L.ExportTemplate(path);
+                MessageBox.Show(this, L.T("msg.lang.exported", path), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { Log.Write("langtemplate", ex); MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }
+
+        private void BuildBehavior(TableLayoutPanel t)
+        {
+            AddCheck(t, _showFloat, L.T("set.showstart"), _cfg.ShowFloating);
+            bool autoOn = false; try { autoOn = Autostart.IsEnabled; } catch { }
+            AddCheck(t, _auto, L.T("set.auto"), autoOn);
+            if (Paths.Portable)
+            {
+                _auto.Enabled = false;   // mode portabel tidak menulis registry
+                AddNote(t, L.T("set.portable.note"), "dim");
+            }
+            AddCheck(t, _onTop, L.T("set.ontop"), _cfg.AlwaysOnTop);
+            AddCheck(t, _hideFs, L.T("set.hidefs"), _cfg.HideOnFullscreen);
+            AddCheck(t, _hotkeyOn, L.T("set.hotkey.enable"), _cfg.HotkeyEnabled);
+            _hotkeyText.Width = 160; _hotkeyText.Text = _cfg.Hotkey ?? "Ctrl+Alt+U";
+            AddRow(t, L.T("set.hotkey.keys"), _hotkeyText);
+        }
+
+        private void BuildAlerts(TableLayoutPanel t)
+        {
+            AddCheck(t, _alertsOn, L.T("set.alerts.enable"), _cfg.AlertsEnabled);
+            _alertTh.Width = 160; _alertTh.Text = _cfg.AlertThresholds ?? "80,95";
+            AddRow(t, L.T("set.alerts.th"), _alertTh);
+            AddCheck(t, _resetOn, L.T("set.alerts.reset"), _cfg.ResetNotify);
+            AddCheck(t, _audioOn, L.T("set.audio.enable"), _cfg.AudioAlertsEnabled);
+            AddCheck(t, _contextOn, L.T("set.context.enable"), _cfg.ContextAlertEnabled);
+            AddCheck(t, _burnRateOn, L.T("set.burnrate.enable"), _cfg.BurnRateAlertEnabled);
+            _burnRateTokens.Minimum = 1000; _burnRateTokens.Maximum = 10000000; _burnRateTokens.Increment = 10000; _burnRateTokens.Width = 110;
+            _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
+            AddRow(t, L.T("set.burnrate.th"), _burnRateTokens);
+            AddNote(t, L.T("set.alerts.note"), "dim");
+
+            AddNote(t, L.T("set.webhook.enable"), "head");
+            AddCheck(t, _webhookOn, L.T("set.webhook.enable"), _cfg.WebhookEnabled);
+            _webhookUrl.Width = 260; _webhookUrl.Text = _cfg.WebhookUrl ?? "";
+            AddRow(t, L.T("set.webhook.url"), _webhookUrl);
+
+            SetupMoney(_budgetDay, _cfg.BudgetDaily);
+            AddRow(t, L.T("set.budget.day"), _budgetDay);
+            SetupMoney(_budgetMonth, _cfg.BudgetMonthly);
+            AddRow(t, L.T("set.budget.month"), _budgetMonth);
+            AddNote(t, L.T("set.budget.note"), "dim");
+
+            // Notifikasi dari hook Claude Code (respons selesai / butuh input)
+            AddCheck(t, _stopOn, L.T("set.hooks.stop"), _cfg.HookNotifyStop);
+            _stopSecs.Minimum = 0; _stopSecs.Maximum = 3600; _stopSecs.Width = 90;
+            _stopSecs.Value = Math.Max(0, Math.Min(3600, _cfg.HookNotifyMinSeconds));
+            AddRow(t, L.T("set.hooks.secs"), _stopSecs);
+            AddCheck(t, _inputOn, L.T("set.hooks.input"), _cfg.HookNotifyInput);
+            _hookState.AutoSize = true; _hookState.Tag = "dim"; _hookState.Anchor = AnchorStyles.Left;
+            Button inst = new Button(); inst.Text = L.T("set.hooks.install"); inst.AutoSize = true; inst.Click += delegate { OnInstallHooks(); };
+            Button rem = new Button(); rem.Text = L.T("set.hooks.remove"); rem.AutoSize = true; rem.Click += delegate { OnRemoveHooks(); };
+            FlowLayoutPanel hp = new FlowLayoutPanel(); hp.AutoSize = true; hp.WrapContents = false;
+            hp.Controls.Add(inst); hp.Controls.Add(rem);
+            RefreshHookState();
+            t.Controls.Add(_hookState); t.Controls.Add(hp);
+            AddNote(t, L.T("set.hooks.note"), "dim");
+        }
+
+        private static void SetupMoney(NumericUpDown n, double value)
+        {
+            n.DecimalPlaces = 2; n.Minimum = 0; n.Maximum = 1000000; n.Increment = 5; n.Width = 110;
+            decimal v = (decimal)Math.Max(0, Math.Min(1000000, value));
+            n.Value = v;
+        }
+
+        private void RefreshHookState()
+        {
+            _hookState.Text = HookInstaller.IsInstalled() ? L.T("set.hooks.on") : L.T("set.hooks.off");
+        }
+
+        private void OnInstallHooks()
+        {
+            DialogResult r = MessageBox.Show(this, L.T("msg.hooks.confirm"), L.T("msg.hooks.title"),
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (r != DialogResult.Yes) return;
+            string err = HookInstaller.Install(typeof(SettingsForm).Assembly.Location);
+            if (err != null) MessageBox.Show(this, L.T("msg.hooks.fail", err), L.T("msg.hooks.title"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            else MessageBox.Show(this, L.T("msg.hooks.done"), L.T("msg.hooks.title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshHookState();
+        }
+
+        private void OnRemoveHooks()
+        {
+            string err = HookInstaller.Uninstall();
+            if (err != null) MessageBox.Show(this, L.T("msg.hooks.fail", err), L.T("msg.hooks.title"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            else MessageBox.Show(this, L.T("msg.hooks.removed"), L.T("msg.hooks.title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshHookState();
+        }
+
+        private void BuildData(TableLayoutPanel t)
+        {
+            AddCheck(t, _wsl, L.T("set.wsl"), _cfg.ScanWsl);
+            _extraDirs.Width = 260; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
+            AddRow(t, L.T("set.extradirs"), _extraDirs);
+            AddNote(t, L.T("set.sources.note"), "dim");
+            AddCheck(t, _projects, L.T("set.projects"), _cfg.ShowProjects);
+
+            Button csv = new Button(); csv.Text = L.T("set.csv"); csv.AutoSize = true;
+            csv.Click += delegate { if (_cb != null && _cb.ExportCsv != null) _cb.ExportCsv(); };
+            Button diag = new Button(); diag.Text = L.T("set.diag"); diag.AutoSize = true;
+            diag.Click += delegate { CopyDiagnostics(); };
+            FlowLayoutPanel dp = new FlowLayoutPanel(); dp.AutoSize = true; dp.WrapContents = false;
+            dp.Controls.Add(csv); dp.Controls.Add(diag);
+            dp.Margin = new Padding(3, 10, 3, 6);
+            t.Controls.Add(dp); t.SetColumnSpan(dp, 2);
+
+            AddNote(t, L.T("set.h.pricing"), "head");
+            Button pricing = new Button(); pricing.Text = L.T("set.pricing.open"); pricing.AutoSize = true;
+            pricing.Click += delegate { try { Process.Start("notepad.exe", "\"" + Paths.PricingFile + "\""); } catch { } };
+            Label pnote = new Label(); pnote.AutoSize = true; pnote.Tag = "dim"; pnote.Anchor = AnchorStyles.Left;
+            pnote.Text = L.T("set.pricing.note");
+            t.Controls.Add(pricing); t.Controls.Add(pnote);
+        }
+
+        private void CopyDiagnostics()
+        {
+            if (_cb == null || _cb.Diagnostics == null) return;
+            try
+            {
+                Clipboard.SetText(_cb.Diagnostics());
+                MessageBox.Show(this, L.T("msg.diag.copied"), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { Log.Write("diag", ex); MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }
+
+        private void BuildProbe(TableLayoutPanel t)
+        {
+            AddNote(t, L.T("set.probe.warn"), "warn");
+            AddCheck(t, _probe, L.T("set.probe.enable"), _cfg.ProbeEnabled);
+            _probeMin.Minimum = 5; _probeMin.Maximum = 240; _probeMin.Width = 70;
+            _probeMin.Value = Math.Max(5, Math.Min(240, _cfg.ProbeMinMinutes));
+            AddRow(t, L.T("set.probe.every"), _probeMin);
+            AddNote(t, L.T("set.probe.note"), "dim");
+
+            AddCheck(t, _mirror, L.T("set.mirror"), _cfg.MirrorEnabled);
+            _mirrorPath.Width = 260; _mirrorPath.Text = _cfg.MirrorFilePath ?? "";
+            Button browse = new Button(); browse.Text = L.T("set.browse"); browse.AutoSize = true;
+            browse.Click += delegate
+            {
+                using (OpenFileDialog d = new OpenFileDialog())
+                {
+                    d.Filter = "JSON (*.json)|*.json"; d.CheckFileExists = true;
+                    if (d.ShowDialog(this) == DialogResult.OK) _mirrorPath.Text = d.FileName;
+                }
+            };
+            AddRow(t, L.T("set.mirror.path"), _mirrorPath);
+            t.Controls.Add(new Label()); t.Controls.Add(browse);
+        }
+
+        private void BuildAdmin(TableLayoutPanel t)
+        {
+            AddCheck(t, _admin, L.T("set.admin.enable"), _cfg.AdminEnabled);
+            _key.UseSystemPasswordChar = true; _key.Width = 260;
+            AddRow(t, L.T("set.admin.key"), _key);
+            _keyState.AutoSize = true; _keyState.Tag = "dim";
+            _keyState.Text = string.IsNullOrEmpty(_cfg.AdminKeyProtected) ? L.T("set.admin.nokey") : L.T("set.admin.stored");
+            _keyState.MaximumSize = new Size(260, 0);
+            Button clear = new Button(); clear.Text = L.T("set.admin.clear"); clear.AutoSize = true;
+            clear.Click += delegate { _clearKey = true; _key.Text = ""; _keyState.Text = L.T("set.admin.cleared"); };
+            FlowLayoutPanel kp = new FlowLayoutPanel(); kp.AutoSize = true; kp.FlowDirection = FlowDirection.TopDown; kp.WrapContents = false;
+            kp.Controls.Add(_keyState); kp.Controls.Add(clear);
+            t.Controls.Add(new Label()); t.Controls.Add(kp);
+            _keyIds.Width = 260; _keyIds.Text = _cfg.AdminApiKeyIds ?? "";
+            AddRow(t, L.T("set.admin.keyids"), _keyIds);
+            _wsIds.Width = 260; _wsIds.Text = _cfg.AdminWorkspaceIds ?? "";
+            AddRow(t, L.T("set.admin.wsids"), _wsIds);
+            AddNote(t, L.T("set.admin.note"), "dim");
+        }
+
+        private static void AddCheck(TableLayoutPanel t, CheckBox c, string text, bool value)
+        {
+            c.Text = text; c.Checked = value; c.AutoSize = true; c.MaximumSize = new Size(620, 0); c.Margin = new Padding(3, 4, 3, 4);
+            t.Controls.Add(c); t.SetColumnSpan(c, 2);
+        }
+
+        private static void AddRow(TableLayoutPanel t, string label, Control c)
+        {
+            Label l = new Label(); l.Text = label; l.AutoSize = true; l.Anchor = AnchorStyles.Left; l.MaximumSize = new Size(330, 0);
+            t.Controls.Add(l); t.Controls.Add(c);
+        }
+
+        /// <summary>Teks penjelas lintas dua kolom. kind: "dim" (abu), "warn" (peringatan), "head" (judul bagian).</summary>
+        private static void AddNote(TableLayoutPanel t, string text, string kind)
+        {
+            Label l = new Label(); l.Text = text; l.AutoSize = true; l.MaximumSize = new Size(620, 0); l.Tag = kind;
+            l.Margin = kind == "head" ? new Padding(3, 14, 3, 4) : new Padding(3, 6, 3, 6);
+            if (kind == "head") l.Font = new Font("Segoe UI Semibold", 9.5f);
+            t.Controls.Add(l); t.SetColumnSpan(l, 2);
+        }
+
+        // ---------------- tema ----------------
+        private void ApplyTheme()
+        {
+            BackColor = Palette.Bg; ForeColor = Palette.Text;
+            ThemeControls(this);
+            _tabStrip.BackColor = Palette.Bg;
+            foreach (Button b in _tabBtns)
+            {
+                b.BackColor = Palette.Bg; b.ForeColor = Palette.Dim;
+                b.FlatAppearance.MouseOverBackColor = Palette.Hover; b.FlatAppearance.MouseDownBackColor = Palette.Hover;
+            }
+            _saveBtn.BackColor = Palette.Accent; _saveBtn.ForeColor = Color.White;
+            _saveBtn.FlatAppearance.BorderColor = Palette.Accent;
+        }
+
+        private void ThemeControls(Control root)
+        {
+            foreach (Control c in root.Controls)
+            {
+                Label l = c as Label;
+                if (l != null)
+                {
+                    string tag = l.Tag as string;
+                    l.BackColor = Palette.Bg;
+                    l.ForeColor = tag == "dim" ? Palette.Dim : (tag == "warn" ? Palette.Amber : Palette.Text);
+                }
+                else if (c is CheckBox) { c.BackColor = Palette.Bg; c.ForeColor = c.Enabled ? Palette.Text : Palette.Dim; }
+                else if (c is TextBox) { TextBox tb = (TextBox)c; tb.BackColor = Palette.Surface; tb.ForeColor = Palette.Text; tb.BorderStyle = BorderStyle.FixedSingle; }
+                else if (c is ComboBox) { ComboBox cb = (ComboBox)c; cb.FlatStyle = FlatStyle.Flat; cb.BackColor = Palette.Surface; cb.ForeColor = Palette.Text; }
+                else if (c is NumericUpDown) { NumericUpDown n = (NumericUpDown)c; n.BackColor = Palette.Surface; n.ForeColor = Palette.Text; n.BorderStyle = BorderStyle.FixedSingle; }
+                else if (c is TrackBar) { c.BackColor = Palette.Bg; }
+                else if (c is Button)
+                {
+                    Button b = (Button)c;
+                    if (!_tabBtns.Contains(b))
+                    {
+                        b.FlatStyle = FlatStyle.Flat; b.BackColor = Palette.Surface; b.ForeColor = Palette.Text;
+                        b.FlatAppearance.BorderColor = Palette.Border; b.FlatAppearance.MouseOverBackColor = Palette.Hover;
+                    }
+                }
+                else c.BackColor = Palette.Bg;
+                if (c.HasChildren) ThemeControls(c);
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            DarkUi.TitleBar(Handle, !Palette.IsLight);
+        }
+
+        // ---------------- simpan ----------------
+        private void OnSave(object sender, EventArgs e)
+        {
+            // Konfirmasi eksplisit setiap kali probe dinyalakan (dari mati ke hidup). Default tombol: Tidak.
+            if (_probe.Checked && !_cfg.ProbeEnabled)
+            {
+                DialogResult r = MessageBox.Show(this, L.T("msg.probe.body"), L.T("msg.probe.title"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (r != DialogResult.Yes) { _probe.Checked = false; SelectTab(4); return; }
+            }
+            string key = _key.Text.Trim();
+            if (key.Length > 0 && !key.StartsWith("sk-ant-admin", StringComparison.Ordinal))
+            {
+                SelectTab(5);
+                MessageBox.Show(this, L.T("msg.key.prefix"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (_admin.Checked && key.Length == 0 && (_clearKey || string.IsNullOrEmpty(_cfg.AdminKeyProtected)))
+            {
+                SelectTab(5);
+                MessageBox.Show(this, L.T("msg.key.required"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (_mirror.Checked && !System.IO.File.Exists(_mirrorPath.Text.Trim()))
+            {
+                SelectTab(4);
+                MessageBox.Show(this, L.T("msg.mirror.missing"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (AlertEngine.ParseThresholds(_alertTh.Text) == null)
+            {
+                SelectTab(2);
+                MessageBox.Show(this, L.T("msg.thresholds.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            uint hm, hv;
+            if (_hotkeyOn.Checked && !HotkeyUtil.TryParse(_hotkeyText.Text, out hm, out hv))
+            {
+                SelectTab(1);
+                MessageBox.Show(this, L.T("msg.hotkey.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            try { Autostart.Set(_auto.Checked); } catch (Exception ex) { Log.Write("autostart", ex); }
+
+            _cfg.ShowRemaining = _remaining.Checked;
+            _cfg.HotkeyEnabled = _hotkeyOn.Checked;
+            _cfg.Hotkey = _hotkeyText.Text.Trim();
+            _cfg.AlertsEnabled = _alertsOn.Checked;
+            _cfg.AlertThresholds = string.Join(",", Array.ConvertAll(AlertEngine.ParseThresholds(_alertTh.Text), delegate(int v) { return v.ToString(); }));
+            _cfg.ResetNotify = _resetOn.Checked;
+            _cfg.BudgetDaily = (double)_budgetDay.Value;
+            _cfg.BudgetMonthly = (double)_budgetMonth.Value;
+            _cfg.HookNotifyStop = _stopOn.Checked;
+            _cfg.HookNotifyMinSeconds = (int)_stopSecs.Value;
+            _cfg.HookNotifyInput = _inputOn.Checked;
+            _cfg.ScanWsl = _wsl.Checked;
+            _cfg.ShowProjects = _projects.Checked;
+            _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
+            _cfg.Language = _lang.SelectedIndex >= 0 && _lang.SelectedIndex < _langCodes.Count ? _langCodes[_lang.SelectedIndex] : "en";
+            _cfg.HistoryDays = _histDays.SelectedIndex == 1 ? 30 : 14;
+            _cfg.DockEdge = _edge.SelectedIndex >= 0 && _edge.SelectedIndex < Edges.Length ? Edges[_edge.SelectedIndex] : "top";
+            _cfg.DockMonitor = _monitor.SelectedIndex >= 0 && _monitor.SelectedIndex < _monitorNames.Count ? _monitorNames[_monitor.SelectedIndex] : "";
+            _cfg.OpacityPercent = _opacity.Value;
+            _cfg.ShowFloating = _showFloat.Checked;
+            _cfg.Compact = _compact.Checked;
+            _cfg.DockTop = _dock.Checked;
+            _cfg.AlwaysOnTop = _onTop.Checked;
+            _cfg.HideOnFullscreen = _hideFs.Checked;
+            _cfg.Theme = _theme.SelectedIndex == 1 ? "light" : (_theme.SelectedIndex == 2 ? "system" : "dark");
+            _cfg.ClickThrough = _click.Checked;
+            _cfg.AdminEnabled = _admin.Checked;
+            _cfg.ProbeEnabled = _probe.Checked;
+            _cfg.ProbeMinMinutes = (int)_probeMin.Value;
+            _cfg.MirrorEnabled = _mirror.Checked;
+            _cfg.MirrorFilePath = _mirrorPath.Text.Trim();
+
+            _cfg.ShowInTaskbar = _showTaskbar.Checked;
+            _cfg.CurrencyCustomEnabled = _currencyOn.Checked;
+            _cfg.CurrencySymbol = _currencySymbol.Text.Trim();
+            if (string.IsNullOrEmpty(_cfg.CurrencySymbol)) _cfg.CurrencySymbol = "Rp";
+            _cfg.CurrencyRate = (double)_currencyRate.Value;
+            _cfg.CurrencyShowBoth = _currencyBoth.Checked;
+
+            _cfg.AudioAlertsEnabled = _audioOn.Checked;
+            _cfg.ContextAlertEnabled = _contextOn.Checked;
+            _cfg.BurnRateAlertEnabled = _burnRateOn.Checked;
+            _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
+            _cfg.WebhookEnabled = _webhookOn.Checked;
+            _cfg.WebhookUrl = _webhookUrl.Text.Trim();
+
+            if (_clearKey) _cfg.SetAdminKey(null);
+            if (key.Length > 0) _cfg.SetAdminKey(key);
+            _cfg.AdminApiKeyIds = _keyIds.Text.Trim();
+            _cfg.AdminWorkspaceIds = _wsIds.Text.Trim();
+            _key.Text = "";
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+    }
+}

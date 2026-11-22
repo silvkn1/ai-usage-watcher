@@ -1,0 +1,23 @@
+{
+  "_catatan": "Harga USD per 1 juta token, setara harga API (list price). Biaya di widget hanya ESTIMASI; bila memakai langganan Pro/Max, ini bukan uang yang keluar. Cocokkan model dengan prefix terpanjang. 'verifikasi' = nilai diturunkan dari kelipatan standar (tulis cache 5m = 1,25x input, 1j = 2x input, baca cache = 0,1x input), bukan dibaca langsung dari sumber; cek ke halaman harga resmi. Tidak dimodelkan: mode fast (Opus 5.5 = 2x harga), tier >100K prompt Haiku 5.5 ($0,50/$2,50), batch.",
+  "_sumber": "Tabel model referensi Claude API (cache 2026-11-03); konfirmasi di https://platform.claude.com/docs/en/about-claude/pricing",
+  "_diperbarui": "2026-11-21",
+  "models": [
+    { "prefix": "claude-fable-5-2",  "input": 8,    "output": 40,  "cache_write_5m": 10,    "cache_write_1h": 16,  "cache_read": 0.20, "verifikasi": "" },
+    { "prefix": "claude-mythos-5-2", "input": 8,    "output": 40,  "cache_write_5m": 10,    "cache_write_1h": 16,  "cache_read": 0.20, "verifikasi": "" },
+    { "prefix": "claude-fable-5-1",  "input": 10,   "output": 50,  "cache_write_5m": 12.5,  "cache_write_1h": 20,  "cache_read": 0.25, "verifikasi": "cache_write" },
+    { "prefix": "claude-mythos-5-1", "input": 10,   "output": 50,  "cache_write_5m": 12.5,  "cache_write_1h": 20,  "cache_read": 0.25, "verifikasi": "cache_write" },
+    { "prefix": "claude-fable-5",    "input": 10,   "output": 50,  "cache_write_5m": 12.5,  "cache_write_1h": 20,  "cache_read": 1.00, "verifikasi": "cache_write" },
+    { "prefix": "claude-mythos-5",   "input": 10,   "output": 50,  "cache_write_5m": 12.5,  "cache_write_1h": 20,  "cache_read": 1.00, "verifikasi": "cache_write" },
+    { "prefix": "claude-opus-5-5",   "input": 4,    "output": 20,  "cache_write_5m": 5,     "cache_write_1h": 8,   "cache_read": 0.20, "verifikasi": "" },
+    { "prefix": "claude-opus-5",     "input": 5,    "output": 25,  "cache_write_5m": 6.25,  "cache_write_1h": 10,  "cache_read": 0.50, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-opus-4-8",   "input": 5,    "output": 25,  "cache_write_5m": 6.25,  "cache_write_1h": 10,  "cache_read": 0.50, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-opus-4-7",   "input": 5,    "output": 25,  "cache_write_5m": 6.25,  "cache_write_1h": 10,  "cache_read": 0.50, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-opus-4-6",   "input": 5,    "output": 25,  "cache_write_5m": 6.25,  "cache_write_1h": 10,  "cache_read": 0.50, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-sonnet-5-5", "input": 2,    "output": 10,  "cache_write_5m": 2.5,   "cache_write_1h": 4,   "cache_read": 0.10, "verifikasi": "cache_write" },
+    { "prefix": "claude-sonnet-5",   "input": 2,    "output": 10,  "cache_write_5m": 2.5,   "cache_write_1h": 4,   "cache_read": 0.20, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-sonnet-4-6", "input": 3,    "output": 15,  "cache_write_5m": 3.75,  "cache_write_1h": 6,   "cache_read": 0.30, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-haiku-5-5",  "input": 0.10, "output": 0.50, "cache_write_5m": 0.125, "cache_write_1h": 0.20, "cache_read": 0.01, "verifikasi": "cache_write, cache_read" },
+    { "prefix": "claude-haiku-4-5",  "input": 1,    "output": 5,   "cache_write_5m": 1.25,  "cache_write_1h": 2,   "cache_read": 0.10, "verifikasi": "cache_write, cache_read" }
+  ]
+}
