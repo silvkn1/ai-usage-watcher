@@ -57,7 +57,7 @@ namespace ClaudeUsageWidget
                     s.SevenDay = Window(J.Obj(rl, "seven_day"));
                 }
 
-                string agFile = Paths.AntigravityRateLimitsFile;
+                string agFile = Paths.AntigravityRateLimitsReadFile;
                 if (File.Exists(agFile))
                 {
                     string txt;
@@ -431,6 +431,295 @@ namespace ClaudeUsageWidget
         {
             if (!dict.ContainsKey(prefix))
                 dict[prefix] = new[] { inp, outp, cw5, cw1, cr };
+        }
+    }
+
+    /// <summary>Pengambil batas kuota resmi Antigravity dari Language Server Connect-RPC lokal (127.0.0.1).</summary>
+    internal static class AntigravityRateFetcher
+    {
+        private static readonly HttpClient Http;
+        private static DateTime _lastFetch = DateTime.MinValue;
+        private static bool _busy;
+
+        static AntigravityRateFetcher()
+        {
+            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+            Http = new HttpClient();
+            Http.Timeout = TimeSpan.FromSeconds(5);
+        }
+
+        public static bool ShouldRefresh(bool force)
+        {
+            if (force) return (DateTime.Now - _lastFetch).TotalSeconds >= 5;
+            return (DateTime.Now - _lastFetch).TotalMinutes >= 1;
+        }
+
+        public static async Task<bool> FetchAndSaveAsync(int portOverride = 0)
+        {
+            if (_busy) return false;
+            _busy = true;
+            try
+            {
+                int port = portOverride;
+                string token = null;
+
+                // 1. Temukan hub_*.json di daemon directory (~/.gemini/antigravity/daemon)
+                if (port <= 0)
+                {
+                    try
+                    {
+                        string daemonDir = Paths.AntigravityDaemonDir;
+                        if (Directory.Exists(daemonDir))
+                        {
+                            string[] files = Directory.GetFiles(daemonDir, "hub_*.json");
+                            if (files != null && files.Length > 0)
+                            {
+                                Array.Sort(files, delegate(string a, string b)
+                                {
+                                    return File.GetLastWriteTimeUtc(b).CompareTo(File.GetLastWriteTimeUtc(a));
+                                });
+                                for (int i = 0; i < files.Length; i++)
+                                {
+                                    try
+                                    {
+                                        string json = File.ReadAllText(files[i], Encoding.UTF8);
+                                        Dictionary<string, object> o = J.Parse(json);
+                                        if (o != null)
+                                        {
+                                            double p = J.Num(o, "httpPort");
+                                            if (double.IsNaN(p) || p <= 0) p = J.Num(o, "httpsPort");
+                                            if (!double.IsNaN(p) && p > 0)
+                                            {
+                                                port = (int)p;
+                                                token = J.Str(o, "csrfToken");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) { Log.Write("antigravity.daemon", ex); }
+                }
+
+                if (port <= 0) return false;
+
+                // 2. Query RetrieveUserQuotaSummary via Connect-RPC
+                string url = "http://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
+                string body = "{\"metadata\":{\"ideName\":\"antigravity\",\"extensionName\":\"antigravity\",\"locale\":\"en\"}}";
+                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, url))
+                {
+                    req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    req.Headers.Add("Connect-Protocol-Version", "1");
+                    if (!string.IsNullOrEmpty(token))
+                        req.Headers.Add("X-Codeium-Csrf-Token", token);
+
+                    HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false);
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        return await FetchGetUserStatusFallbackAsync(port, token).ConfigureAwait(false);
+                    }
+
+                    string respText = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    bool ok = ParseAndSaveQuotaSummary(respText);
+                    if (!ok) return await FetchGetUserStatusFallbackAsync(port, token).ConfigureAwait(false);
+
+                    _lastFetch = DateTime.Now;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("antigravity.fetch", ex);
+                return false;
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+
+        public static bool ParseAndSaveQuotaSummary(string json)
+        {
+            try
+            {
+                Dictionary<string, object> root = J.Parse(json);
+                if (root == null) return false;
+
+                Dictionary<string, object> responseObj = J.Obj(root, "response");
+                if (responseObj == null) responseObj = root;
+
+                IList groups = J.Arr(responseObj, "groups");
+                if (groups == null || groups.Count == 0) return false;
+
+                double used5h = double.NaN, used7d = double.NaN;
+                DateTime reset5h = DateTime.MinValue, reset7d = DateTime.MinValue;
+
+                // Cari group Gemini Models lebih dulu, fallback ke group pertama yang punya buckets
+                Dictionary<string, object> targetGroup = null;
+                for (int i = 0; i < groups.Count; i++)
+                {
+                    Dictionary<string, object> g = groups[i] as Dictionary<string, object>;
+                    if (g == null) continue;
+                    string disp = J.Str(g, "displayName");
+                    if (disp != null && disp.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        targetGroup = g;
+                        break;
+                    }
+                }
+                if (targetGroup == null && groups.Count > 0)
+                    targetGroup = groups[0] as Dictionary<string, object>;
+
+                if (targetGroup != null)
+                {
+                    IList buckets = J.Arr(targetGroup, "buckets");
+                    if (buckets != null)
+                    {
+                        for (int i = 0; i < buckets.Count; i++)
+                        {
+                            Dictionary<string, object> b = buckets[i] as Dictionary<string, object>;
+                            if (b == null) continue;
+                            string win = J.Str(b, "window") ?? "";
+                            string bid = J.Str(b, "bucketId") ?? "";
+                            double rem = J.Num(b, "remainingFraction");
+                            string rTime = J.Str(b, "resetTime");
+                            DateTime dt;
+                            DateTime rDt = DateTime.MinValue;
+                            if (!string.IsNullOrEmpty(rTime) && DateTime.TryParse(rTime, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out dt))
+                                rDt = dt.ToLocalTime();
+
+                            if (win == "5h" || bid.IndexOf("5h", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                if (!double.IsNaN(rem)) used5h = Math.Max(0.0, Math.Min(100.0, (1.0 - rem) * 100.0));
+                                if (rDt != DateTime.MinValue) reset5h = rDt;
+                            }
+                            else if (win == "weekly" || bid.IndexOf("weekly", StringComparison.OrdinalIgnoreCase) >= 0 || bid.IndexOf("7d", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                if (!double.IsNaN(rem)) used7d = Math.Max(0.0, Math.Min(100.0, (1.0 - rem) * 100.0));
+                                if (rDt != DateTime.MinValue) reset7d = rDt;
+                            }
+                        }
+                    }
+                }
+
+                if (double.IsNaN(used5h) && double.IsNaN(used7d)) return false;
+
+                SaveRateLimitsFile(used5h, reset5h, used7d, reset7d);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("antigravity.parse", ex);
+                return false;
+            }
+        }
+
+        private static async Task<bool> FetchGetUserStatusFallbackAsync(int port, string token)
+        {
+            try
+            {
+                string url = "http://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/GetUserStatus";
+                string body = "{\"metadata\":{\"ideName\":\"antigravity\",\"extensionName\":\"antigravity\",\"locale\":\"en\"}}";
+                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, url))
+                {
+                    req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    req.Headers.Add("Connect-Protocol-Version", "1");
+                    if (!string.IsNullOrEmpty(token))
+                        req.Headers.Add("X-Codeium-Csrf-Token", token);
+
+                    HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false);
+                    if (!resp.IsSuccessStatusCode) return false;
+
+                    string respText = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    return ParseAndSaveUserStatus(respText);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("antigravity.fallback", ex);
+                return false;
+            }
+        }
+
+        public static bool ParseAndSaveUserStatus(string json)
+        {
+            try
+            {
+                Dictionary<string, object> root = J.Parse(json);
+                if (root == null) return false;
+
+                Dictionary<string, object> uStat = J.Obj(root, "userStatus");
+                Dictionary<string, object> cData = J.Obj(uStat, "cascadeModelConfigData");
+                IList configs = J.Arr(cData, "clientModelConfigs");
+                if (configs == null || configs.Count == 0) return false;
+
+                double used5h = double.NaN;
+                DateTime reset5h = DateTime.MinValue;
+
+                for (int i = 0; i < configs.Count; i++)
+                {
+                    Dictionary<string, object> c = configs[i] as Dictionary<string, object>;
+                    if (c == null) continue;
+                    Dictionary<string, object> q = J.Obj(c, "quotaInfo");
+                    if (q == null) continue;
+                    double rem = J.Num(q, "remainingFraction");
+                    string rTime = J.Str(q, "resetTime");
+                    if (!double.IsNaN(rem))
+                    {
+                        used5h = Math.Max(0.0, Math.Min(100.0, (1.0 - rem) * 100.0));
+                        DateTime dt;
+                        if (!string.IsNullOrEmpty(rTime) && DateTime.TryParse(rTime, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out dt))
+                            reset5h = dt.ToLocalTime();
+                        break;
+                    }
+                }
+
+                if (double.IsNaN(used5h)) return false;
+                SaveRateLimitsFile(used5h, reset5h, double.NaN, DateTime.MinValue);
+                _lastFetch = DateTime.Now;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("antigravity.userstatus", ex);
+                return false;
+            }
+        }
+
+        private static void SaveRateLimitsFile(double used5h, DateTime reset5h, double used7d, DateTime reset7d)
+        {
+            double nowUnix = (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("{");
+            sb.AppendLine("  \"captured_at\": " + (long)nowUnix + ",");
+            sb.AppendLine("  \"source\": \"antigravity-local\",");
+            sb.AppendLine("  \"rate_limits\": {");
+
+            List<string> rls = new List<string>();
+            if (!double.IsNaN(used5h))
+            {
+                double rUnix = reset5h != DateTime.MinValue ? (reset5h.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds : 0;
+                rls.Add(string.Format(CultureInfo.InvariantCulture,
+                    "    \"five_hour\": {{ \"used_percentage\": {0:F2}, \"resets_at\": {1} }}",
+                    used5h, (long)rUnix));
+            }
+            if (!double.IsNaN(used7d))
+            {
+                double rUnix = reset7d != DateTime.MinValue ? (reset7d.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds : 0;
+                rls.Add(string.Format(CultureInfo.InvariantCulture,
+                    "    \"seven_day\": {{ \"used_percentage\": {0:F2}, \"resets_at\": {1} }}",
+                    used7d, (long)rUnix));
+            }
+
+            sb.AppendLine(string.Join(",\n", rls.ToArray()));
+            sb.AppendLine("  }");
+            sb.AppendLine("}");
+
+            Paths.Ensure();
+            File.WriteAllText(Paths.AntigravityRateLimitsFile, sb.ToString(), Encoding.UTF8);
         }
     }
 }

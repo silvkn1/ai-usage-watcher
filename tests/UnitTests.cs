@@ -613,6 +613,44 @@ namespace Tests
                 Assert.Equal("Antigravity", rightTitle);
             }
         }
+
+        public static void Test_AntigravityRateFetcher_ParseQuotaSummary()
+        {
+            string sampleJson = "{\n" +
+                "  \"response\": {\n" +
+                "    \"groups\": [\n" +
+                "      {\n" +
+                "        \"displayName\": \"Gemini Models\",\n" +
+                "        \"buckets\": [\n" +
+                "          {\n" +
+                "            \"bucketId\": \"gemini-weekly\",\n" +
+                "            \"displayName\": \"Weekly Limit Remaining\",\n" +
+                "            \"window\": \"weekly\",\n" +
+                "            \"remainingFraction\": 0.81384,\n" +
+                "            \"resetTime\": \"2026-11-29T09:20:46Z\"\n" +
+                "          },\n" +
+                "          {\n" +
+                "            \"bucketId\": \"gemini-5h\",\n" +
+                "            \"displayName\": \"Five Hour Limit Remaining\",\n" +
+                "            \"window\": \"5h\",\n" +
+                "            \"remainingFraction\": 0.41834,\n" +
+                "            \"resetTime\": \"2026-11-22T14:20:46Z\"\n" +
+                "          }\n" +
+                "        ]\n" +
+                "      }\n" +
+                "    ]\n" +
+                "  }\n" +
+                "}";
+
+            bool ok = AntigravityRateFetcher.ParseAndSaveQuotaSummary(sampleJson);
+            Assert.True(ok, "ParseAndSaveQuotaSummary must succeed on valid JSON");
+
+            RateLimitSnapshot s = RateLimitReader.Read();
+            Assert.True(s.AntigravityFiveHour.Available, "Antigravity 5h must be available");
+            Assert.True(Math.Abs(s.AntigravityFiveHour.UsedPercent - 58.17) < 0.1, "5h used must be ~58.17%");
+            Assert.True(s.AntigravitySevenDay.Available, "Antigravity 7d must be available");
+            Assert.True(Math.Abs(s.AntigravitySevenDay.UsedPercent - 18.62) < 0.1, "7d used must be ~18.62%");
+        }
     }
 
     public static class TestRunner

@@ -143,6 +143,7 @@ namespace ClaudeUsageWidget
             MaybeFetchOrg(false);
             MaybeFetchGoogleRate(false);
             MaybeFetchOfficialPricing(false);
+            MaybeFetchAntigravityRate(false);
         }
 
         // ---------------- jendela detail di atas ikon tray ----------------
@@ -505,7 +506,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miRemaining);
             m.Items.Add(_miClickThrough);
             m.Items.Add(new ToolStripSeparator());
-            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); });
+            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); MaybeFetchAntigravityRate(true); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
@@ -837,6 +838,7 @@ namespace ClaudeUsageWidget
             MaybeFetchOrg(false);
             MaybeProbe(false);
             MaybeFetchGoogleRate(false);
+            MaybeFetchAntigravityRate(false);
         }
 
         /// <summary>
@@ -899,13 +901,27 @@ namespace ClaudeUsageWidget
         private void ReloadLimits()
         {
             _limits = RateLimitReader.Read();
-            if (!File.Exists(Paths.AntigravityRateLimitsFile) && _usage != null && _usage.AntigravityFiveHour != null && _usage.AntigravityFiveHour.Available)
+            if (!_limits.AntigravityFiveHour.Available && _usage != null && _usage.AntigravityFiveHour != null && _usage.AntigravityFiveHour.Available)
             {
                 _limits.AntigravityFiveHour = _usage.AntigravityFiveHour;
                 _limits.AntigravitySevenDay = _usage.AntigravitySevenDay;
             }
             Refresh();
             RunAlerts();
+        }
+
+        private void MaybeFetchAntigravityRate(bool force)
+        {
+            if (!_cfg.ScanGemini) return;
+            if (!force && !AntigravityRateFetcher.ShouldRefresh(false)) return;
+            Task.Run(async delegate
+            {
+                bool ok = await AntigravityRateFetcher.FetchAndSaveAsync().ConfigureAwait(false);
+                if (ok)
+                {
+                    _ui.Post(delegate { ReloadLimits(); }, null);
+                }
+            });
         }
 
         /// <summary>full = enumerasi semua file (timer 1 menit); selain itu hanya file yang dilaporkan watcher.</summary>
@@ -933,7 +949,7 @@ namespace ClaudeUsageWidget
                     _ui.Post(delegate
                     {
                         _usage = snap;
-                        if (!File.Exists(Paths.AntigravityRateLimitsFile) && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
+                        if (!_limits.AntigravityFiveHour.Available && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
                         {
                             _limits.AntigravityFiveHour = snap.AntigravityFiveHour;
                             _limits.AntigravitySevenDay = snap.AntigravitySevenDay;

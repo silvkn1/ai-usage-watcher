@@ -85,8 +85,21 @@ namespace ClaudeUsageWidget
             }
         }
         public static string AntigravityBrainDir { get { return Path.Combine(AntigravityDir, "brain"); } }
+        public static string AntigravityDaemonDir { get { return Path.Combine(AntigravityDir, "daemon"); } }
         public static string RateLimitsFile { get { return Path.Combine(AppDir, "ratelimits.json"); } }
         public static string AntigravityRateLimitsFile { get { return Path.Combine(AppDir, "antigravity_ratelimits.json"); } }
+        public static string AntigravityRateLimitsReadFile
+        {
+            get
+            {
+                if (File.Exists(AntigravityRateLimitsFile)) return AntigravityRateLimitsFile;
+                string p1 = Path.Combine(AntigravityDir, "antigravity_ratelimits.json");
+                if (File.Exists(p1)) return p1;
+                string p2 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".gemini", "antigravity_ratelimits.json");
+                if (File.Exists(p2)) return p2;
+                return AntigravityRateLimitsFile;
+            }
+        }
         public static string ConfigFile { get { return Path.Combine(AppDir, "config.json"); } }
         public static string PricingFile { get { return Path.Combine(AppDir, "pricing.json"); } }
         public static string LogFile { get { return Path.Combine(AppDir, "widget.log"); } }
