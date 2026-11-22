@@ -60,7 +60,11 @@ namespace ClaudeUsageWidget
         {
             if (string.IsNullOrEmpty(model)) return null;
             foreach (Price p in _list)
+            {
+                if (p.Prefix == "gemini-" && model.IndexOf("pro", StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
                 if (model.StartsWith(p.Prefix, StringComparison.OrdinalIgnoreCase)) return p;
+            }
             if (model.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase))
             {
                 bool isPro = model.IndexOf("pro", StringComparison.OrdinalIgnoreCase) >= 0;
