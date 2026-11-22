@@ -127,11 +127,22 @@ namespace Tests
             Assert.NotNull(pClaude, "claude-opus-4-6 must be found");
             Assert.True(pClaude.Input > 0);
 
+            // Modern active Claude model
+            Price pSonnet35 = p.Find("claude-3-5-sonnet-20241022");
+            Assert.NotNull(pSonnet35, "claude-3-5-sonnet must be found");
+            Assert.Equal(3.0, pSonnet35.Input);
+            Assert.Equal(15.0, pSonnet35.Output);
+            Assert.Equal(0.30, pSonnet35.CacheRead);
+
             // Gemini model in pricing table
             Price pGemini = p.Find("gemini-3.8-flash");
             Assert.NotNull(pGemini, "gemini-3.8-flash must be found");
             Assert.True(pGemini.Input > 0);
             Assert.True(pGemini.Output > 0);
+
+            Price pGemini25 = p.Find("gemini-2.5-flash");
+            Assert.NotNull(pGemini25, "gemini-2.5-flash must be found");
+            Assert.Equal(0.075, pGemini25.Input);
 
             // Gemini fallback models
             Price pFallbackFlash = p.Find("gemini-unknown-model");
@@ -320,6 +331,25 @@ namespace Tests
             Assert.True(c.ScanGemini, "ScanGemini must default to true");
             Assert.True(c.BurnRateThresholdTokens > 0);
             Assert.NotNull(c.CurrencySymbol);
+        }
+
+        public static void Test_OfficialPricing_Integration()
+        {
+            Pricing p = Pricing.Load();
+            Price sonnet = p.Find("claude-3-7-sonnet");
+            Assert.NotNull(sonnet, "claude-3-7-sonnet must exist");
+            Assert.Equal(3.0, sonnet.Input);
+            Assert.Equal(15.0, sonnet.Output);
+
+            Price geminiFlash = p.Find("gemini-2.0-flash");
+            Assert.NotNull(geminiFlash, "gemini-2.0-flash must exist");
+            Assert.Equal(0.10, geminiFlash.Input);
+            Assert.Equal(0.40, geminiFlash.Output);
+
+            Price geminiPro = p.Find("gemini-2.5-pro");
+            Assert.NotNull(geminiPro, "gemini-2.5-pro must exist");
+            Assert.Equal(1.25, geminiPro.Input);
+            Assert.Equal(5.00, geminiPro.Output);
         }
     }
 

@@ -138,6 +138,7 @@ namespace ClaudeUsageWidget
             RequestScan();
             MaybeFetchOrg(false);
             MaybeFetchGoogleRate(false);
+            MaybeFetchOfficialPricing(false);
         }
 
         // ---------------- jendela detail di atas ikon tray ----------------
@@ -492,7 +493,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miRemaining);
             m.Items.Add(_miClickThrough);
             m.Items.Add(new ToolStripSeparator());
-            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); });
+            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
@@ -938,6 +939,14 @@ namespace ClaudeUsageWidget
                 Opts.CurrencyRate = _cfg.CurrencyRate;
                 _cfg.Save();
                 Refresh();
+            }
+        }
+
+        private async void MaybeFetchOfficialPricing(bool force)
+        {
+            if (force || OfficialPricingFetcher.ShouldAutoRefresh())
+            {
+                await OfficialPricingFetcher.FetchAndSaveAsync();
             }
         }
 

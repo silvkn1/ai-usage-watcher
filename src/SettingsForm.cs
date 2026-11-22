@@ -363,11 +363,40 @@ namespace ClaudeUsageWidget
             t.Controls.Add(dp); t.SetColumnSpan(dp, 2);
 
             AddNote(t, L.T("set.h.pricing"), "head");
+            FlowLayoutPanel pp = new FlowLayoutPanel(); pp.AutoSize = true; pp.WrapContents = false;
             Button pricing = new Button(); pricing.Text = L.T("set.pricing.open"); pricing.AutoSize = true;
             pricing.Click += delegate { try { Process.Start("notepad.exe", "\"" + Paths.PricingFile + "\""); } catch { } };
+
+            Button btnFetchPricing = new Button(); btnFetchPricing.Text = L.T("set.pricing.fetch"); btnFetchPricing.AutoSize = true;
+            btnFetchPricing.Click += async delegate
+            {
+                btnFetchPricing.Enabled = false;
+                btnFetchPricing.Text = L.T("set.pricing.fetching");
+                try
+                {
+                    int count = await OfficialPricingFetcher.FetchAndSaveAsync();
+                    if (count > 0)
+                        MessageBox.Show(this, L.T("set.pricing.fetch_ok", count), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    else
+                        MessageBox.Show(this, L.T("set.pricing.fetch_fail"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("pricing.fetch", ex);
+                    MessageBox.Show(this, L.T("set.pricing.fetch_fail"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                finally
+                {
+                    btnFetchPricing.Enabled = true;
+                    btnFetchPricing.Text = L.T("set.pricing.fetch");
+                }
+            };
+            pp.Controls.Add(pricing);
+            pp.Controls.Add(btnFetchPricing);
+
             Label pnote = new Label(); pnote.AutoSize = true; pnote.Tag = "dim"; pnote.Anchor = AnchorStyles.Left;
             pnote.Text = L.T("set.pricing.note");
-            t.Controls.Add(pricing); t.Controls.Add(pnote);
+            t.Controls.Add(pp); t.Controls.Add(pnote);
         }
 
         private void CopyDiagnostics()

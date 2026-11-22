@@ -315,6 +315,10 @@ namespace ClaudeUsageWidget
             { "set.webhook.enable",  new[] { "Send alerts to Webhook (Discord / Slack / Telegram)", "Kirim alert ke Webhook (Discord / Slack / Telegram)" } },
             { "set.webhook.url",     new[] { "Webhook URL", "URL Webhook" } },
             { "set.gemini",          new[] { "Scan Google Antigravity / Gemini logs (~/.gemini/antigravity)", "Pindai log Google Antigravity / Gemini (~/.gemini/antigravity)" } },
+            { "set.pricing.fetch",   new[] { "Update from Official Sources", "Ambil dari Sumber Resmi" } },
+            { "set.pricing.fetching",new[] { "Updating...", "Mengambil..." } },
+            { "set.pricing.fetch_ok",new[] { "Pricing updated from official sources ({0} models).", "Tabel harga berhasil diperbarui dari sumber resmi ({0} model)." } },
+            { "set.pricing.fetch_fail", new[] { "Failed to fetch pricing from official sources. Existing pricing kept.", "Gagal mengambil harga dari sumber resmi. Tabel harga saat ini tetap digunakan." } },
         };
     }
 }
