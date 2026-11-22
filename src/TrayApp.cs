@@ -76,6 +76,8 @@ namespace ClaudeUsageWidget
             ApplyCurrencyOpts();
             _pricing = Pricing.Load();
             _scanner = new UsageScanner(_pricing);
+            _scanner.ScanClaude = _cfg.ScanClaude;
+            _scanner.ScanGemini = _cfg.ScanGemini;
             _scanner.Roots = ProjectRoots;
             _scanner.SetTrackProjects(_cfg.ShowProjects);
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
@@ -242,18 +244,21 @@ namespace ClaudeUsageWidget
         private List<string> ProjectRoots()
         {
             List<string> r = new List<string>();
-            r.Add(Paths.ProjectsDir);
-            string extra = _cfg.ExtraClaudeDirs;
-            if (!string.IsNullOrWhiteSpace(extra))
-                foreach (string raw in extra.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    string p = raw.Trim().Trim('"');
-                    if (p.Length == 0) continue;
-                    if (!p.TrimEnd('\\', '/').EndsWith("projects", StringComparison.OrdinalIgnoreCase)) p = Path.Combine(p, "projects");
-                    if (!r.Contains(p, StringComparer.OrdinalIgnoreCase)) r.Add(p);
-                }
-            if (_cfg.ScanWsl)
-                foreach (string w in WslRoots.Get()) if (!r.Contains(w, StringComparer.OrdinalIgnoreCase)) r.Add(w);
+            if (_cfg.ScanClaude)
+            {
+                r.Add(Paths.ProjectsDir);
+                string extra = _cfg.ExtraClaudeDirs;
+                if (!string.IsNullOrWhiteSpace(extra))
+                    foreach (string raw in extra.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string p = raw.Trim().Trim('"');
+                        if (p.Length == 0) continue;
+                        if (!p.TrimEnd('\\', '/').EndsWith("projects", StringComparison.OrdinalIgnoreCase)) p = Path.Combine(p, "projects");
+                        if (!r.Contains(p, StringComparer.OrdinalIgnoreCase)) r.Add(p);
+                    }
+                if (_cfg.ScanWsl)
+                    foreach (string w in WslRoots.Get()) if (!r.Contains(w, StringComparer.OrdinalIgnoreCase)) r.Add(w);
+            }
             if (_cfg.ScanGemini && Directory.Exists(Paths.AntigravityBrainDir))
                 if (!r.Contains(Paths.AntigravityBrainDir, StringComparer.OrdinalIgnoreCase)) r.Add(Paths.AntigravityBrainDir);
             return r;
@@ -699,6 +704,11 @@ namespace ClaudeUsageWidget
                 if (f.ShowDialog() != DialogResult.OK) return;
             }
             _cfg.Save();
+            _scanner.ScanClaude = _cfg.ScanClaude;
+            _scanner.ScanGemini = _cfg.ScanGemini;
+            _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
+            _scanner.AntigravityQuota7dTokens = _cfg.AntigravityQuota7dTokens;
+            StartWatchers();
             L.Set(_cfg.Language);
             ApplyCurrencyOpts();
             ApplyLanguage();
@@ -747,24 +757,31 @@ namespace ClaudeUsageWidget
         // ---------------- data ----------------
         private void StartWatchers()
         {
-            try
+            if (_logWatcher != null) { try { _logWatcher.Dispose(); } catch { } _logWatcher = null; }
+            if (_appWatcher != null) { try { _appWatcher.Dispose(); } catch { } _appWatcher = null; }
+            if (_geminiWatcher != null) { try { _geminiWatcher.Dispose(); } catch { } _geminiWatcher = null; }
+
+            if (_cfg.ScanClaude)
             {
-                if (Directory.Exists(Paths.ProjectsDir))
+                try
                 {
-                    _logWatcher = new FileSystemWatcher(Paths.ProjectsDir, "*.jsonl");
-                    _logWatcher.IncludeSubdirectories = true;
-                    _logWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
-                    _logWatcher.InternalBufferSize = 64 * 1024;
-                    FileSystemEventHandler h = delegate(object s, FileSystemEventArgs e)
+                    if (Directory.Exists(Paths.ProjectsDir))
                     {
-                        lock (_dirty) _dirty.Add(e.FullPath);
-                        _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);   // paling lambat 2 dtk sekali
-                    };
-                    _logWatcher.Changed += h; _logWatcher.Created += h;
-                    _logWatcher.EnableRaisingEvents = true;
+                        _logWatcher = new FileSystemWatcher(Paths.ProjectsDir, "*.jsonl");
+                        _logWatcher.IncludeSubdirectories = true;
+                        _logWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
+                        _logWatcher.InternalBufferSize = 64 * 1024;
+                        FileSystemEventHandler h = delegate(object s, FileSystemEventArgs e)
+                        {
+                            lock (_dirty) _dirty.Add(e.FullPath);
+                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);   // paling lambat 2 dtk sekali
+                        };
+                        _logWatcher.Changed += h; _logWatcher.Created += h;
+                        _logWatcher.EnableRaisingEvents = true;
+                    }
                 }
+                catch (Exception ex) { Log.Write("watch.logs", ex); }
             }
-            catch (Exception ex) { Log.Write("watch.logs", ex); }
             try
             {
                 _appWatcher = new FileSystemWatcher(Paths.AppDir, "*.json");
@@ -781,24 +798,27 @@ namespace ClaudeUsageWidget
                 _appWatcher.EnableRaisingEvents = true;
             }
             catch (Exception ex) { Log.Write("watch.app", ex); }
-            try
+            if (_cfg.ScanGemini)
             {
-                if (_cfg.ScanGemini && Directory.Exists(Paths.AntigravityBrainDir))
+                try
                 {
-                    _geminiWatcher = new FileSystemWatcher(Paths.AntigravityBrainDir, "transcript.jsonl");
-                    _geminiWatcher.IncludeSubdirectories = true;
-                    _geminiWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
-                    _geminiWatcher.InternalBufferSize = 64 * 1024;
-                    FileSystemEventHandler hG = delegate(object s, FileSystemEventArgs e)
+                    if (Directory.Exists(Paths.AntigravityBrainDir))
                     {
-                        lock (_dirty) _dirty.Add(e.FullPath);
-                        _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
-                    };
-                    _geminiWatcher.Changed += hG; _geminiWatcher.Created += hG;
-                    _geminiWatcher.EnableRaisingEvents = true;
+                        _geminiWatcher = new FileSystemWatcher(Paths.AntigravityBrainDir, "transcript.jsonl");
+                        _geminiWatcher.IncludeSubdirectories = true;
+                        _geminiWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
+                        _geminiWatcher.InternalBufferSize = 64 * 1024;
+                        FileSystemEventHandler hG = delegate(object s, FileSystemEventArgs e)
+                        {
+                            lock (_dirty) _dirty.Add(e.FullPath);
+                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                        };
+                        _geminiWatcher.Changed += hG; _geminiWatcher.Created += hG;
+                        _geminiWatcher.EnableRaisingEvents = true;
+                    }
                 }
+                catch (Exception ex) { Log.Write("watch.gemini", ex); }
             }
-            catch (Exception ex) { Log.Write("watch.gemini", ex); }
         }
 
         private void OnTick()
@@ -825,7 +845,7 @@ namespace ClaudeUsageWidget
         /// </summary>
         private void MaybeProbe(bool force)
         {
-            if (!_cfg.ProbeEnabled || _probeBusy) return;
+            if (!_cfg.ScanClaude || !_cfg.ProbeEnabled || _probeBusy) return;
             if (_usage != null && _usage.LastRecord != DateTime.MinValue)
             {
                 if (_lastSeenRecord == DateTime.MinValue) _lastSeenRecord = _usage.LastRecord;   // patokan saat app mulai
@@ -879,7 +899,7 @@ namespace ClaudeUsageWidget
         private void ReloadLimits()
         {
             _limits = RateLimitReader.Read();
-            if (!_limits.AntigravityFiveHour.Available && _usage != null && _usage.AntigravityFiveHour != null && _usage.AntigravityFiveHour.Available)
+            if (!File.Exists(Paths.AntigravityRateLimitsFile) && _usage != null && _usage.AntigravityFiveHour != null && _usage.AntigravityFiveHour.Available)
             {
                 _limits.AntigravityFiveHour = _usage.AntigravityFiveHour;
                 _limits.AntigravitySevenDay = _usage.AntigravitySevenDay;
@@ -913,7 +933,7 @@ namespace ClaudeUsageWidget
                     _ui.Post(delegate
                     {
                         _usage = snap;
-                        if (!_limits.AntigravityFiveHour.Available && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
+                        if (!File.Exists(Paths.AntigravityRateLimitsFile) && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
                         {
                             _limits.AntigravityFiveHour = snap.AntigravityFiveHour;
                             _limits.AntigravitySevenDay = snap.AntigravitySevenDay;
@@ -983,6 +1003,8 @@ namespace ClaudeUsageWidget
             vm.Limits = _limits;
             vm.Org = _org;
             vm.AdminEnabled = _cfg.AdminEnabled;
+            vm.ScanClaude = _cfg.ScanClaude;
+            vm.ScanGemini = _cfg.ScanGemini;
             vm.ProbeStatus = _probeStatus;
             vm.History = _history.Series(_cfg.HistoryDays);
             vm.BudgetDaily = _cfg.BudgetDaily; vm.BudgetMonthly = _cfg.BudgetMonthly;
@@ -1003,7 +1025,7 @@ namespace ClaudeUsageWidget
         {
             // Satu angka besar: limit 5 jam, atau limit mingguan (cincin putih) bila mingguan sudah penuh.
             string txt; Color badge; bool weekly;
-            TrayText.IconSpec(_limits, out txt, out badge, out weekly);
+            TrayText.IconSpec(_limits, _cfg.ScanClaude, _cfg.ScanGemini, out txt, out badge, out weekly);
 
             Size sz = SystemInformation.SmallIconSize;
             using (Bitmap bmp = new Bitmap(sz.Width, sz.Height))
@@ -1029,7 +1051,7 @@ namespace ClaudeUsageWidget
         private static readonly System.Reflection.MethodInfo NiUpdate = typeof(NotifyIcon).GetMethod("UpdateIcon", Priv);
         private static readonly bool LongTipOk = NiText != null && NiAdded != null && NiUpdate != null;
 
-        private string Tooltip() { return TrayText.Tooltip(_limits, _usage, _probeFailed, LongTipOk ? 127 : 63); }
+        private string Tooltip() { return TrayText.Tooltip(_limits, _usage, _probeFailed, LongTipOk ? 127 : 63, _cfg.ScanClaude, _cfg.ScanGemini); }
 
         private void SetTrayTip(string text)
         {

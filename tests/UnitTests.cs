@@ -357,8 +357,40 @@ namespace Tests
             Assert.True(Palette.ClaudeColor != Palette.AntigravityColor, "Claude and Antigravity must have distinct bar colors");
             Assert.True(UsageScanner.IsAntigravityModel("gemini-2.5-flash"));
             Assert.True(UsageScanner.IsAntigravityModel("gemini-3.8-pro"));
-            Assert.False(UsageScanner.IsAntigravityModel("claude-3-5-sonnet"));
-            Assert.False(UsageScanner.IsAntigravityModel("claude-opus-4-6"));
+
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_split_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string nowUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                // Antigravity log running Claude Opus inside Antigravity
+                string agLine = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"claude-opus-4-6-thinking\",\"created_at\":\"{0}\",\"step_index\":1,\"input_tokens\":10000,\"output_tokens\":500,\"cache_read_tokens\":2000}}",
+                    nowUtc
+                );
+                // Claude Code log running Claude 3.7 Sonnet
+                string claudeLine = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"message\":{{\"id\":\"msg_1\",\"model\":\"claude-3-7-sonnet\",\"usage\":{{\"input_tokens\":5000,\"output_tokens\":250,\"cache_read_input_tokens\":1000}}}}}}",
+                    nowUtc
+                );
+
+                File.WriteAllLines(Path.Combine(tempDir, "ag.jsonl"), new[] { agLine });
+                File.WriteAllLines(Path.Combine(tempDir, "claude.jsonl"), new[] { claudeLine });
+
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(12500L, snap.AntigravityToday.Total, "AntigravityToday must correctly include tokens from Antigravity even with Opus model");
+                Assert.Equal(6250L, snap.ClaudeToday.Total, "ClaudeToday must only include Claude Code tokens");
+                Assert.Equal(18750L, snap.TodayTotal.Total, "TodayTotal must equal sum of Claude and Antigravity");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
         }
 
         public static void Test_Antigravity_RateLimits_Calculation()
@@ -397,6 +429,84 @@ namespace Tests
 
                 Assert.True(snap.AntigravityFiveHour.ResetsAt > DateTime.Now, "5h resetsAt should be in the future");
                 Assert.True(snap.AntigravitySevenDay.ResetsAt > DateTime.Now, "7d resetsAt should be in the future");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_Monitoring_Toggles_Selective_Scanning()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_toggles_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string nowUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string agLine = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":1,\"input_tokens\":10000,\"output_tokens\":100,\"cache_read_tokens\":0}}",
+                    nowUtc
+                );
+                string claudeLine = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"message\":{{\"id\":\"msg_tog\",\"model\":\"claude-3-5-haiku\",\"usage\":{{\"input_tokens\":4000,\"output_tokens\":200,\"cache_read_input_tokens\":0}}}}}}",
+                    nowUtc
+                );
+
+                File.WriteAllLines(Path.Combine(tempDir, "ag.jsonl"), new[] { agLine });
+                File.WriteAllLines(Path.Combine(tempDir, "claude.jsonl"), new[] { claudeLine });
+
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+
+                // 1. Only Claude enabled
+                sc.ScanClaude = true;
+                sc.ScanGemini = false;
+                sc.ResetWithPricing(pricing);
+                sc.Scan();
+                UsageSnapshot snapClaudeOnly = sc.Snapshot();
+                Assert.Equal(4200L, snapClaudeOnly.TodayTotal.Total, "Only Claude tokens should be scanned");
+                Assert.Equal(0L, snapClaudeOnly.AntigravityToday.Total, "Gemini tokens must be 0 when ScanGemini is false");
+
+                // 2. Only Gemini enabled
+                sc.ScanClaude = false;
+                sc.ScanGemini = true;
+                sc.ResetWithPricing(pricing);
+                sc.Scan();
+                UsageSnapshot snapGeminiOnly = sc.Snapshot();
+                Assert.Equal(10100L, snapGeminiOnly.TodayTotal.Total, "Only Gemini tokens should be scanned");
+                Assert.Equal(0L, snapGeminiOnly.ClaudeToday.Total, "Claude tokens must be 0 when ScanClaude is false");
+
+                // 3. Neither enabled
+                sc.ScanClaude = false;
+                sc.ScanGemini = false;
+                sc.ResetWithPricing(pricing);
+                sc.Scan();
+                UsageSnapshot snapNone = sc.Snapshot();
+                Assert.Equal(0L, snapNone.TodayTotal.Total, "Total tokens must be 0 when both are disabled");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_Antigravity_Zero_Usage_ResetsAt_Is_MinValue()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_zero_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+                UsageSnapshot snap = sc.Snapshot();
+
+                Assert.Equal(0L, snap.AntigravityToday.Total);
+                Assert.Equal(0L, snap.AntigravityWeek.Total);
+                Assert.Equal(DateTime.MinValue, snap.AntigravityFiveHour.ResetsAt, "5h ResetsAt should be MinValue when 0 tokens used");
+                Assert.Equal(DateTime.MinValue, snap.AntigravitySevenDay.ResetsAt, "7d ResetsAt should be MinValue when 0 tokens used");
             }
             finally
             {

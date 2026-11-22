@@ -231,17 +231,29 @@ namespace ClaudeUsageWidget
         /// </summary>
         public static void IconSpec(RateLimitSnapshot limits, out string text, out Color badge, out bool weekly)
         {
-            LimitWindow w5 = limits.FiveHour, w7 = limits.SevenDay;
-            if ((!w5.Available || w5.IsStale) && limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available)
+            IconSpec(limits, true, true, out text, out badge, out weekly);
+        }
+
+        public static void IconSpec(RateLimitSnapshot limits, bool scanClaude, bool scanGemini, out string text, out Color badge, out bool weekly)
+        {
+            LimitWindow w5 = null, w7 = null;
+            if (scanClaude && limits.FiveHour != null && limits.FiveHour.Available)
             {
-                w5 = limits.AntigravityFiveHour;
-                if (limits.AntigravitySevenDay != null && limits.AntigravitySevenDay.Available)
-                    w7 = limits.AntigravitySevenDay;
+                w5 = limits.FiveHour;
+                w7 = limits.SevenDay;
             }
-            weekly = w7.Available && !w7.IsStale && Math.Round(w7.UsedPercent) >= 100;
+            if (scanGemini && limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available)
+            {
+                if (w5 == null || !w5.Available || w5.IsStale || (limits.AntigravityFiveHour.UsedPercent > w5.UsedPercent))
+                {
+                    w5 = limits.AntigravityFiveHour;
+                    w7 = limits.AntigravitySevenDay;
+                }
+            }
+            weekly = w7 != null && w7.Available && !w7.IsStale && Math.Round(w7.UsedPercent) >= 100;
             LimitWindow w = weekly ? w7 : w5;
-            bool show = w.Available && !w.IsStale;
-            int used = (int)Math.Round(w.UsedPercent);
+            bool show = w != null && w.Available && !w.IsStale;
+            int used = show ? (int)Math.Round(w.UsedPercent) : 0;
             int v = Math.Max(0, Math.Min(100, Opts.ShowRemaining ? 100 - used : used));
             text = show ? v.ToString() : "--";
             badge = show ? TrayIconPainter.StatusColor(w.UsedPercent) : TrayIconPainter.StGray;
@@ -258,9 +270,22 @@ namespace ClaudeUsageWidget
         /// maxLen: 127 bila batas tooltip bisa diperluas, selain itu 63 (batas NotifyIcon.Text).</summary>
         public static string Tooltip(RateLimitSnapshot limits, UsageSnapshot usage, string probeFailed, int maxLen)
         {
-            string s = Line(limits.FiveHour, "tip.l5", "tip.l5n") + "\n" + Line(limits.SevenDay, "tip.l7", "tip.l7n");
-            if (!string.IsNullOrEmpty(probeFailed)) s += "\n" + L.T("tip.error", probeFailed);
-            else if (usage != null) s += "\n" + L.T("tip.today", Fmt.UsdShort(usage.TodayTotal.Cost));
+            return Tooltip(limits, usage, probeFailed, maxLen, true, true);
+        }
+
+        public static string Tooltip(RateLimitSnapshot limits, UsageSnapshot usage, string probeFailed, int maxLen, bool scanClaude, bool scanGemini)
+        {
+            string s = "";
+            if (scanClaude && limits != null && limits.FiveHour != null)
+                s += Line(limits.FiveHour, "tip.l5", "tip.l5n") + "\n" + Line(limits.SevenDay, "tip.l7", "tip.l7n");
+            if (scanGemini && limits != null && limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available)
+            {
+                if (s.Length > 0) s += "\n";
+                s += "AG 5h: " + Pct(limits.AntigravityFiveHour) + " · 7d: " + Pct(limits.AntigravitySevenDay);
+            }
+            if (!string.IsNullOrEmpty(probeFailed)) s += (s.Length > 0 ? "\n" : "") + L.T("tip.error", probeFailed);
+            else if (usage != null) s += (s.Length > 0 ? "\n" : "") + L.T("tip.today", Fmt.UsdShort(usage.TodayTotal.Cost));
+            if (string.IsNullOrEmpty(s)) s = L.AppName;
             return s.Length > maxLen ? s.Substring(0, maxLen - 1) + "…" : s;
         }
     }

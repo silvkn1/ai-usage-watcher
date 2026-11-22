@@ -78,7 +78,8 @@ namespace ClaudeUsageWidget
         // Tombol taskbar & progress bar
         public bool ShowInTaskbar { get; set; }
 
-        // Pindai log Google Antigravity / Gemini (~/.gemini/antigravity)
+        // Pindai log Claude Code (~/.claude/projects) & Antigravity (~/.gemini/antigravity)
+        public bool ScanClaude { get; set; }
         public bool ScanGemini { get; set; }
         public long AntigravityQuota5hTokens { get; set; }
         public long AntigravityQuota7dTokens { get; set; }
@@ -114,6 +115,7 @@ namespace ClaudeUsageWidget
             WebhookEnabled = false;
             WebhookUrl = "";
             ShowInTaskbar = false;
+            ScanClaude = true;
             ScanGemini = true;
             AntigravityQuota5hTokens = 1000000;
             AntigravityQuota7dTokens = 10000000;

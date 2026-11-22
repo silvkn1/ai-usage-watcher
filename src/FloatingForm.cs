@@ -14,6 +14,8 @@ namespace ClaudeUsageWidget
         public RateLimitSnapshot Limits;
         public OrgCostResult Org;
         public bool AdminEnabled;
+        public bool ScanClaude = true;
+        public bool ScanGemini = true;
         public string ProbeStatus;
         public DayStat[] History;
         public double BudgetDaily, BudgetMonthly, MonthCost;
@@ -349,27 +351,37 @@ namespace ClaudeUsageWidget
             RateLimitSnapshot rl = vm.Limits ?? new RateLimitSnapshot();
             UsageSnapshot u = vm.Usage;
 
-            bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
+            bool scanClaude = vm.ScanClaude;
+            bool scanGemini = vm.ScanGemini;
 
-            CardCol leftCol = new CardCol();
-            leftCol.Title = "Claude Code";
-            leftCol.TitleColor = Palette.ClaudeColor;
-            leftCol.Limit5 = rl.FiveHour;
-            leftCol.Limit7 = rl.SevenDay;
-            leftCol.CapturedAt = rl.CapturedAt;
-            leftCol.Stale = stale;
-            leftCol.Today = u.ClaudeToday;
-            leftCol.Models = u.TodayClaude;
+            CardCol leftCol = null;
+            if (scanClaude)
+            {
+                bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
+                leftCol = new CardCol();
+                leftCol.Title = "Claude Code";
+                leftCol.TitleColor = Palette.ClaudeColor;
+                leftCol.Limit5 = rl.FiveHour;
+                leftCol.Limit7 = rl.SevenDay;
+                leftCol.CapturedAt = rl.CapturedAt;
+                leftCol.Stale = stale;
+                leftCol.Today = u.ClaudeToday;
+                leftCol.Models = u.TodayClaude;
+            }
 
-            CardCol rightCol = new CardCol();
-            rightCol.Title = "Antigravity";
-            rightCol.TitleColor = Palette.AntigravityColor;
-            rightCol.Limit5 = rl.AntigravityFiveHour;
-            rightCol.Limit7 = rl.AntigravitySevenDay;
-            rightCol.CapturedAt = rl.CapturedAt == DateTime.MinValue ? DateTime.Now : rl.CapturedAt;
-            rightCol.Stale = false;
-            rightCol.Today = u.AntigravityToday;
-            rightCol.Models = u.TodayAntigravity;
+            CardCol rightCol = null;
+            if (scanGemini)
+            {
+                rightCol = new CardCol();
+                rightCol.Title = "Antigravity";
+                rightCol.TitleColor = Palette.AntigravityColor;
+                rightCol.Limit5 = rl.AntigravityFiveHour;
+                rightCol.Limit7 = rl.AntigravitySevenDay;
+                rightCol.CapturedAt = u.ScannedAt != DateTime.MinValue ? u.ScannedAt : DateTime.Now;
+                rightCol.Stale = false;
+                rightCol.Today = u.AntigravityToday;
+                rightCol.Models = u.TodayAntigravity;
+            }
 
             if (ShowCompact)
             {
@@ -383,20 +395,31 @@ namespace ClaudeUsageWidget
             // 1. Header
             rows.Add(new Row(Kind.Title, L.AppName, L.T("lastchat", Fmt.Clock(u.LastRecord))));
 
-            // 2. Dual-Column Cards
-            Row dual = new Row(Kind.DualCards, null, null);
-            dual.LeftCol = leftCol;
-            dual.RightCol = rightCol;
-            rows.Add(dual);
+            // 2. Dual-Column Cards (or single card if only one provider enabled)
+            if (leftCol != null || rightCol != null)
+            {
+                Row cards = new Row(Kind.DualCards, null, null);
+                cards.LeftCol = leftCol != null ? leftCol : rightCol;
+                cards.RightCol = (leftCol != null && rightCol != null) ? rightCol : null;
+                rows.Add(cards);
+            }
+            else
+            {
+                rows.Add(new Row(Kind.Text, L.T("set.noproviders"), null));
+            }
 
             // 3. Statusline / snapshot info
-            if (!rl.FileFound && !rl.AntigravityFiveHour.Available)
-                rows.Add(new Row(Kind.Small, L.T("nostatusline"), null));
-            else if (rl.FileFound)
-                rows.Add(new Row(Kind.Small, L.T("snapshot", Fmt.Clock(rl.CapturedAt),
-                    rl.Source == "cli-probe" ? L.T("src.probe") : L.T("src.statusline")) + (stale ? L.T("snapshot.stale") : ""), null));
-            if (!string.IsNullOrEmpty(vm.ProbeStatus))
-                rows.Add(new Row(Kind.Small, vm.ProbeStatus, null));
+            if (scanClaude)
+            {
+                bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
+                if (!rl.FileFound)
+                    rows.Add(new Row(Kind.Small, L.T("nostatusline"), null));
+                else
+                    rows.Add(new Row(Kind.Small, L.T("snapshot", Fmt.Clock(rl.CapturedAt),
+                        rl.Source == "cli-probe" ? L.T("src.probe") : L.T("src.statusline")) + (stale ? L.T("snapshot.stale") : ""), null));
+                if (!string.IsNullOrEmpty(vm.ProbeStatus))
+                    rows.Add(new Row(Kind.Small, vm.ProbeStatus, null));
+            }
 
             rows.Add(new Row(Kind.Sep, null, null));
             if (!u.Ready) rows.Add(new Row(Kind.Small, L.T("scanning"), null));
@@ -616,36 +639,67 @@ namespace ClaudeUsageWidget
             using (Pen pp = new Pen(Palette.Border, 1f))
                 g.DrawRectangle(pp, pillRect);
 
-            int segW = pillW / 3;
             int pad = (int)(4 * s);
+            bool hasLeft = (r.LeftCol != null);
+            bool hasRight = (r.RightCol != null);
 
-            // Segment 1: Claude 5h
-            Rectangle r1 = new Rectangle(x + pad, y, segW - pad * 2, rh);
-            string cVal = (r.LeftCol != null && r.LeftCol.Limit5 != null) ? PctShort(r.LeftCol.Limit5) : "--";
-            string cText = "C 5h: " + cVal;
-            TextRenderer.DrawText(g, cText, _fBody, r1, Palette.ClaudeColor,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            if (hasLeft && hasRight)
+            {
+                int segW = pillW / 3;
 
-            // Divider 1
-            using (Pen dp = new Pen(Palette.Track, 1f))
-                g.DrawLine(dp, x + segW, y + (int)(4 * s), x + segW, y + rh - (int)(4 * s));
+                // Segment 1: Claude 5h
+                Rectangle r1 = new Rectangle(x + pad, y, segW - pad * 2, rh);
+                string cVal = (r.LeftCol.Limit5 != null) ? PctShort(r.LeftCol.Limit5) : "--";
+                string cText = "C 5h: " + cVal;
+                TextRenderer.DrawText(g, cText, _fBody, r1, Palette.ClaudeColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
-            // Segment 2: Antigravity 5h
-            Rectangle r2 = new Rectangle(x + segW + pad, y, segW - pad * 2, rh);
-            string agVal = (r.RightCol != null && r.RightCol.Limit5 != null) ? PctShort(r.RightCol.Limit5) : "--";
-            string agText = "AG 5h: " + agVal;
-            TextRenderer.DrawText(g, agText, _fBody, r2, Palette.AntigravityColor,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                // Divider 1
+                using (Pen dp = new Pen(Palette.Track, 1f))
+                    g.DrawLine(dp, x + segW, y + (int)(4 * s), x + segW, y + rh - (int)(4 * s));
 
-            // Divider 2
-            using (Pen dp = new Pen(Palette.Track, 1f))
-                g.DrawLine(dp, x + segW * 2, y + (int)(4 * s), x + segW * 2, y + rh - (int)(4 * s));
+                // Segment 2: Antigravity 5h
+                Rectangle r2 = new Rectangle(x + segW + pad, y, segW - pad * 2, rh);
+                string agVal = (r.RightCol.Limit5 != null) ? PctShort(r.RightCol.Limit5) : "--";
+                string agText = "AG 5h: " + agVal;
+                TextRenderer.DrawText(g, agText, _fBody, r2, Palette.AntigravityColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
-            // Segment 3: Total Spend
-            Rectangle r3 = new Rectangle(x + segW * 2 + pad, y, pillW - segW * 2 - pad * 2, rh);
-            string costText = _vm != null && _vm.Usage != null ? Fmt.UsdShort(_vm.Usage.TodayTotal.Cost) : "$0.00";
-            TextRenderer.DrawText(g, costText, _fBody, r3, Palette.Text,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                // Divider 2
+                using (Pen dp = new Pen(Palette.Track, 1f))
+                    g.DrawLine(dp, x + segW * 2, y + (int)(4 * s), x + segW * 2, y + rh - (int)(4 * s));
+
+                // Segment 3: Total Spend
+                Rectangle r3 = new Rectangle(x + segW * 2 + pad, y, pillW - segW * 2 - pad * 2, rh);
+                string costText = _vm != null && _vm.Usage != null ? Fmt.UsdShort(_vm.Usage.TodayTotal.Cost) : "$0.00";
+                TextRenderer.DrawText(g, costText, _fBody, r3, Palette.Text,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+            else if (hasLeft || hasRight)
+            {
+                CardCol col = hasLeft ? r.LeftCol : r.RightCol;
+                int segW = pillW / 2;
+
+                Rectangle r1 = new Rectangle(x + pad, y, segW - pad * 2, rh);
+                string pVal = (col.Limit5 != null) ? PctShort(col.Limit5) : "--";
+                string prefix = (col.Title != null && col.Title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0) ? "AG 5h: " : "C 5h: ";
+                TextRenderer.DrawText(g, prefix + pVal, _fBody, r1, col.TitleColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+                using (Pen dp = new Pen(Palette.Track, 1f))
+                    g.DrawLine(dp, x + segW, y + (int)(4 * s), x + segW, y + rh - (int)(4 * s));
+
+                Rectangle r2 = new Rectangle(x + segW + pad, y, pillW - segW - pad * 2, rh);
+                string costText = _vm != null && _vm.Usage != null ? Fmt.UsdShort(_vm.Usage.TodayTotal.Cost) : "$0.00";
+                TextRenderer.DrawText(g, costText, _fBody, r2, Palette.Text,
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+            else
+            {
+                Rectangle r0 = new Rectangle(x + pad, y, pillW - pad * 2, rh);
+                TextRenderer.DrawText(g, L.T("set.noproviders"), _fBody, r0, Palette.Dim,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
         }
 
         private void DrawCardCol(Graphics g, CardCol col, Rectangle rect, float s)
@@ -777,14 +831,26 @@ namespace ClaudeUsageWidget
                 }
                 if (r.Kind == Kind.DualCards)
                 {
-                    int colGap = (int)(8 * s);
-                    int colW = (right - x - colGap) / 2;
                     int cardH = rh - (int)(4 * s);
-                    Rectangle leftRect = new Rectangle(x, y + (int)(2 * s), colW, cardH);
-                    Rectangle rightRect = new Rectangle(x + colW + colGap, y + (int)(2 * s), right - (x + colW + colGap), cardH);
-
-                    if (r.LeftCol != null) DrawCardCol(g, r.LeftCol, leftRect, s);
-                    if (r.RightCol != null) DrawCardCol(g, r.RightCol, rightRect, s);
+                    if (r.LeftCol != null && r.RightCol != null)
+                    {
+                        int colGap = (int)(8 * s);
+                        int colW = (right - x - colGap) / 2;
+                        Rectangle leftRect = new Rectangle(x, y + (int)(2 * s), colW, cardH);
+                        Rectangle rightRect = new Rectangle(x + colW + colGap, y + (int)(2 * s), right - (x + colW + colGap), cardH);
+                        DrawCardCol(g, r.LeftCol, leftRect, s);
+                        DrawCardCol(g, r.RightCol, rightRect, s);
+                    }
+                    else if (r.LeftCol != null)
+                    {
+                        Rectangle fullRect = new Rectangle(x, y + (int)(2 * s), right - x, cardH);
+                        DrawCardCol(g, r.LeftCol, fullRect, s);
+                    }
+                    else if (r.RightCol != null)
+                    {
+                        Rectangle fullRect = new Rectangle(x, y + (int)(2 * s), right - x, cardH);
+                        DrawCardCol(g, r.RightCol, fullRect, s);
+                    }
                     y += rh; continue;
                 }
                 if (r.Kind == Kind.Sep)

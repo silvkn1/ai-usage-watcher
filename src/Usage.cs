@@ -148,6 +148,7 @@ namespace ClaudeUsageWidget
         private readonly Dictionary<string, long> _offsets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _seen = new Dictionary<string, DateTime>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _days = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysAg = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _proj = new Dictionary<DateTime, Dictionary<string, Tally>>();
         /// <summary>Lacak total per proyek (nama folder terakhir dari 'cwd'). Default mati.</summary>
         public bool TrackProjects;
@@ -169,7 +170,7 @@ namespace ClaudeUsageWidget
             {
                 if (TrackProjects == on) return;
                 TrackProjects = on;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -184,6 +185,8 @@ namespace ClaudeUsageWidget
         private DateTime _lastContextTime = DateTime.MinValue;
         private string _lastActiveCwd;
         private string _lastActiveProject;
+        public bool ScanClaude = true;
+        public bool ScanGemini = true;
         public long AntigravityQuota5hTokens = 1000000;
         public long AntigravityQuota7dTokens = 10000000;
         private readonly List<KeyValuePair<DateTime, long>> _recentTokens = new List<KeyValuePair<DateTime, long>>();
@@ -194,8 +197,9 @@ namespace ClaudeUsageWidget
             _pricing = pricing;
             Roots = delegate
             {
-                List<string> r = new List<string> { Paths.ProjectsDir };
-                if (Directory.Exists(Paths.AntigravityBrainDir)) r.Add(Paths.AntigravityBrainDir);
+                List<string> r = new List<string>();
+                if (ScanClaude && Directory.Exists(Paths.ProjectsDir)) r.Add(Paths.ProjectsDir);
+                if (ScanGemini && Directory.Exists(Paths.AntigravityBrainDir)) r.Add(Paths.AntigravityBrainDir);
                 return r;
             };
         }
@@ -206,7 +210,7 @@ namespace ClaudeUsageWidget
             lock (_gate)
             {
                 _pricing = pricing;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -397,9 +401,11 @@ namespace ClaudeUsageWidget
         {
             if (line.IndexOf("\"PLANNER_RESPONSE\"", StringComparison.Ordinal) >= 0)
             {
-                ProcessAntigravityLine(line);
+                if (ScanGemini) ProcessAntigravityLine(line);
                 return;
             }
+
+            if (!ScanClaude) return;
 
             // Saring murah sebelum parse JSON.
             if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0) return;
@@ -535,7 +541,7 @@ namespace ClaudeUsageWidget
             }
 
             Dictionary<string, Tally> day;
-            if (!_days.TryGetValue(local.Date, out day)) { day = new Dictionary<string, Tally>(); _days[local.Date] = day; }
+            if (!_daysAg.TryGetValue(local.Date, out day)) { day = new Dictionary<string, Tally>(); _daysAg[local.Date] = day; }
             Tally acc;
             if (!day.TryGetValue(model, out acc)) { acc = new Tally(); day[model] = acc; }
             acc.Add(t);
@@ -568,6 +574,9 @@ namespace ClaudeUsageWidget
             List<DateTime> oldDays = new List<DateTime>();
             foreach (DateTime d in _days.Keys) if (d < min) oldDays.Add(d);
             foreach (DateTime d in oldDays) _days.Remove(d);
+            List<DateTime> oldDaysAg = new List<DateTime>();
+            foreach (DateTime d in _daysAg.Keys) if (d < min) oldDaysAg.Add(d);
+            foreach (DateTime d in oldDaysAg) _daysAg.Remove(d);
             List<DateTime> oldProj = new List<DateTime>();
             foreach (DateTime d in _proj.Keys) if (d < min) oldProj.Add(d);
             foreach (DateTime d in oldProj) _proj.Remove(d);
@@ -596,28 +605,70 @@ namespace ClaudeUsageWidget
             {
                 UsageSnapshot s = new UsageSnapshot();
                 DateTime today = DateTime.Today, weekStart = today.AddDays(-6);
-                foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> day in _days)
-                {
-                    Tally dayTotal = new Tally();
-                    foreach (Tally t in day.Value.Values) dayTotal.Add(t);
-                    s.Days.Add(new DayStat(day.Key, dayTotal.Total, dayTotal.Cost, dayTotal.Requests));
-                    if (day.Key < weekStart) continue;
-                    foreach (KeyValuePair<string, Tally> m in day.Value)
-                    {
-                        AddTo(s.Week, m.Key, m.Value); s.WeekTotal.Add(m.Value);
-                        bool isAg = IsAntigravityModel(m.Key);
-                        if (isAg) { AddTo(s.WeekAntigravity, m.Key, m.Value); s.AntigravityWeek.Add(m.Value); }
-                        else { AddTo(s.WeekClaude, m.Key, m.Value); s.ClaudeWeek.Add(m.Value); }
 
-                        if (day.Key == today)
+                if (ScanClaude)
+                {
+                    foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> day in _days)
+                    {
+                        if (day.Key >= weekStart)
                         {
-                            AddTo(s.Today, m.Key, m.Value); s.TodayTotal.Add(m.Value);
-                            if (isAg) { AddTo(s.TodayAntigravity, m.Key, m.Value); s.AntigravityToday.Add(m.Value); }
-                            else { AddTo(s.TodayClaude, m.Key, m.Value); s.ClaudeToday.Add(m.Value); }
+                            foreach (KeyValuePair<string, Tally> m in day.Value)
+                            {
+                                AddTo(s.Week, m.Key, m.Value); s.WeekTotal.Add(m.Value);
+                                AddTo(s.WeekClaude, m.Key, m.Value); s.ClaudeWeek.Add(m.Value);
+
+                                if (day.Key == today)
+                                {
+                                    AddTo(s.Today, m.Key, m.Value); s.TodayTotal.Add(m.Value);
+                                    AddTo(s.TodayClaude, m.Key, m.Value); s.ClaudeToday.Add(m.Value);
+                                }
+                            }
                         }
                     }
                 }
-                if (TrackProjects)
+
+                DateTime oldest7dAg = DateTime.MaxValue;
+                if (ScanGemini)
+                {
+                    foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> day in _daysAg)
+                    {
+                        if (day.Key >= weekStart)
+                        {
+                            long dTokens = 0;
+                            foreach (Tally t in day.Value.Values) dTokens += t.Total;
+                            if (dTokens > 0 && day.Key < oldest7dAg) oldest7dAg = day.Key;
+
+                            foreach (KeyValuePair<string, Tally> m in day.Value)
+                            {
+                                AddTo(s.Week, m.Key, m.Value); s.WeekTotal.Add(m.Value);
+                                AddTo(s.WeekAntigravity, m.Key, m.Value); s.AntigravityWeek.Add(m.Value);
+
+                                if (day.Key == today)
+                                {
+                                    AddTo(s.Today, m.Key, m.Value); s.TodayTotal.Add(m.Value);
+                                    AddTo(s.TodayAntigravity, m.Key, m.Value); s.AntigravityToday.Add(m.Value);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HashSet<DateTime> allDates = new HashSet<DateTime>();
+                if (ScanClaude) foreach (DateTime d in _days.Keys) allDates.Add(d);
+                if (ScanGemini) foreach (DateTime d in _daysAg.Keys) allDates.Add(d);
+                foreach (DateTime d in allDates)
+                {
+                    Tally dt = new Tally();
+                    Dictionary<string, Tally> cd;
+                    if (ScanClaude && _days.TryGetValue(d, out cd))
+                        foreach (Tally t in cd.Values) dt.Add(t);
+                    Dictionary<string, Tally> ad;
+                    if (ScanGemini && _daysAg.TryGetValue(d, out ad))
+                        foreach (Tally t in ad.Values) dt.Add(t);
+                    s.Days.Add(new DayStat(d, dt.Total, dt.Cost, dt.Requests));
+                }
+
+                if (TrackProjects && ScanClaude)
                     foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> pd in _proj)
                     {
                         if (pd.Key < weekStart) continue;
@@ -644,33 +695,39 @@ namespace ClaudeUsageWidget
                 }
                 s.TokensLast10m = t10;
 
-                DateTime cut5h = DateTime.Now.AddHours(-5);
-                long agTokens5h = 0;
-                DateTime oldest5h = DateTime.MaxValue;
-                for (int i = 0; i < _antigravityRecentTokens.Count; i++)
+                if (ScanGemini)
                 {
-                    if (_antigravityRecentTokens[i].Key >= cut5h)
+                    DateTime cut5h = DateTime.Now.AddHours(-5);
+                    long agTokens5h = 0;
+                    DateTime oldest5h = DateTime.MaxValue;
+                    for (int i = 0; i < _antigravityRecentTokens.Count; i++)
                     {
-                        agTokens5h += _antigravityRecentTokens[i].Value;
-                        if (_antigravityRecentTokens[i].Key < oldest5h)
-                            oldest5h = _antigravityRecentTokens[i].Key;
+                        if (_antigravityRecentTokens[i].Key >= cut5h)
+                        {
+                            agTokens5h += _antigravityRecentTokens[i].Value;
+                            if (_antigravityRecentTokens[i].Key < oldest5h)
+                                oldest5h = _antigravityRecentTokens[i].Key;
+                        }
                     }
-                }
 
-                if (agTokens5h > 0 || s.AntigravityWeek.Total > 0)
-                {
-                    long q5 = AntigravityQuota5hTokens > 0 ? AntigravityQuota5hTokens : 1000000;
-                    s.AntigravityFiveHour.Available = true;
-                    s.AntigravityFiveHour.UsedPercent = Math.Min(100.0, Math.Max(0.0, (double)agTokens5h / q5 * 100.0));
-                    if (agTokens5h > 0 && oldest5h != DateTime.MaxValue)
-                        s.AntigravityFiveHour.ResetsAt = oldest5h.AddHours(5);
-                    else
-                        s.AntigravityFiveHour.ResetsAt = DateTime.Now.AddHours(5);
+                    if (agTokens5h > 0 || s.AntigravityWeek.Total > 0 || s.AntigravityToday.Total > 0)
+                    {
+                        long q5 = AntigravityQuota5hTokens > 0 ? AntigravityQuota5hTokens : 1000000;
+                        s.AntigravityFiveHour.Available = true;
+                        s.AntigravityFiveHour.UsedPercent = Math.Min(100.0, Math.Max(0.0, (double)agTokens5h / q5 * 100.0));
+                        if (agTokens5h > 0 && oldest5h != DateTime.MaxValue)
+                            s.AntigravityFiveHour.ResetsAt = oldest5h.AddHours(5);
+                        else
+                            s.AntigravityFiveHour.ResetsAt = DateTime.MinValue;
 
-                    long q7 = AntigravityQuota7dTokens > 0 ? AntigravityQuota7dTokens : 10000000;
-                    s.AntigravitySevenDay.Available = true;
-                    s.AntigravitySevenDay.UsedPercent = Math.Min(100.0, Math.Max(0.0, (double)s.AntigravityWeek.Total / q7 * 100.0));
-                    s.AntigravitySevenDay.ResetsAt = DateTime.Today.AddDays(1);
+                        long q7 = AntigravityQuota7dTokens > 0 ? AntigravityQuota7dTokens : 10000000;
+                        s.AntigravitySevenDay.Available = true;
+                        s.AntigravitySevenDay.UsedPercent = Math.Min(100.0, Math.Max(0.0, (double)s.AntigravityWeek.Total / q7 * 100.0));
+                        if (s.AntigravityWeek.Total > 0 && oldest7dAg != DateTime.MaxValue)
+                            s.AntigravitySevenDay.ResetsAt = oldest7dAg.AddDays(7);
+                        else
+                            s.AntigravitySevenDay.ResetsAt = DateTime.MinValue;
+                    }
                 }
 
                 return s;

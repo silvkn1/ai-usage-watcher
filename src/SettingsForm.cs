@@ -47,7 +47,7 @@ namespace ClaudeUsageWidget
         private readonly CheckBox _currencyOn = new CheckBox(), _currencyBoth = new CheckBox();
         private readonly TextBox _currencySymbol = new TextBox();
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
-        private readonly CheckBox _scanGemini = new CheckBox();
+        private readonly CheckBox _scanClaude = new CheckBox(), _scanGemini = new CheckBox(), _adminData = new CheckBox();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
         private readonly CheckBox _burnRateOn = new CheckBox();
         private readonly NumericUpDown _burnRateTokens = new NumericUpDown();
@@ -346,7 +346,13 @@ namespace ClaudeUsageWidget
 
         private void BuildData(TableLayoutPanel t)
         {
+            AddNote(t, L.T("set.h.monitoring"), "head");
+            AddCheck(t, _scanClaude, L.T("set.claude"), _cfg.ScanClaude);
             AddCheck(t, _scanGemini, L.T("set.gemini"), _cfg.ScanGemini);
+            AddCheck(t, _adminData, L.T("set.claude_api"), _cfg.AdminEnabled);
+            _adminData.CheckedChanged += delegate { if (_admin.Checked != _adminData.Checked) _admin.Checked = _adminData.Checked; };
+            _admin.CheckedChanged += delegate { if (_adminData.Checked != _admin.Checked) _adminData.Checked = _admin.Checked; };
+
             AddCheck(t, _wsl, L.T("set.wsl"), _cfg.ScanWsl);
             _extraDirs.Width = 260; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
             AddRow(t, L.T("set.extradirs"), _extraDirs);
@@ -581,8 +587,9 @@ namespace ClaudeUsageWidget
             _cfg.HookNotifyStop = _stopOn.Checked;
             _cfg.HookNotifyMinSeconds = (int)_stopSecs.Value;
             _cfg.HookNotifyInput = _inputOn.Checked;
-            _cfg.ScanWsl = _wsl.Checked;
+            _cfg.ScanClaude = _scanClaude.Checked;
             _cfg.ScanGemini = _scanGemini.Checked;
+            _cfg.ScanWsl = _wsl.Checked;
             _cfg.ShowProjects = _projects.Checked;
             _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
             _cfg.Language = _lang.SelectedIndex >= 0 && _lang.SelectedIndex < _langCodes.Count ? _langCodes[_lang.SelectedIndex] : "en";
