@@ -74,6 +74,7 @@ namespace ClaudeUsageWidget
         [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr h, int idx);
         [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr h, int idx, int val);
         [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr h);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
 
         private ViewModel _vm;
@@ -141,6 +142,12 @@ namespace ClaudeUsageWidget
             Relayout();
         }
 
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible) Relayout();
+        }
+
         public void ApplyTheme()
         {
             BackColor = Palette.Bg;
@@ -177,6 +184,7 @@ namespace ClaudeUsageWidget
 
         // ---------- mode tempel di tepi atas & mode pill: ringkas, lengkap saat kursor di atasnya ----------
         private bool _dockTop, _expanded;
+        private bool _snapLeft, _snapRight, _snapTop, _snapBottom;
         private Timer _hoverTimer;
         private DateTime _outsideSince = DateTime.MinValue;
 
@@ -209,6 +217,11 @@ namespace ClaudeUsageWidget
                 Relayout();
             }
         }
+
+        public bool SnappedLeft { get { return _snapLeft; } }
+        public bool SnappedRight { get { return _snapRight; } }
+        public bool SnappedTop { get { return _snapTop; } }
+        public bool SnappedBottom { get { return _snapBottom; } }
 
         private bool ShowCompact { get { return !_popup && ((_compact || _dockTop) && !_expanded); } }
 
@@ -573,7 +586,7 @@ namespace ClaudeUsageWidget
         {
             switch (r.Kind)
             {
-                case Kind.Pill: return (int)(26 * s);
+                case Kind.Pill: return (int)(22 * s);
                 case Kind.DualCards: return (int)(112 * s);
                 case Kind.Title: return (int)(22 * s);
                 case Kind.Bar: return (int)(30 * s);
@@ -596,7 +609,7 @@ namespace ClaudeUsageWidget
             if (!IsHandleCreated) return;
             EnsureFonts();
             float s = DpiScale;
-            int pad = (int)(10 * s);
+            int pad = ShowCompact ? 0 : (int)(10 * s);
             List<Row> rows = BuildRows();
             int w = 0, h = pad * 2;
             using (Graphics g = CreateGraphics())
@@ -611,21 +624,75 @@ namespace ClaudeUsageWidget
                     w = Math.Max(w, lw + rw);
                 }
             }
-            int minW = ShowCompact ? (Opts.CurrencyCustomEnabled ? (int)(380 * s) : (int)(330 * s)) : (int)(390 * s);
-            Size = new Size(Math.Max(minW, w + pad * 2), h);
+            int minW;
+            if (ShowCompact)
+            {
+                bool dual = (_vm != null && _vm.ScanClaude && _vm.ScanGemini);
+                if (dual)
+                    minW = Opts.CurrencyCustomEnabled ? (int)(250 * s) : (int)(225 * s);
+                else
+                    minW = Opts.CurrencyCustomEnabled ? (int)(170 * s) : (int)(150 * s);
+            }
+            else
+            {
+                minW = (int)(390 * s);
+            }
+            int targetW = Math.Max(minW, w + pad * 2);
+            int targetH = h;
+            if (IsHandleCreated && targetH < 39)
+                SetWindowPos(Handle, IntPtr.Zero, Left, Top, targetW, targetH, 0x0014); // SWP_NOZORDER | SWP_NOACTIVATE
+            else
+                Size = new Size(targetW, targetH);
             if (_dockTop) PositionDocked(); else KeepOnScreen();
             Invalidate();
         }
 
-        /// <summary>Saat ukuran berubah, geser agar tetap di area kerja (tidak tertutup taskbar).</summary>
+        /// <summary>Menempelkan jendela ke tepi layar terdekat jika dalam jarak magnetik.</summary>
+        public void SnapToEdges()
+        {
+            Rectangle wa = Screen.FromRectangle(Bounds).WorkingArea;
+            float s = DpiScale;
+            int snapDist = (int)(20 * s);
+
+            _snapLeft = Math.Abs(Left - wa.Left) <= snapDist;
+            _snapRight = !_snapLeft && Math.Abs((Left + Width) - wa.Right) <= snapDist;
+            _snapTop = Math.Abs(Top - wa.Top) <= snapDist;
+            _snapBottom = !_snapTop && Math.Abs((Top + Height) - wa.Bottom) <= snapDist;
+
+            int left = Left;
+            int top = Top;
+
+            if (_snapLeft) left = wa.Left;
+            else if (_snapRight) left = wa.Right - Width;
+
+            if (_snapTop) top = wa.Top;
+            else if (_snapBottom) top = wa.Bottom - Height;
+
+            if (left + Width > wa.Right) { left = wa.Right - Width; _snapRight = true; }
+            if (top + Height > wa.Bottom) { top = wa.Bottom - Height; _snapBottom = true; }
+            if (left < wa.Left) { left = wa.Left; _snapLeft = true; }
+            if (top < wa.Top) { top = wa.Top; _snapTop = true; }
+
+            if (left != Left || top != Top) Location = new Point(left, top);
+        }
+
+        /// <summary>Saat ukuran berubah, geser agar tetap di area kerja dan mempertahankan jangkar tepi.</summary>
         private void KeepOnScreen()
         {
             Rectangle wa = Screen.FromRectangle(Bounds).WorkingArea;
             int left = Left, top = Top;
+
+            if (_snapRight) left = wa.Right - Width;
+            else if (_snapLeft) left = wa.Left;
+
+            if (_snapBottom) top = wa.Bottom - Height;
+            else if (_snapTop) top = wa.Top;
+
             if (left + Width > wa.Right) left = wa.Right - Width;
             if (top + Height > wa.Bottom) top = wa.Bottom - Height;
             if (left < wa.Left) left = wa.Left;
             if (top < wa.Top) top = wa.Top;
+
             if (left != Left || top != Top) Location = new Point(left, top);
         }
 
@@ -637,9 +704,9 @@ namespace ClaudeUsageWidget
             using (SolidBrush pb = new SolidBrush(ThemeUtil.Blend(Palette.Track, Palette.Bg, 0.35)))
                 g.FillRectangle(pb, pillRect);
             using (Pen pp = new Pen(Palette.Border, 1f))
-                g.DrawRectangle(pp, pillRect);
+                g.DrawRectangle(pp, x, y, Math.Max(0, pillW - 1), Math.Max(0, rh - 1));
 
-            int pad = (int)(4 * s);
+            int pad = (int)(3 * s);
             bool hasLeft = (r.LeftCol != null);
             bool hasRight = (r.RightCol != null);
 
@@ -656,7 +723,7 @@ namespace ClaudeUsageWidget
 
                 // Divider 1
                 using (Pen dp = new Pen(Palette.Track, 1f))
-                    g.DrawLine(dp, x + segW, y + (int)(4 * s), x + segW, y + rh - (int)(4 * s));
+                    g.DrawLine(dp, x + segW, y + (int)(3 * s), x + segW, y + rh - (int)(3 * s));
 
                 // Segment 2: Antigravity 5h
                 Rectangle r2 = new Rectangle(x + segW + pad, y, segW - pad * 2, rh);
@@ -667,7 +734,7 @@ namespace ClaudeUsageWidget
 
                 // Divider 2
                 using (Pen dp = new Pen(Palette.Track, 1f))
-                    g.DrawLine(dp, x + segW * 2, y + (int)(4 * s), x + segW * 2, y + rh - (int)(4 * s));
+                    g.DrawLine(dp, x + segW * 2, y + (int)(3 * s), x + segW * 2, y + rh - (int)(3 * s));
 
                 // Segment 3: Total Spend
                 Rectangle r3 = new Rectangle(x + segW * 2 + pad, y, pillW - segW * 2 - pad * 2, rh);
@@ -687,7 +754,7 @@ namespace ClaudeUsageWidget
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
                 using (Pen dp = new Pen(Palette.Track, 1f))
-                    g.DrawLine(dp, x + segW, y + (int)(4 * s), x + segW, y + rh - (int)(4 * s));
+                    g.DrawLine(dp, x + segW, y + (int)(3 * s), x + segW, y + rh - (int)(3 * s));
 
                 Rectangle r2 = new Rectangle(x + segW + pad, y, pillW - segW - pad * 2, rh);
                 string costText = _vm != null && _vm.Usage != null ? Fmt.UsdShort(_vm.Usage.TodayTotal.Cost) : "$0.00";
@@ -817,7 +884,7 @@ namespace ClaudeUsageWidget
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             float s = DpiScale;
-            int pad = (int)(10 * s);
+            int pad = ShowCompact ? 0 : (int)(10 * s);
             int y = pad, x = pad, right = ClientSize.Width - pad;
             _sparkN = 0;   // diisi ulang saat baris grafik digambar
 
@@ -954,13 +1021,38 @@ namespace ClaudeUsageWidget
             SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
         }
 
+        private const int WM_GETMINMAXINFO = 0x0024;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int x; public int y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MINMAXINFO
+        {
+            public POINT ptReserved;
+            public POINT ptMaxSize;
+            public POINT ptMaxPosition;
+            public POINT ptMinTrackSize;
+            public POINT ptMaxTrackSize;
+        }
+
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == WM_GETMINMAXINFO)
+            {
+                base.WndProc(ref m);
+                MINMAXINFO mmi = (MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(MINMAXINFO));
+                mmi.ptMinTrackSize.x = 10;
+                mmi.ptMinTrackSize.y = 10;
+                Marshal.StructureToPtr(mmi, m.LParam, false);
+                return;
+            }
             base.WndProc(ref m);
             if (m.Msg == WM_EXITSIZEMOVE)
             {
                 // Di mode tepi atas, geser hanya mengubah posisi horizontal; widget kembali menempel ke tepi atas.
                 if (_dockTop) { DockCenterX = Left + Width / 2; DockCenterY = Top + Height / 2; PositionDocked(); }
+                else SnapToEdges();
                 if (PositionCommitted != null) PositionCommitted(this, EventArgs.Empty);
             }
             else if (m.Msg == WM_DPICHANGED)
@@ -984,6 +1076,7 @@ namespace ClaudeUsageWidget
                 if (sc.WorkingArea.IntersectsWith(new Rectangle(p, new Size(Math.Max(40, Width), 40)))) { visible = true; break; }
             if (!visible) p = new Point(wa.Right - Width - 16, wa.Bottom - Height - 16);
             Location = p;
+            if (!_dockTop && hasPos) SnapToEdges();
         }
 
         protected override void Dispose(bool disposing)

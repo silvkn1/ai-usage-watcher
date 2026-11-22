@@ -651,6 +651,73 @@ namespace Tests
             Assert.True(s.AntigravitySevenDay.Available, "Antigravity 7d must be available");
             Assert.True(Math.Abs(s.AntigravitySevenDay.UsedPercent - 18.62) < 0.1, "7d used must be ~18.62%");
         }
+
+        public static void Test_MiniWidget_SmallerDimensions()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                ViewModel vm = new ViewModel();
+                vm.Usage = new UsageSnapshot();
+                vm.Usage.Ready = true;
+                vm.ScanClaude = true;
+                vm.ScanGemini = true;
+                f.SetData(vm);
+                f.Compact = true;
+                f.Show();
+                Application.DoEvents();
+
+                PropertyInfo pDpi = typeof(FloatingForm).GetProperty("DpiScale", BindingFlags.Instance | BindingFlags.NonPublic);
+                float s = (float)pDpi.GetValue(f, null);
+                int expectedH = (int)(22 * s);
+                Assert.Equal(expectedH, f.Height, "Compact height should be (int)(22 * s)");
+                int expectedW = (int)(225 * s);
+                Assert.Equal(expectedW, f.Width, "Compact dual-provider width should be (int)(225 * s)");
+
+                // Single provider
+                vm.ScanGemini = false;
+                f.SetData(vm);
+                int expectedSingleW = (int)(150 * s);
+                Assert.Equal(expectedSingleW, f.Width, "Compact single-provider width should be (int)(150 * s)");
+            }
+        }
+
+        public static void Test_MiniWidget_EdgeSnap_And_Anchor()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                IntPtr handle = f.Handle;
+                f.Compact = true;
+                Rectangle wa = Screen.FromRectangle(f.Bounds).WorkingArea;
+
+                // Test Right Edge Snap
+                // Place 12px away from right edge (within 20px threshold)
+                f.Location = new Point(wa.Right - f.Width - 12, wa.Top + 100);
+                f.SnapToEdges();
+
+                Assert.True(f.SnappedRight, "Should be snapped to right edge");
+                Assert.Equal(wa.Right, f.Right, "Right edge must touch wa.Right exactly");
+
+                // Test Hover Expand preserves Right edge anchor
+                MethodInfo mEnter = typeof(FloatingForm).GetMethod("OnMouseEnter", BindingFlags.Instance | BindingFlags.NonPublic);
+                mEnter.Invoke(f, new object[] { EventArgs.Empty });
+
+                Assert.Equal(wa.Right, f.Right, "Expanded window must remain anchored to wa.Right");
+
+                // Test Collapse restores compact width and still touches wa.Right
+                FieldInfo fExpanded = typeof(FloatingForm).GetField("_expanded", BindingFlags.Instance | BindingFlags.NonPublic);
+                fExpanded.SetValue(f, false);
+                MethodInfo mRelayout = typeof(FloatingForm).GetMethod("Relayout", BindingFlags.Instance | BindingFlags.NonPublic);
+                mRelayout.Invoke(f, null);
+
+                Assert.Equal(wa.Right, f.Right, "Collapsed window must remain anchored to wa.Right");
+
+                // Test Dragging away unsets snap
+                f.Location = new Point(wa.Left + 200, wa.Top + 200);
+                f.SnapToEdges();
+                Assert.False(f.SnappedRight, "Should not be snapped to right edge when in middle");
+                Assert.False(f.SnappedLeft, "Should not be snapped to left edge when in middle");
+            }
+        }
     }
 
     public static class TestRunner
