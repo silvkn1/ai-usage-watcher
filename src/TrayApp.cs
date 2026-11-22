@@ -26,7 +26,7 @@ namespace ClaudeUsageWidget
         private readonly FloatingForm _float;
         private readonly ContextMenuStrip _menu;
         private readonly System.Windows.Forms.Timer _tick, _debounce, _fsTimer;
-        private FileSystemWatcher _logWatcher, _appWatcher;
+        private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
         private readonly SynchronizationContext _ui;
 
         private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miRefresh, _miSettings, _miData, _miExit, _miCsv;
@@ -251,6 +251,8 @@ namespace ClaudeUsageWidget
                 }
             if (_cfg.ScanWsl)
                 foreach (string w in WslRoots.Get()) if (!r.Contains(w, StringComparer.OrdinalIgnoreCase)) r.Add(w);
+            if (_cfg.ScanGemini && Directory.Exists(Paths.AntigravityBrainDir))
+                if (!r.Contains(Paths.AntigravityBrainDir, StringComparer.OrdinalIgnoreCase)) r.Add(Paths.AntigravityBrainDir);
             return r;
         }
 
@@ -772,6 +774,24 @@ namespace ClaudeUsageWidget
                 _appWatcher.EnableRaisingEvents = true;
             }
             catch (Exception ex) { Log.Write("watch.app", ex); }
+            try
+            {
+                if (_cfg.ScanGemini && Directory.Exists(Paths.AntigravityBrainDir))
+                {
+                    _geminiWatcher = new FileSystemWatcher(Paths.AntigravityBrainDir, "transcript.jsonl");
+                    _geminiWatcher.IncludeSubdirectories = true;
+                    _geminiWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
+                    _geminiWatcher.InternalBufferSize = 64 * 1024;
+                    FileSystemEventHandler hG = delegate(object s, FileSystemEventArgs e)
+                    {
+                        lock (_dirty) _dirty.Add(e.FullPath);
+                        _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                    };
+                    _geminiWatcher.Changed += hG; _geminiWatcher.Created += hG;
+                    _geminiWatcher.EnableRaisingEvents = true;
+                }
+            }
+            catch (Exception ex) { Log.Write("watch.gemini", ex); }
         }
 
         private void OnTick()
@@ -988,6 +1008,7 @@ namespace ClaudeUsageWidget
                 if (_hotkey != null) _hotkey.Dispose();
                 if (_logWatcher != null) _logWatcher.Dispose();
                 if (_appWatcher != null) _appWatcher.Dispose();
+                if (_geminiWatcher != null) _geminiWatcher.Dispose();
                 _tray.Visible = false;
                 _tray.Dispose();
                 if (_icon != null) _icon.Dispose();

@@ -48,6 +48,7 @@ namespace ClaudeUsageWidget
         private readonly TextBox _currencySymbol = new TextBox();
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
         private readonly CheckBox _showTaskbar = new CheckBox();
+        private readonly CheckBox _scanGemini = new CheckBox();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
         private readonly CheckBox _burnRateOn = new CheckBox();
         private readonly NumericUpDown _burnRateTokens = new NumericUpDown();
@@ -324,6 +325,7 @@ namespace ClaudeUsageWidget
 
         private void BuildData(TableLayoutPanel t)
         {
+            AddCheck(t, _scanGemini, L.T("set.gemini"), _cfg.ScanGemini);
             AddCheck(t, _wsl, L.T("set.wsl"), _cfg.ScanWsl);
             _extraDirs.Width = 260; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
             AddRow(t, L.T("set.extradirs"), _extraDirs);
@@ -530,6 +532,7 @@ namespace ClaudeUsageWidget
             _cfg.HookNotifyMinSeconds = (int)_stopSecs.Value;
             _cfg.HookNotifyInput = _inputOn.Checked;
             _cfg.ScanWsl = _wsl.Checked;
+            _cfg.ScanGemini = _scanGemini.Checked;
             _cfg.ShowProjects = _projects.Checked;
             _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
             _cfg.Language = _lang.SelectedIndex >= 0 && _lang.SelectedIndex < _langCodes.Count ? _langCodes[_lang.SelectedIndex] : "en";

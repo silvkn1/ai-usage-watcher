@@ -78,6 +78,9 @@ namespace ClaudeUsageWidget
         // Tombol taskbar & progress bar
         public bool ShowInTaskbar { get; set; }
 
+        // Pindai log Google Antigravity / Gemini (~/.gemini/antigravity)
+        public bool ScanGemini { get; set; }
+
         public AppConfig()
         {
             OpacityPercent = 90;
@@ -109,6 +112,7 @@ namespace ClaudeUsageWidget
             WebhookEnabled = false;
             WebhookUrl = "";
             ShowInTaskbar = false;
+            ScanGemini = true;
         }
 
         public static AppConfig Load()

@@ -60,6 +60,17 @@ namespace ClaudeUsageWidget
         }
 
         public static string ProjectsDir { get { return Path.Combine(ClaudeDir, "projects"); } }
+
+        public static string AntigravityDir
+        {
+            get
+            {
+                string env = Environment.GetEnvironmentVariable("ANTIGRAVITY_DATA_DIR");
+                if (!string.IsNullOrEmpty(env)) return env;
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".gemini", "antigravity");
+            }
+        }
+        public static string AntigravityBrainDir { get { return Path.Combine(AntigravityDir, "brain"); } }
         public static string RateLimitsFile { get { return Path.Combine(AppDir, "ratelimits.json"); } }
         public static string ConfigFile { get { return Path.Combine(AppDir, "config.json"); } }
         public static string PricingFile { get { return Path.Combine(AppDir, "pricing.json"); } }

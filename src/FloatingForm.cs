@@ -485,7 +485,10 @@ namespace ClaudeUsageWidget
 
         private static string ShortModel(string m)
         {
-            return m != null && m.StartsWith("claude-") ? m.Substring(7) : m;
+            if (string.IsNullOrEmpty(m)) return m;
+            if (m.StartsWith("claude-", StringComparison.OrdinalIgnoreCase)) return m.Substring(7);
+            if (m.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase)) return m.Substring(7);
+            return m;
         }
 
         private int RowHeight(Row r, float s)

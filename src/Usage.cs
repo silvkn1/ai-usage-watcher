@@ -61,6 +61,16 @@ namespace ClaudeUsageWidget
             if (string.IsNullOrEmpty(model)) return null;
             foreach (Price p in _list)
                 if (model.StartsWith(p.Prefix, StringComparison.OrdinalIgnoreCase)) return p;
+            if (model.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase))
+            {
+                bool isPro = model.IndexOf("pro", StringComparison.OrdinalIgnoreCase) >= 0;
+                Price def = new Price();
+                def.Prefix = model;
+                def.Input = isPro ? 1.25 : 0.10;
+                def.Output = isPro ? 5.00 : 0.40;
+                def.CacheRead = isPro ? 0.3125 : 0.025;
+                return def;
+            }
             return null;
         }
     }
@@ -165,7 +175,12 @@ namespace ClaudeUsageWidget
         public UsageScanner(Pricing pricing)
         {
             _pricing = pricing;
-            Roots = delegate { return new List<string> { Paths.ProjectsDir }; };
+            Roots = delegate
+            {
+                List<string> r = new List<string> { Paths.ProjectsDir };
+                if (Directory.Exists(Paths.AntigravityBrainDir)) r.Add(Paths.AntigravityBrainDir);
+                return r;
+            };
         }
 
         /// <summary>Ganti tabel harga: hitung ulang semua dengan membaca ulang dari awal.</summary>
@@ -192,12 +207,33 @@ namespace ClaudeUsageWidget
                     try
                     {
                         if (!Directory.Exists(root)) continue;
-                        foreach (string f in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories)) ScanOne(f, cutoffUtc);
+                        foreach (string f in SafeEnumerateJsonl(root)) ScanOne(f, cutoffUtc);
                     }
                     catch (Exception ex) { Log.Write("scan.enumerate", ex); }
                 }
                 Prune();
                 _ready = true;
+            }
+        }
+
+        private static IEnumerable<string> SafeEnumerateJsonl(string root)
+        {
+            Stack<string> stack = new Stack<string>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                string dir = stack.Pop();
+                string[] files = null, subdirs = null;
+                try { files = Directory.GetFiles(dir, "*.jsonl"); } catch { }
+                if (files != null)
+                {
+                    for (int i = 0; i < files.Length; i++) yield return files[i];
+                }
+                try { subdirs = Directory.GetDirectories(dir); } catch { }
+                if (subdirs != null)
+                {
+                    for (int i = 0; i < subdirs.Length; i++) stack.Push(subdirs[i]);
+                }
             }
         }
 
@@ -216,6 +252,7 @@ namespace ClaudeUsageWidget
         {
             try
             {
+                if (f.EndsWith("transcript_full.jsonl", StringComparison.OrdinalIgnoreCase)) return;
                 FileInfo fi = new FileInfo(f);
                 long off;
                 bool known = _offsets.TryGetValue(f, out off);
@@ -225,6 +262,17 @@ namespace ClaudeUsageWidget
                 _offsets[f] = ReadFrom(f, off);
             }
             catch (Exception ex) { Log.Write("scan.file", ex); }
+        }
+
+        private static string StripField(string line, string fieldName)
+        {
+            int c = line.IndexOf(fieldName, StringComparison.Ordinal);
+            if (c < 0) return line;
+            int v = c + fieldName.Length;
+            while (v < line.Length && char.IsWhiteSpace(line[v])) v++;
+            int end = SkipValue(line, v);
+            if (end <= v) return line;
+            return line.Substring(0, v) + "null" + line.Substring(end);
         }
 
         /// <summary>Buang nilai message.content (isi percakapan, bagian terbesar) sebelum parse JSON:
@@ -240,6 +288,14 @@ namespace ClaudeUsageWidget
             int end = SkipValue(line, v);
             if (end <= v) return line;
             return line.Substring(0, v) + "null" + line.Substring(end);
+        }
+
+        private static string StripAntigravity(string line)
+        {
+            line = StripField(line, "\"tool_calls\":");
+            line = StripField(line, "\"content\":");
+            line = StripField(line, "\"thinking\":");
+            return line;
         }
 
         /// <summary>Indeks setelah satu nilai JSON yang dimulai di i (string/array/objek/primitif); -1 bila rusak.</summary>
@@ -322,6 +378,12 @@ namespace ClaudeUsageWidget
 
         private void ProcessLine(string line)
         {
+            if (line.IndexOf("\"PLANNER_RESPONSE\"", StringComparison.Ordinal) >= 0)
+            {
+                ProcessAntigravityLine(line);
+                return;
+            }
+
             // Saring murah sebelum parse JSON.
             if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0) return;
             if (line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return;
@@ -411,6 +473,73 @@ namespace ClaudeUsageWidget
                     _lastActiveCwd = cwd;
                     _lastActiveProject = ProjectName(cwd);
                 }
+            }
+            _recentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
+        }
+
+        private void ProcessAntigravityLine(string line)
+        {
+            if (line.IndexOf("\"model\"", StringComparison.Ordinal) < 0) return;
+
+            Dictionary<string, object> o;
+            try { o = J.Parse(StripAntigravity(line)); }
+            catch { _skipped++; return; }
+            if (o == null) { _skipped++; return; }
+            if (J.Str(o, "type") != "PLANNER_RESPONSE") return;
+
+            string model = J.Str(o, "model");
+            if (string.IsNullOrEmpty(model) || model == "<synthetic>") return;
+
+            DateTime ts;
+            string tsRaw = J.Str(o, "created_at");
+            if (tsRaw == null || !DateTime.TryParse(tsRaw, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out ts))
+            { _skipped++; return; }
+            DateTime local = DateTime.SpecifyKind(ts, DateTimeKind.Utc).ToLocalTime();
+            if (local.Date < DateTime.Today.AddDays(-(KeepDays - 1))) return;
+
+            long stepIndex = J.Long(o, "step_index");
+            string key = "ag|" + (tsRaw ?? "") + "|" + stepIndex + "|" + model;
+            if (_seen.ContainsKey(key)) return;
+            _seen[key] = local;
+
+            Tally t = new Tally();
+            t.Requests = 1;
+            t.Input = J.Long(o, "input_tokens");
+            t.Output = J.Long(o, "output_tokens");
+            t.CacheRead = J.Long(o, "cache_read_tokens");
+
+            Price p = _pricing.Find(model);
+            if (p == null) t.UnpricedRequests = 1;
+            else
+            {
+                t.Cost = (t.Input * p.Input + t.Output * p.Output + t.CacheRead * p.CacheRead) / 1e6;
+                t.Saved = (t.CacheRead * (p.Input - p.CacheRead)) / 1e6;
+            }
+
+            Dictionary<string, Tally> day;
+            if (!_days.TryGetValue(local.Date, out day)) { day = new Dictionary<string, Tally>(); _days[local.Date] = day; }
+            Tally acc;
+            if (!day.TryGetValue(model, out acc)) { acc = new Tally(); day[model] = acc; }
+            acc.Add(t);
+
+            if (TrackProjects)
+            {
+                string proj = "Antigravity";
+                Dictionary<string, Tally> pd;
+                if (!_proj.TryGetValue(local.Date, out pd)) { pd = new Dictionary<string, Tally>(); _proj[local.Date] = pd; }
+                Tally pa;
+                if (!pd.TryGetValue(proj, out pa)) { pa = new Tally(); pd[proj] = pa; }
+                pa.Add(t);
+            }
+            if (local > _lastRecord) _lastRecord = local;
+
+            long ctxTokens = t.Input + t.CacheRead;
+            if (local >= _lastContextTime)
+            {
+                _lastContextTokens = ctxTokens;
+                _lastContextModel = model;
+                _lastContextTime = local;
             }
             _recentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
         }

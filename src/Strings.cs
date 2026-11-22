@@ -311,6 +311,7 @@ namespace ClaudeUsageWidget
             { "set.burnrate.th",     new[] { "Spike threshold (tokens in 10 minutes)", "Ambang lonjakan (token dalam 10 menit)" } },
             { "set.webhook.enable",  new[] { "Send alerts to Webhook (Discord / Slack / Telegram)", "Kirim alert ke Webhook (Discord / Slack / Telegram)" } },
             { "set.webhook.url",     new[] { "Webhook URL", "URL Webhook" } },
+            { "set.gemini",          new[] { "Scan Google Antigravity / Gemini logs (~/.gemini/antigravity)", "Pindai log Google Antigravity / Gemini (~/.gemini/antigravity)" } },
         };
     }
 }
