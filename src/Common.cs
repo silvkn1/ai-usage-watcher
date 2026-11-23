@@ -245,6 +245,15 @@ namespace ClaudeUsageWidget
             return L.T("time.m", Math.Max(1, (int)Math.Ceiling(t.TotalMinutes)));
         }
 
+        public static string Runway(double minutes)
+        {
+            if (minutes <= 0) return L.T("time.now");
+            if (minutes < 60) return string.Format("{0:0}m", minutes);
+            int h = (int)(minutes / 60);
+            int m = (int)(minutes % 60);
+            return string.Format("{0}h {1:00}m", h, m);
+        }
+
         /// <summary>Durasi pendek: 45s, 2m 10s, 1h 5m.</summary>
         public static string Duration(long seconds)
         {

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -154,6 +156,10 @@ namespace ClaudeUsageWidget
             {
                 st.Crossed = true;
                 if (!silent) { Alert a = new Alert(); a.Window = name; a.Threshold = top; a.Used = w.UsedPercent; a.ResetsAt = w.ResetsAt; r.Add(a); }
+            }
+            else if (w.UsedPercent >= 30)
+            {
+                st.Crossed = true;
             }
         }
 
@@ -417,6 +423,158 @@ namespace ClaudeUsageWidget
         {
             Unregister();
             if (Handle != IntPtr.Zero) DestroyHandle();
+        }
+    }
+
+    internal static class RunwayEstimator
+    {
+        public static double EstimateMinutes(RateLimitSnapshot limits, UsageSnapshot usage)
+        {
+            if (usage == null || usage.TokensLast10m < 5000) return 0;
+            double minMins = double.MaxValue;
+            if (limits != null)
+            {
+                if (limits.FiveHour != null && limits.FiveHour.Available && !limits.FiveHour.IsStale)
+                {
+                    double leftPct = Math.Max(0, 100.0 - limits.FiveHour.UsedPercent);
+                    if (limits.FiveHour.UsedPercent > 5)
+                    {
+                        double elapsed = Pace.ElapsedAt(limits.FiveHour, DateTime.Now, Pace.FiveHourSecs);
+                        if (!double.IsNaN(elapsed) && elapsed > 0.05)
+                        {
+                            double pctPerMin = limits.FiveHour.UsedPercent / (elapsed * 300.0);
+                            if (pctPerMin > 0)
+                            {
+                                double m = leftPct / pctPerMin;
+                                if (m < minMins) minMins = m;
+                            }
+                        }
+                    }
+                }
+                if (limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available && !limits.AntigravityFiveHour.IsStale)
+                {
+                    double leftPct = Math.Max(0, 100.0 - limits.AntigravityFiveHour.UsedPercent);
+                    if (limits.AntigravityFiveHour.UsedPercent > 5)
+                    {
+                        double elapsed = Pace.ElapsedAt(limits.AntigravityFiveHour, DateTime.Now, Pace.FiveHourSecs);
+                        if (!double.IsNaN(elapsed) && elapsed > 0.05)
+                        {
+                            double pctPerMin = limits.AntigravityFiveHour.UsedPercent / (elapsed * 300.0);
+                            if (pctPerMin > 0)
+                            {
+                                double m = leftPct / pctPerMin;
+                                if (m < minMins) minMins = m;
+                            }
+                        }
+                    }
+                }
+            }
+            return (minMins < double.MaxValue && minMins > 0) ? minMins : 0;
+        }
+    }
+
+    internal static class StatusFormatter
+    {
+        public static string Format(RateLimitSnapshot limits, UsageSnapshot usage, bool scanClaude, bool scanGemini)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("🤖 AI Quota Status (AI Usage Watcher)");
+            if (scanClaude)
+            {
+                LimitWindow w5 = limits != null ? limits.FiveHour : null;
+                LimitWindow w7 = limits != null ? limits.SevenDay : null;
+                string s5 = (w5 != null && w5.Available && !w5.IsStale)
+                    ? string.Format("{0}%{1}", (int)Math.Round(w5.UsedPercent), w5.ResetsAt != DateTime.MinValue ? " (reset " + Fmt.Until(w5.ResetsAt) + " / " + Fmt.Clock(w5.ResetsAt) + ")" : "")
+                    : "n/a";
+                string s7 = (w7 != null && w7.Available && !w7.IsStale)
+                    ? string.Format("{0}%{1}", (int)Math.Round(w7.UsedPercent), w7.ResetsAt != DateTime.MinValue ? " (reset " + Fmt.Until(w7.ResetsAt) + " / " + Fmt.Clock(w7.ResetsAt) + ")" : "")
+                    : "n/a";
+                sb.AppendLine("• Claude Code: 5h " + s5 + " · 7d " + s7);
+            }
+            if (scanGemini)
+            {
+                LimitWindow w5 = limits != null ? limits.AntigravityFiveHour : null;
+                LimitWindow w7 = limits != null ? limits.AntigravitySevenDay : null;
+                string s5 = (w5 != null && w5.Available && !w5.IsStale)
+                    ? string.Format("{0}%{1}", (int)Math.Round(w5.UsedPercent), w5.ResetsAt != DateTime.MinValue ? " (reset " + Fmt.Until(w5.ResetsAt) + " / " + Fmt.Clock(w5.ResetsAt) + ")" : "")
+                    : "0%";
+                string s7 = (w7 != null && w7.Available && !w7.IsStale)
+                    ? string.Format("{0}%{1}", (int)Math.Round(w7.UsedPercent), w7.ResetsAt != DateTime.MinValue ? " (reset " + Fmt.Until(w7.ResetsAt) + " / " + Fmt.Clock(w7.ResetsAt) + ")" : "")
+                    : "0%";
+                sb.AppendLine("• Antigravity: 5h " + s5 + " · 7d " + s7);
+            }
+            if (usage != null)
+            {
+                sb.AppendLine(string.Format("• Today: {0} · {1}", Fmt.Usd(usage.TodayTotal.Cost), Fmt.Tokens(usage.TodayTotal.Total)));
+                if (usage.LastRecord != DateTime.MinValue)
+                    sb.AppendLine("• Last Chat: " + Fmt.Clock(usage.LastRecord));
+            }
+            return sb.ToString().TrimEnd();
+        }
+    }
+
+    internal static class ReportExporter
+    {
+        public static string GenerateMonthlyMarkdown(HistoryStore history, UsageSnapshot usage, DateTime month)
+        {
+            StringBuilder sb = new StringBuilder();
+            string titleMonth = month.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            sb.Append("# AI Usage Monthly Report - ").Append(titleMonth).Append("\r\n\r\n");
+            sb.Append("Generated on: ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append("\r\n\r\n");
+
+            List<DayStat> days = history != null ? history.GetMonth(month) : new List<DayStat>();
+            long totalTokens = 0;
+            long totalReqs = 0;
+            double totalCost = 0;
+            foreach (DayStat d in days)
+            {
+                totalTokens += d.Tokens;
+                totalReqs += d.Requests;
+                totalCost += d.Cost;
+            }
+
+            sb.Append("## Monthly Summary\r\n");
+            sb.Append("- **Total Requests**: ").Append(totalReqs.ToString("N0", CultureInfo.InvariantCulture)).Append("\r\n");
+            sb.Append("- **Total Tokens**: ").Append(Fmt.Tokens(totalTokens)).Append(" (").Append(totalTokens.ToString("N0", CultureInfo.InvariantCulture)).Append(")\r\n");
+            sb.Append("- **Estimated Cost (USD)**: ").Append(totalCost.ToString("$0.0000", CultureInfo.InvariantCulture)).Append("\r\n");
+            sb.Append("- **Estimated Cost (IDR)**: ").Append(Fmt.Usd(totalCost)).Append("\r\n\r\n");
+
+            if (usage != null && usage.Week != null && usage.Week.Count > 0)
+            {
+                sb.Append("## Active Models\r\n");
+                sb.Append("| Model | Requests | Tokens | Cost (Est) |\r\n");
+                sb.Append("| :--- | :--- | :--- | :--- |\r\n");
+                List<KeyValuePair<string, Tally>> sortedModels = new List<KeyValuePair<string, Tally>>(usage.Week);
+                sortedModels.Sort(delegate(KeyValuePair<string, Tally> a, KeyValuePair<string, Tally> b) { return b.Value.Total.CompareTo(a.Value.Total); });
+                foreach (KeyValuePair<string, Tally> kv in sortedModels)
+                {
+                    sb.Append("| `").Append(kv.Key).Append("` | ")
+                      .Append(kv.Value.Requests.ToString("N0", CultureInfo.InvariantCulture)).Append(" | ")
+                      .Append(Fmt.Tokens(kv.Value.Total)).Append(" | ")
+                      .Append(Fmt.Usd(kv.Value.Cost)).Append(" |\r\n");
+                }
+                sb.Append("\r\n");
+            }
+
+            sb.Append("## Daily Breakdown\r\n");
+            sb.Append("| Date | Requests | Tokens | Cost (USD) | Cost (IDR) |\r\n");
+            sb.Append("| :--- | :--- | :--- | :--- | :--- |\r\n");
+            if (days.Count == 0)
+            {
+                sb.Append("| *No records* | - | - | - | - |\r\n");
+            }
+            else
+            {
+                foreach (DayStat d in days)
+                {
+                    sb.Append("| ").Append(d.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(" | ")
+                      .Append(d.Requests.ToString("N0", CultureInfo.InvariantCulture)).Append(" | ")
+                      .Append(Fmt.Tokens(d.Tokens)).Append(" | ")
+                      .Append(d.Cost.ToString("$0.0000", CultureInfo.InvariantCulture)).Append(" | ")
+                      .Append(Fmt.Usd(d.Cost)).Append(" |\r\n");
+                }
+            }
+            return sb.ToString();
         }
     }
 }

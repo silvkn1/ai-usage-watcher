@@ -84,6 +84,11 @@ namespace ClaudeUsageWidget
 
         public event EventHandler PositionCommitted;
         public event EventHandler CompactToggled;
+        public event EventHandler ClaudeCardDoubleClicked;
+        public event EventHandler AntigravityCardDoubleClicked;
+
+        private Rectangle _claudeCardRect = Rectangle.Empty;
+        private Rectangle _antigravityCardRect = Rectangle.Empty;
 
         private readonly bool _popup;          // jendela detail di atas ikon tray: selalu lengkap, bisa aktif, hilang saat kehilangan fokus
         public event EventHandler Dismissed;   // popup ditutup (fokus pindah atau Esc)
@@ -455,7 +460,12 @@ namespace ClaudeUsageWidget
                 meta.Add(string.Format("Ctx: {0} ({1:0}%)", Fmt.Tokens(u.LastContextTokens), ctxPct));
             }
             if (u.TokensLast10m > 5000)
+            {
                 meta.Add(string.Format("Burn: {0}/10m", Fmt.Tokens(u.TokensLast10m)));
+                double runwayMins = RunwayEstimator.EstimateMinutes(rl, u);
+                if (runwayMins > 0)
+                    meta.Add(L.T("runway", Fmt.Runway(runwayMins)));
+            }
             if (u.WeekTotal.InputSide > 0)
                 meta.Add(string.Format("Cache: {0}%", (int)Math.Round(u.WeekTotal.CacheHit * 100)));
 
@@ -592,7 +602,7 @@ namespace ClaudeUsageWidget
             switch (r.Kind)
             {
                 case Kind.Pill: return (int)(22 * s);
-                case Kind.DualCards: return (int)(112 * s);
+                case Kind.DualCards: return (int)(118 * s);
                 case Kind.Title: return (int)(22 * s);
                 case Kind.Bar: return (int)(30 * s);
                 case Kind.Spark: return (int)(50 * s);
@@ -810,23 +820,20 @@ namespace ClaudeUsageWidget
 
             if (col.Models != null && col.Models.Count > 0)
             {
-                string topModelName = null;
-                long topTokens = 0;
-                foreach (KeyValuePair<string, Tally> kv in col.Models)
+                List<KeyValuePair<string, Tally>> sorted = new List<KeyValuePair<string, Tally>>(col.Models);
+                sorted.Sort(delegate(KeyValuePair<string, Tally> a, KeyValuePair<string, Tally> b) { return b.Value.Total.CompareTo(a.Value.Total); });
+                int modH = (int)(12 * s);
+                int shown = Math.Min(2, sorted.Count);
+                for (int i = 0; i < shown; i++)
                 {
-                    if (kv.Value.Total > topTokens)
-                    {
-                        topTokens = kv.Value.Total;
-                        topModelName = kv.Key;
-                    }
-                }
-                if (!string.IsNullOrEmpty(topModelName))
-                {
-                    int modH = (int)(13 * s);
                     Rectangle modRect = new Rectangle(cx, cy, cw, modH);
-                    string modText = ShortModel(topModelName) + "  " + Fmt.Tokens(topTokens);
-                    TextRenderer.DrawText(g, modText, _fSmall, modRect, Palette.Dim,
+                    string mName = ShortModel(sorted[i].Key);
+                    string mTok = Fmt.Tokens(sorted[i].Value.Total);
+                    TextRenderer.DrawText(g, mName, _fSmall, modRect, Palette.Dim,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                    TextRenderer.DrawText(g, mTok, _fSmall, modRect, Palette.Dim,
+                        TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    cy += modH;
                 }
             }
         }
@@ -898,6 +905,8 @@ namespace ClaudeUsageWidget
             int pad = ShowCompact ? 0 : (int)(10 * s);
             int y = pad, x = pad, right = ClientSize.Width - pad;
             _sparkN = 0;   // diisi ulang saat baris grafik digambar
+            _claudeCardRect = Rectangle.Empty;
+            _antigravityCardRect = Rectangle.Empty;
 
             foreach (Row r in BuildRows())
             {
@@ -916,17 +925,21 @@ namespace ClaudeUsageWidget
                         int colW = (right - x - colGap) / 2;
                         Rectangle leftRect = new Rectangle(x, y + (int)(2 * s), colW, cardH);
                         Rectangle rightRect = new Rectangle(x + colW + colGap, y + (int)(2 * s), right - (x + colW + colGap), cardH);
+                        _claudeCardRect = leftRect;
+                        _antigravityCardRect = rightRect;
                         DrawCardCol(g, r.LeftCol, leftRect, s);
                         DrawCardCol(g, r.RightCol, rightRect, s);
                     }
                     else if (r.LeftCol != null)
                     {
                         Rectangle fullRect = new Rectangle(x, y + (int)(2 * s), right - x, cardH);
+                        _claudeCardRect = fullRect;
                         DrawCardCol(g, r.LeftCol, fullRect, s);
                     }
                     else if (r.RightCol != null)
                     {
                         Rectangle fullRect = new Rectangle(x, y + (int)(2 * s), right - x, cardH);
+                        _antigravityCardRect = fullRect;
                         DrawCardCol(g, r.RightCol, fullRect, s);
                     }
                     y += rh; continue;
@@ -1025,6 +1038,16 @@ namespace ClaudeUsageWidget
             if (e.Button != MouseButtons.Left) return;
             if (e.Clicks >= 2)
             {
+                if (!_claudeCardRect.IsEmpty && _claudeCardRect.Contains(e.Location))
+                {
+                    if (ClaudeCardDoubleClicked != null) ClaudeCardDoubleClicked(this, EventArgs.Empty);
+                    return;
+                }
+                if (!_antigravityCardRect.IsEmpty && _antigravityCardRect.Contains(e.Location))
+                {
+                    if (AntigravityCardDoubleClicked != null) AntigravityCardDoubleClicked(this, EventArgs.Empty);
+                    return;
+                }
                 if (!_dockTop && CompactToggled != null) CompactToggled(this, EventArgs.Empty);   // di tepi atas: ringkas/lengkap mengikuti hover
                 return;
             }

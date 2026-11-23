@@ -96,6 +96,7 @@ namespace ClaudeUsageWidget
             Language = "en";
             AlertsEnabled = true;
             AlertThresholds = "80,95";
+            ResetNotify = true;
             Hotkey = "Ctrl+Alt+U";
             HistoryDays = 14;
             DockEdge = "top";

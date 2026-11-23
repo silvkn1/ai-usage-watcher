@@ -116,6 +116,22 @@ namespace ClaudeUsageWidget
             }
         }
 
+        /// <summary>Daftar statistik harian untuk bulan tertentu (terurut kronologis).</summary>
+        public List<DayStat> GetMonth(DateTime month)
+        {
+            lock (_gate)
+            {
+                List<DayStat> r = new List<DayStat>();
+                foreach (DayStat s in _d.Values)
+                {
+                    if (s.Date.Year == month.Year && s.Date.Month == month.Month)
+                        r.Add(s);
+                }
+                r.Sort(delegate(DayStat a, DayStat b) { return a.Date.CompareTo(b.Date); });
+                return r;
+            }
+        }
+
         /// <summary>
         /// CSV riwayat harian: tanggal, token, estimasi biaya (USD, harga API), jumlah request. Hanya agregat.
         /// sep ',' memakai titik desimal; sep ';' memakai koma desimal (untuk Excel dengan pengaturan regional yang memakai ';').

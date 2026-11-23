@@ -842,6 +842,67 @@ namespace Tests
             string fullReset = until + " (" + at + ")";
             Assert.True(fullReset.Contains("("), "Must include clock time in parentheses");
         }
+
+        public static void Test_Runway_Estimator()
+        {
+            RateLimitSnapshot snap = new RateLimitSnapshot();
+            snap.FiveHour = new LimitWindow { Available = true, UsedPercent = 75, ResetsAt = DateTime.Now.AddHours(2) };
+            UsageSnapshot usage = new UsageSnapshot();
+            usage.TokensLast10m = 25000;
+
+            double runway = RunwayEstimator.EstimateMinutes(snap, usage);
+            Assert.True(runway > 0, "Runway should be estimated when tokens are burning");
+            Assert.True(runway < 200, "Runway should be within reasonable minutes");
+
+            Assert.Equal("45m", Fmt.Runway(45));
+            Assert.Equal("2h 05m", Fmt.Runway(125));
+            Assert.Equal("1h 00m", Fmt.Runway(60));
+        }
+
+        public static void Test_Status_Formatter()
+        {
+            RateLimitSnapshot snap = new RateLimitSnapshot();
+            snap.FiveHour = new LimitWindow { Available = true, UsedPercent = 40, ResetsAt = DateTime.Now.AddHours(1) };
+            snap.SevenDay = new LimitWindow { Available = true, UsedPercent = 80, ResetsAt = DateTime.Now.AddDays(3) };
+            snap.AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 15, ResetsAt = DateTime.Now.AddHours(4) };
+            snap.AntigravitySevenDay = new LimitWindow { Available = true, UsedPercent = 30, ResetsAt = DateTime.Now.AddDays(5) };
+
+            UsageSnapshot usage = new UsageSnapshot();
+            usage.TodayTotal = new Tally { Input = 150000, Cost = 0.45 };
+            usage.LastRecord = DateTime.Now;
+
+            string md = StatusFormatter.Format(snap, usage, true, true);
+            Assert.True(md.Contains("Claude Code:"), "Must format Claude Code row");
+            Assert.True(md.Contains("Antigravity:"), "Must format Antigravity row");
+            Assert.True(md.Contains("Today:"), "Must format today's stats");
+            Assert.True(md.Contains("Last Chat:"), "Must format last chat timestamp");
+        }
+
+        public static void Test_Monthly_Report_Exporter()
+        {
+            HistoryStore store = new HistoryStore();
+            store.Merge(new[] {
+                new DayStat(new DateTime(2026, 11, 1), 50000, 0.25, 20),
+                new DayStat(new DateTime(2026, 11, 2), 75000, 0.40, 35),
+                new DayStat(new DateTime(2026, 10, 25), 10000, 0.05, 5)
+            });
+
+            List<DayStat> novDays = store.GetMonth(new DateTime(2026, 11, 1));
+            Assert.Equal(2, novDays.Count, "Should return only 2 records for November");
+
+            UsageSnapshot u = new UsageSnapshot();
+            u.Week = new Dictionary<string, Tally> {
+                { "claude-3-7-sonnet", new Tally { Requests = 50, Input = 120000, Cost = 0.60 } }
+            };
+
+            string md = ReportExporter.GenerateMonthlyMarkdown(store, u, new DateTime(2026, 11, 1));
+            Assert.True(md.Contains("# AI Usage Monthly Report - 2026-11"), "Report must include title with month");
+            Assert.True(md.Contains("## Monthly Summary"), "Report must include monthly summary");
+            Assert.True(md.Contains("## Active Models"), "Report must include models section");
+            Assert.True(md.Contains("claude-3-7-sonnet"), "Report must include active model name");
+            Assert.True(md.Contains("## Daily Breakdown"), "Report must include daily breakdown table");
+            Assert.True(md.Contains("2026-11-01"), "Report must include date entries");
+        }
     }
 
     public static class TestRunner

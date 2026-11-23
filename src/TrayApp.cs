@@ -29,7 +29,7 @@ namespace ClaudeUsageWidget
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miRefresh, _miSettings, _miData, _miExit, _miCsv;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miRefresh, _miCopy, _miSettings, _miData, _miExit, _miCsv, _miReport;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
@@ -41,9 +41,11 @@ namespace ClaudeUsageWidget
             _miClickThrough.Text = L.T("tray.clickthrough");
             _miRemaining.Text = L.T("tray.remaining");
             _miRefresh.Text = L.T("tray.refresh");
+            if (_miCopy != null) _miCopy.Text = L.T("tray.copystatus");
             _miSettings.Text = L.T("tray.settings");
             _miData.Text = L.T("tray.datafolder");
             _miCsv.Text = L.T("tray.exportcsv");
+            if (_miReport != null) _miReport.Text = L.T("tray.exportreport");
             _miAutostart.Text = L.T("tray.autostart");
             _miExit.Text = L.T("tray.exit");
             UpdateQuickJumpMenu();
@@ -92,6 +94,8 @@ namespace ClaudeUsageWidget
             ApplyOpacity();
             _float.PositionCommitted += delegate { SavePosition(); };
             _float.CompactToggled += delegate { SetCompact(!_float.Compact); };
+            _float.ClaudeCardDoubleClicked += delegate { OpenProjectTerminal(); };
+            _float.AntigravityCardDoubleClicked += delegate { OpenAntigravityFolder(); };
             IntPtr force = _float.Handle;   // buat handle sekarang (untuk DPI & ukuran)
             _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
@@ -369,6 +373,30 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private void ExportMonthlyReport()
+        {
+            try
+            {
+                using (SaveFileDialog d = new SaveFileDialog())
+                {
+                    d.Filter = L.T("msg.report.filter");
+                    d.FileName = string.Format("AI_Usage_Report_{0:yyyy_MM}.md", DateTime.Now);
+                    d.DefaultExt = "md";
+                    d.OverwritePrompt = true;
+                    if (d.ShowDialog() != DialogResult.OK) return;
+
+                    string md = ReportExporter.GenerateMonthlyMarkdown(_history, _usage, DateTime.Now);
+                    File.WriteAllText(d.FileName, md, new System.Text.UTF8Encoding(true));
+                    MessageBox.Show(L.T("msg.report.done", d.FileName), L.AppName);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("report.export", ex);
+                MessageBox.Show(ex.Message, L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private void RunAlerts()
         {
             if (!_cfg.AlertsEnabled) return;
@@ -481,6 +509,28 @@ namespace ClaudeUsageWidget
             catch (Exception ex) { Log.Write("open.terminal", ex); }
         }
 
+        private void OpenAntigravityFolder()
+        {
+            try
+            {
+                string dir = Paths.AntigravityDir;
+                if (Directory.Exists(dir))
+                    Process.Start("explorer.exe", "\"" + dir + "\"");
+            }
+            catch (Exception ex) { Log.Write("open.antigravity", ex); }
+        }
+
+        private void CopyStatus()
+        {
+            try
+            {
+                string text = StatusFormatter.Format(_limits, _usage, _cfg.ScanClaude, _cfg.ScanGemini);
+                Clipboard.SetText(text);
+                ShowBalloon(L.T("msg.copied"), ToolTipIcon.Info);
+            }
+            catch (Exception ex) { Log.Write("copystatus", ex); }
+        }
+
         // ---------------- menu ----------------
         private ContextMenuStrip BuildMenu()
         {
@@ -507,14 +557,18 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miClickThrough);
             m.Items.Add(new ToolStripSeparator());
             _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); MaybeFetchAntigravityRate(true); });
+            _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
+            _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
             _miExit = new ToolStripMenuItem(L.T("tray.exit"), null, delegate { ExitThread(); });
             m.Items.Add(_miRefresh);
+            m.Items.Add(_miCopy);
             m.Items.Add(_miSettings);
             m.Items.Add(_miData);
             m.Items.Add(_miCsv);
+            m.Items.Add(_miReport);
             m.Items.Add(_miAutostart);
 
             _miOpenFolder = new ToolStripMenuItem("", null, delegate { OpenProjectFolder(); });
