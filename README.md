@@ -70,6 +70,36 @@ Mode minimalis untuk produktivitas tanpa gangguan: hanya berupa bilah kapsul ram
 
 ---
 
+## 🏆 Mengapa AI Usage Watcher? (Perbandingan dengan Solusi Lain)
+
+Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statusline CLI) hanya berupa utilitas terminal interaktif, terbatas pada satu penyedia AI, atau aplikasi berbasis Electron yang berat. **AI Usage Watcher** dirancang khusus untuk pengguna desktop Windows yang membutuhkan pemantauan kuota instan, pasif, dan tanpa beban sistem.
+
+| Fitur / Parameter | **AI Usage Watcher** (Aplikasi Ini) | **CLI Tools** (mis. `ccusage`) | **Statusline Bawaan** | **Aplikasi GUI Electron** |
+| :--- | :---: | :---: | :---: | :---: |
+| **Dukungan Provider** | **Claude Code + Antigravity (Gemini)** | Hanya Claude Code | Hanya Claude Code | Umumnya hanya 1 provider |
+| **Bentuk Antarmuka (UI)** | **Mini HUD Pill (26px) + Dual Cards** | Teks terminal (harus diketik) | Bar status terminal | Jendela berat / webview |
+| **System Tray Dinamis** | **Ada** (angka badge & warna dinamis) | Tidak ada | Tidak ada | Jarang / ikon statis |
+| **Ukuran Biner / Distro** | **~300 KB** (Single Standalone .exe) | ~5 - 50 MB (Node.js/npm) | Berkas skrip bash/ps1 | 150 MB - 300 MB+ |
+| **Konsumsi Memori (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Menumpang runtime CLI | 0 MB (hanya saat print) | 200 MB - 600 MB+ |
+| **Dependensi Eksternal** | **Nol** (Bawaan Windows 10/11) | Perlu Node.js / Python | Perlu wrapper CLI | Perlu Node / Chromium |
+| **Prediksi Habis Kuota (Runway)**| **Ada** (`Runway: ~45m` + pacing marker) | Tidak ada | Tidak ada | Tidak ada |
+| **Konversi Mata Uang Otomatis** | **Ada** (Kurs live Google Finance ke IDR) | Tidak ada (hanya USD) | Tidak ada | Terbatas / Manual |
+| **Integrasi Resmi Antigravity** | **Ada** (Connect-RPC ke Language Server) | Tidak ada | Tidak ada | Tidak ada |
+| **Klik-Tembus & Zero Taskbar** | **Ada** (`WS_EX_TOOLWINDOW` & transparent) | Tidak relevan | Tidak relevan | Mengotori taskbar & Alt+Tab |
+| **Aksi Produktivitas Cepat** | **Double-click terminal launch & copy status** | Ketik perintah manual | Tidak ada | Terbatas |
+| **Laporan & Ekspor** | **Markdown (.md) bulanan & CSV** | Ekspor JSON/teks terbatas | Tidak ada | CSV dasar |
+| **Peringatan & Webhook** | **Audio chimes, toast reset, Discord/Slack** | Tidak ada | Tidak ada | Tergantung plugin |
+| **Privasi Kode & Prompt** | **100% Lokal** (konten dibuang sebelum parse) | 100% Lokal | 100% Lokal | Bervariasi / Telemetri |
+
+### 💡 Keunggulan Utama yang Membedakan:
+1. **Dukungan Simultan Claude Code & Google Antigravity**: Satu-satunya monitor yang menampilkan metrik penggunaan token, biaya, dan kuota 5h/7d dari dua ekosistem AI coding terdepan secara berdampingan dalam satu dashboard terpadu.
+2. **Koneksi Resmi Connect-RPC ke Antigravity**: Membaca kuota resmi Antigravity langsung dari Language Server lokal (`127.0.0.1`) melalui daemon socket `hub_*.json` tanpa scraping web atau risiko token expired.
+3. **Mini HUD Pill & Zero Taskbar Clutter**: Widget mengambang setinggi 26 piksel yang menempel di tepi layar, tembus klik (*click-through*), dan otomatis membesar saat disentuh kursor (*instant hover-expand*) tanpa pernah memakan ruang taskbar Windows atau mengganggu jendela kerja `Alt+Tab`.
+4. **Analitik Cerdas & Runway Forecast**: Tidak hanya menampilkan persentase pasif, aplikasi memprediksi kapan kuota Anda habis berdasarkan laju konsumsi 10 menit terakhir, lengkap dengan penanda *pacing marker* untuk mencegah limit terputus di tengah sesi coding.
+5. **Kompak, Mandiri, dan Portabel**: Tanpa installer rumit, tanpa dependensi Node.js/npm/Python, dan cukup satu berkas `.exe` portabel berukuran 300 KB yang langsung jalan di setiap PC Windows 10 dan 11.
+
+---
+
 ## ✨ Fitur Utama
 
 ### 📊 Pemantauan Multi-Provider AI (Claude Code + Google Antigravity)
