@@ -796,6 +796,22 @@ namespace Tests
             Assert.True(shortTip.Contains("AG:"), "Must use short prefix AG:");
             Assert.True(shortTip.Length <= 63, "Must not exceed 63 characters (was " + shortTip.Length + ")");
         }
+
+        public static void Test_Probe_Result_Parsing()
+        {
+            // Claude Code 2.1.330 stream-json result line where "type":"result" is not at the start
+            string json = "{\"duration_api_ms\":0,\"is_error\":true,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in · Please run /login\",\"type\":\"result\"}";
+            Assert.True(json.IndexOf("\"type\":\"result\"", StringComparison.Ordinal) >= 0, "Must detect type:result substring");
+
+            Dictionary<string, object> o = J.Parse(json);
+            Assert.NotNull(o, "Parsed object must not be null");
+            Assert.Equal("result", J.Str(o, "type"), "Type must be result");
+            
+            object isErr;
+            Assert.True(o.TryGetValue("is_error", out isErr) && isErr is bool && (bool)isErr, "is_error must be true");
+            string resultError = J.Str(o, "api_error_status") ?? J.Str(o, "result") ?? "error";
+            Assert.Equal("Not logged in · Please run /login", resultError, "Must extract clear error result");
+        }
     }
 
     public static class TestRunner

@@ -113,7 +113,7 @@ namespace ClaudeUsageWidget
                 {
                     if (e.Data == null) return;
                     if (e.Data.IndexOf("\"rate_limit_event\"", StringComparison.Ordinal) >= 0
-                        || e.Data.StartsWith("{\"type\":\"result\"", StringComparison.Ordinal)
+                        || e.Data.IndexOf("\"type\":\"result\"", StringComparison.Ordinal) >= 0
                         || e.Data.IndexOf("\"subtype\":\"init\"", StringComparison.Ordinal) >= 0)
                         lock (gate) keep.Add(e.Data);
                 };
@@ -151,7 +151,7 @@ namespace ClaudeUsageWidget
                     sawResult = true;
                     object isErr;
                     if (o.TryGetValue("is_error", out isErr) && isErr is bool && (bool)isErr)
-                        resultError = J.Str(o, "api_error_status") ?? "error";
+                        resultError = J.Str(o, "api_error_status") ?? J.Str(o, "result") ?? "error";
                 }
             }
 
