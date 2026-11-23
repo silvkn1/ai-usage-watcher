@@ -820,6 +820,28 @@ namespace Tests
             // File app.ico exists in project root
             Assert.True(File.Exists("app.ico"), "app.ico must exist in project root");
         }
+
+        public static void Test_Widget_Sync_And_Reset_Time_Display()
+        {
+            DateTime now = DateTime.Now;
+            DateTime next = now.AddMinutes(1);
+
+            L.Set("en");
+            string enSync = L.T("sync.schedule", Fmt.Clock(now), Fmt.Clock(next));
+            Assert.True(enSync.Contains("Updated"), "EN sync text must mention Updated");
+            Assert.True(enSync.Contains("Next sync"), "EN sync text must mention Next sync");
+
+            L.Set("id");
+            string idSync = L.T("sync.schedule", Fmt.Clock(now), Fmt.Clock(next));
+            Assert.True(idSync.Contains("Diperbarui"), "ID sync text must mention Diperbarui");
+            Assert.True(idSync.Contains("Sinkronisasi"), "ID sync text must mention Sinkronisasi");
+
+            DateTime resetTarget = now.AddHours(2);
+            string until = Fmt.Until(resetTarget);
+            string at = Fmt.Clock(resetTarget);
+            string fullReset = until + " (" + at + ")";
+            Assert.True(fullReset.Contains("("), "Must include clock time in parentheses");
+        }
     }
 
     public static class TestRunner

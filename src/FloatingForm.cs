@@ -422,7 +422,11 @@ namespace ClaudeUsageWidget
                 rows.Add(new Row(Kind.Text, L.T("set.noproviders"), null));
             }
 
-            // 3. Statusline / snapshot info
+            // 3. Statusline / snapshot / sync info
+            DateTime scanned = u.ScannedAt != DateTime.MinValue ? u.ScannedAt : DateTime.Now;
+            DateTime nextSync = scanned.AddMinutes(1);
+            rows.Add(new Row(Kind.Small, L.T("sync.schedule", Fmt.Clock(scanned), Fmt.Clock(nextSync)), null));
+
             if (scanClaude)
             {
                 bool stale = rl.FileFound && u.LastRecord != DateTime.MinValue && u.LastRecord > rl.CapturedAt.AddMinutes(5);
@@ -848,12 +852,18 @@ namespace ClaudeUsageWidget
 
             int used = (int)Math.Round(w.UsedPercent);
             string lStr = label + "  " + (Opts.ShowRemaining ? (100 - used) + "%" : used + "%");
-            string rStr = w.ResetsAt == DateTime.MinValue ? "" : Fmt.Until(w.ResetsAt);
+            string rStr = "";
+            if (w.ResetsAt != DateTime.MinValue)
+            {
+                string until = Fmt.Until(w.ResetsAt);
+                string at = Fmt.Clock(w.ResetsAt);
+                rStr = until + " (" + at + ")";
+            }
             TextRenderer.DrawText(g, lStr, _fSmall, tr, Palette.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             if (!string.IsNullOrEmpty(rStr))
                 TextRenderer.DrawText(g, rStr, _fSmall, tr, Palette.Dim,
-                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
             cy += lineH;
 
             int bh = Math.Max(3, (int)(4f * s));

@@ -82,6 +82,7 @@ namespace ClaudeUsageWidget
             { "limit7.ag",      new[] { "Antigravity weekly limit", "Limit mingguan Antigravity" } },
             { "nostatusline",   new[] { "Limit: statusline not installed", "Limit: statusline belum dipasang" } },
             { "snapshot",       new[] { "Limit snapshot: {0} · source: {1}", "Snapshot limit: {0} · sumber: {1}" } },
+            { "sync.schedule",   new[] { "Updated {0} · Next sync {1} (or on chat)", "Diperbarui {0} · Sinkronisasi {1} (atau saat chat)" } },
             { "src.probe",      new[] { "CLI probe", "probe CLI" } },
             { "src.statusline", new[] { "CLI statusline", "statusline CLI" } },
             { "scanning",       new[] { "Scanning Claude Code logs...", "Memindai log Claude Code..." } },
