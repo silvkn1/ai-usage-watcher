@@ -1,10 +1,19 @@
-# AI Usage Watcher
+<p align="center">
+  <img src="assets/icon.png" alt="AI Usage Watcher Logo" width="120" height="120" />
+</p>
 
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg)](https://github.com)
-[![Framework](https://img.shields.io/badge/.NET%20Framework-4.8%20(Native)-darkgreen.svg)](https://github.com)
-[![Size](https://img.shields.io/badge/binary%20size-~220%20KB-success.svg)](https://github.com)
-[![Dependencies](https://img.shields.io/badge/dependencies-Zero%20(No%20NuGet%20%2F%20No%20Node)-brightgreen.svg)](https://github.com)
-[![License](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
+<h1 align="center">AI Usage Watcher</h1>
+
+<p align="center">
+  <em>Real-time Desktop Quota &amp; Token Monitor for Claude Code and Google Antigravity</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com"><img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg" alt="Platform" /></a>
+  <a href="https://github.com"><img src="https://img.shields.io/badge/.NET%20Framework-4.8%20(Native)-darkgreen.svg" alt="Framework" /></a>
+  <a href="https://github.com"><img src="https://img.shields.io/badge/dependencies-Zero%20(No%20NuGet%20%2F%20No%20Node)-brightgreen.svg" alt="Dependencies" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
+</p>
 
 **AI Usage Watcher** adalah aplikasi widget desktop ringan (native Windows) dan monitor system tray untuk memantau konsumsi token, estimasi biaya API, serta batas kuota (*rate limits*) dari **Claude Code** dan **Google Antigravity (Gemini)** secara *real-time*.
 

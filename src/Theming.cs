@@ -195,4 +195,32 @@ namespace ClaudeUsageWidget
             return p;
         }
     }
+
+    internal static class AppIcon
+    {
+        private static Icon _icon;
+        public static Icon Get()
+        {
+            if (_icon != null) return _icon;
+            try
+            {
+                using (System.IO.Stream s = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("app.ico"))
+                {
+                    if (s != null) _icon = new Icon(s);
+                }
+            }
+            catch { }
+            if (_icon == null)
+            {
+                try
+                {
+                    string loc = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                    if (!string.IsNullOrEmpty(loc) && System.IO.File.Exists(loc))
+                        _icon = Icon.ExtractAssociatedIcon(loc);
+                }
+                catch { }
+            }
+            return _icon;
+        }
+    }
 }

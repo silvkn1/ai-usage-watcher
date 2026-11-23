@@ -27,8 +27,10 @@ $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.
 
 & $csc /nologo /target:winexe /optimize+ /platform:anycpu /langversion:5 `
     "/out:$dist\AIUsageWatcher.exe" `
+    "/win32icon:$root\app.ico" `
     "/win32manifest:$root\app.manifest" `
     "/resource:$root\pricing.json,pricing.json" `
+    "/resource:$root\app.ico,app.ico" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     /r:System.Net.Http.dll /r:System.Security.dll /r:System.Web.Extensions.dll `
     $src

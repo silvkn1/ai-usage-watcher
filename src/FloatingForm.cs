@@ -100,6 +100,7 @@ namespace ClaudeUsageWidget
             BackColor = Palette.Bg;
             DoubleBuffered = true;
             Text = L.AppName;
+            try { Icon ic = AppIcon.Get(); if (ic != null) Icon = ic; } catch { }
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
         }
 

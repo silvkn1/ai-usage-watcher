@@ -812,6 +812,14 @@ namespace Tests
             string resultError = J.Str(o, "api_error_status") ?? J.Str(o, "result") ?? "error";
             Assert.Equal("Not logged in · Please run /login", resultError, "Must extract clear error result");
         }
+
+        public static void Test_AppIcon_Resolution()
+        {
+            // AppIcon.Get() must not throw and should handle null safely
+            Icon ic = AppIcon.Get();
+            // File app.ico exists in project root
+            Assert.True(File.Exists("app.ico"), "app.ico must exist in project root");
+        }
     }
 
     public static class TestRunner

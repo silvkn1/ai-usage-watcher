@@ -68,6 +68,7 @@ namespace ClaudeUsageWidget
             _cfg = cfg;
             _cb = callbacks;
             Text = L.T("set.title");
+            try { Icon ic = AppIcon.Get(); if (ic != null) Icon = ic; } catch { }
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             ShowInTaskbar = false;
