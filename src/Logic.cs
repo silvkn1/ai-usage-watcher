@@ -261,9 +261,23 @@ namespace ClaudeUsageWidget
 
         private static string Line(LimitWindow w, string withReset, string noReset)
         {
+            if (w == null || !w.Available) return L.T(noReset, L.T("na"));
+            if (w.IsStale) return L.T(noReset, L.T("reset.short"));
             string pct = Pct(w);
-            if (w.Available && !w.IsStale && w.ResetsAt != DateTime.MinValue) return L.T(withReset, pct, Fmt.Until(w.ResetsAt), Fmt.Clock(w.ResetsAt));
+            if (w.ResetsAt != DateTime.MinValue) return L.T(withReset, pct, Fmt.Until(w.ResetsAt), Fmt.Clock(w.ResetsAt));
             return L.T(noReset, pct);
+        }
+
+        private static string ProviderSummary(string name, LimitWindow w5, LimitWindow w7, bool shortPrefix)
+        {
+            string prefix = shortPrefix ? (name.StartsWith("C", StringComparison.OrdinalIgnoreCase) ? "C: " : "AG: ") : (name + ": ");
+            string s5 = L.T("tip.l5n", Pct(w5));
+            if (!shortPrefix && w5 != null && w5.Available && !w5.IsStale && w5.ResetsAt != DateTime.MinValue)
+                s5 += " (" + Fmt.Until(w5.ResetsAt) + ")";
+            string s7 = L.T("tip.l7n", Pct(w7));
+            if (!shortPrefix && w7 != null && w7.Available && !w7.IsStale && w7.ResetsAt != DateTime.MinValue)
+                s7 += " (" + Fmt.Until(w7.ResetsAt) + ")";
+            return prefix + s5 + " · " + s7;
         }
 
         /// <summary>Baris 1: 5h, baris 2: 7d (persen, sisa waktu, dan jam reset), baris 3: galat probe terakhir atau biaya hari ini.
@@ -275,16 +289,60 @@ namespace ClaudeUsageWidget
 
         public static string Tooltip(RateLimitSnapshot limits, UsageSnapshot usage, string probeFailed, int maxLen, bool scanClaude, bool scanGemini)
         {
-            string s = "";
-            if (scanClaude && limits != null && limits.FiveHour != null)
-                s += Line(limits.FiveHour, "tip.l5", "tip.l5n") + "\n" + Line(limits.SevenDay, "tip.l7", "tip.l7n");
-            if (scanGemini && limits != null && limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available)
+            List<string> lines = new List<string>();
+
+            if (scanClaude && scanGemini)
             {
-                if (s.Length > 0) s += "\n";
-                s += "AG 5h: " + Pct(limits.AntigravityFiveHour) + " · 7d: " + Pct(limits.AntigravitySevenDay);
+                bool shortPrefix = maxLen <= 63;
+                lines.Add(ProviderSummary("Claude", limits != null ? limits.FiveHour : null, limits != null ? limits.SevenDay : null, shortPrefix));
+                lines.Add(ProviderSummary("Antigravity", limits != null ? limits.AntigravityFiveHour : null, limits != null ? limits.AntigravitySevenDay : null, shortPrefix));
             }
-            if (!string.IsNullOrEmpty(probeFailed)) s += (s.Length > 0 ? "\n" : "") + L.T("tip.error", probeFailed);
-            else if (usage != null) s += (s.Length > 0 ? "\n" : "") + L.T("tip.today", Fmt.UsdShort(usage.TodayTotal.Cost));
+            else if (scanClaude)
+            {
+                LimitWindow w5 = limits != null ? limits.FiveHour : null;
+                LimitWindow w7 = limits != null ? limits.SevenDay : null;
+                if (maxLen > 63)
+                {
+                    lines.Add("Claude Code:");
+                    lines.Add("  " + Line(w5, "tip.l5", "tip.l5n"));
+                    lines.Add("  " + Line(w7, "tip.l7", "tip.l7n"));
+                }
+                else
+                {
+                    lines.Add(ProviderSummary("Claude", w5, w7, true));
+                }
+            }
+            else if (scanGemini)
+            {
+                LimitWindow w5 = limits != null ? limits.AntigravityFiveHour : null;
+                LimitWindow w7 = limits != null ? limits.AntigravitySevenDay : null;
+                if (maxLen > 63)
+                {
+                    lines.Add("Antigravity:");
+                    lines.Add("  " + Line(w5, "tip.l5", "tip.l5n"));
+                    lines.Add("  " + Line(w7, "tip.l7", "tip.l7n"));
+                }
+                else
+                {
+                    lines.Add(ProviderSummary("Antigravity", w5, w7, true));
+                }
+            }
+            else
+            {
+                lines.Add(L.AppName);
+                lines.Add(L.T("tip.noproviders"));
+            }
+
+            if (!string.IsNullOrEmpty(probeFailed) && scanClaude)
+            {
+                lines.Add(L.T("tip.error", probeFailed));
+            }
+            else if (usage != null)
+            {
+                lines.Add(L.T("tip.today", Fmt.UsdShort(usage.TodayTotal.Cost)));
+            }
+
+            string s = string.Join("\n", lines.ToArray());
             if (string.IsNullOrEmpty(s)) s = L.AppName;
             return s.Length > maxLen ? s.Substring(0, maxLen - 1) + "…" : s;
         }

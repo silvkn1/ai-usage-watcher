@@ -125,6 +125,7 @@ namespace ClaudeUsageWidget
             { "tip.l7",            new[] { "7d {0} · resets in {1} ({2})", "7h {0} · reset {1} ({2})" } },
             { "tip.l7n",           new[] { "7d {0}", "7h {0}" } },
             { "tip.today",         new[] { "Today ≈{0}", "Hari ini ≈{0}" } },
+            { "tip.noproviders",   new[] { "No active providers", "Tidak ada monitoring aktif" } },
             { "msg.autostartfail", new[] { "Failed to change autostart.", "Gagal mengubah autostart." } },
             { "probe.running",     new[] { "CLI probe running...", "probe CLI berjalan..." } },
             { "probe.failed",      new[] { "CLI probe failed: {0}", "probe CLI gagal: {0}" } },

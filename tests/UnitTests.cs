@@ -718,6 +718,84 @@ namespace Tests
                 Assert.False(f.SnappedLeft, "Should not be snapped to left edge when in middle");
             }
         }
+
+        public static void Test_TrayText_Tooltip_DualProviders()
+        {
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.FiveHour.Available = false;
+            rl.SevenDay.Available = true;
+            rl.SevenDay.UsedPercent = 75;
+            rl.SevenDay.ResetsAt = DateTime.Now.AddHours(18);
+
+            rl.AntigravityFiveHour.Available = true;
+            rl.AntigravityFiveHour.UsedPercent = 58;
+            rl.AntigravityFiveHour.ResetsAt = DateTime.Now.AddHours(4);
+            rl.AntigravitySevenDay.Available = true;
+            rl.AntigravitySevenDay.UsedPercent = 19;
+            rl.AntigravitySevenDay.ResetsAt = DateTime.Now.AddDays(6);
+
+            UsageSnapshot u = new UsageSnapshot();
+            u.TodayTotal.Cost = 1.50;
+
+            string tip = TrayText.Tooltip(rl, u, null, 127, true, true);
+            Assert.True(tip.Contains("Claude:"), "Dual tooltip must contain 'Claude:'");
+            Assert.True(tip.Contains("Antigravity:"), "Dual tooltip must contain 'Antigravity:'");
+            Assert.True(tip.Contains("5h") || tip.Contains("5j"), "Must contain 5h/5j");
+            Assert.True(tip.Contains("7d") || tip.Contains("7h"), "Must contain 7d/7h");
+            Assert.True(tip.Length <= 127, "Must not exceed 127 characters (was " + tip.Length + ")");
+        }
+
+        public static void Test_TrayText_Tooltip_Selective_Scanning()
+        {
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.FiveHour.Available = true;
+            rl.FiveHour.UsedPercent = 40;
+            rl.SevenDay.Available = true;
+            rl.SevenDay.UsedPercent = 60;
+            rl.AntigravityFiveHour.Available = true;
+            rl.AntigravityFiveHour.UsedPercent = 25;
+            rl.AntigravitySevenDay.Available = true;
+            rl.AntigravitySevenDay.UsedPercent = 15;
+
+            UsageSnapshot u = new UsageSnapshot();
+
+            // 1. Claude only
+            string claudeOnly = TrayText.Tooltip(rl, u, null, 127, true, false);
+            Assert.True(claudeOnly.Contains("Claude Code:"), "Should have 'Claude Code:' header");
+            Assert.False(claudeOnly.Contains("Antigravity"), "Should not contain Antigravity when scanGemini=false");
+
+            // 2. Antigravity only
+            string agOnly = TrayText.Tooltip(rl, u, null, 127, false, true);
+            Assert.True(agOnly.Contains("Antigravity:"), "Should have 'Antigravity:' header");
+            Assert.False(agOnly.Contains("Claude"), "Should not contain Claude when scanClaude=false");
+
+            // 3. Neither active
+            string none = TrayText.Tooltip(rl, u, null, 127, false, false);
+            Assert.False(none.Contains("Claude:"), "Should not contain Claude: when none active");
+            Assert.False(none.Contains("Antigravity:"), "Should not contain Antigravity: when none active");
+            Assert.True(none.Contains(L.T("tip.noproviders")), "Should state no active providers");
+        }
+
+        public static void Test_TrayText_Tooltip_ShortPrefix_63Limit()
+        {
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.FiveHour.Available = true;
+            rl.FiveHour.UsedPercent = 40;
+            rl.SevenDay.Available = true;
+            rl.SevenDay.UsedPercent = 60;
+            rl.AntigravityFiveHour.Available = true;
+            rl.AntigravityFiveHour.UsedPercent = 25;
+            rl.AntigravitySevenDay.Available = true;
+            rl.AntigravitySevenDay.UsedPercent = 15;
+
+            UsageSnapshot u = new UsageSnapshot();
+            u.TodayTotal.Cost = 2.0;
+
+            string shortTip = TrayText.Tooltip(rl, u, null, 63, true, true);
+            Assert.True(shortTip.Contains("C:"), "Must use short prefix C:");
+            Assert.True(shortTip.Contains("AG:"), "Must use short prefix AG:");
+            Assert.True(shortTip.Length <= 63, "Must not exceed 63 characters (was " + shortTip.Length + ")");
+        }
     }
 
     public static class TestRunner
