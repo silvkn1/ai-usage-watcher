@@ -1453,12 +1453,16 @@ namespace ClaudeUsageWidget
                     });
                     if (ok)
                     {
-                        if (_float != null && _float.IsHandleCreated)
+                        try
                         {
-                            try { _float.BeginInvoke(new Action(delegate { Application.Exit(); })); return; }
-                            catch { }
+                            if (_tray != null)
+                            {
+                                _tray.Visible = false;
+                                _tray.Dispose();
+                            }
                         }
-                        Application.Exit();
+                        catch { }
+                        Environment.Exit(0);
                     }
                 }
                 catch (Exception ex)

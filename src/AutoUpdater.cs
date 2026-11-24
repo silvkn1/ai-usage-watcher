@@ -201,6 +201,7 @@ namespace ClaudeUsageWidget
             string targetDir = Path.GetDirectoryName(target);
             string tempFile = Path.Combine(targetDir, "update-" + Guid.NewGuid().ToString("N") + ".tmp");
             string downloadFile = tempFile;
+            string exeToInstall = null;
 
             try
             {
@@ -237,7 +238,7 @@ namespace ClaudeUsageWidget
                     }
                 }
 
-                string exeToInstall = downloadFile;
+                exeToInstall = downloadFile;
                 if (release.AssetName != null && release.AssetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
                     if (onProgress != null) onProgress(85, "Extracting update...");
@@ -267,13 +268,36 @@ namespace ClaudeUsageWidget
 
                 if (onProgress != null) onProgress(95, "Applying update...");
 
-                string oldExe = target + ".old";
-                if (File.Exists(oldExe))
+                string targetBackup = target + ".old";
+                if (File.Exists(targetBackup))
                 {
-                    try { File.Delete(oldExe); } catch { }
+                    try { File.Delete(targetBackup); }
+                    catch
+                    {
+                        try
+                        {
+                            string uniqueAside = target + ".old-" + Guid.NewGuid().ToString("N");
+                            File.Move(targetBackup, uniqueAside);
+                        }
+                        catch { }
+                    }
                 }
-                File.Move(target, oldExe);
-                File.Move(exeToInstall, target);
+
+                if (File.Exists(targetBackup))
+                {
+                    targetBackup = target + ".old-" + Guid.NewGuid().ToString("N");
+                }
+
+                File.Move(target, targetBackup);
+                try
+                {
+                    File.Move(exeToInstall, target);
+                }
+                catch
+                {
+                    try { if (File.Exists(targetBackup)) File.Move(targetBackup, target); } catch { }
+                    throw;
+                }
 
                 if (onProgress != null) onProgress(100, "Restarting...");
 
@@ -288,6 +312,10 @@ namespace ClaudeUsageWidget
             catch
             {
                 try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+                if (!string.IsNullOrEmpty(exeToInstall) && exeToInstall != tempFile)
+                {
+                    try { if (File.Exists(exeToInstall)) File.Delete(exeToInstall); } catch { }
+                }
                 throw;
             }
         }
@@ -319,14 +347,41 @@ namespace ClaudeUsageWidget
                 if (string.IsNullOrEmpty(target))
                 {
                     try { target = typeof(AutoUpdater).Assembly.Location; } catch { }
-                }
-                if (!string.IsNullOrEmpty(target))
-                {
-                    string oldExe = target + ".old";
-                    if (File.Exists(oldExe))
+                    if (string.IsNullOrEmpty(target))
                     {
-                        File.Delete(oldExe);
+                        try
+                        {
+                            using (Process p = Process.GetCurrentProcess())
+                            {
+                                target = p.MainModule.FileName;
+                            }
+                        }
+                        catch { }
                     }
+                }
+                if (string.IsNullOrEmpty(target)) return;
+
+                string dir = Path.GetDirectoryName(target);
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+
+                string baseName = Path.GetFileName(target);
+
+                string oldExe = target + ".old";
+                if (File.Exists(oldExe))
+                {
+                    try { File.Delete(oldExe); } catch { }
+                }
+
+                string[] oldFiles = Directory.GetFiles(dir, baseName + ".old*");
+                foreach (string f in oldFiles)
+                {
+                    try { File.Delete(f); } catch { }
+                }
+
+                string[] tmpFiles = Directory.GetFiles(dir, "update-*.tmp");
+                foreach (string f in tmpFiles)
+                {
+                    try { File.Delete(f); } catch { }
                 }
             }
             catch (Exception ex)

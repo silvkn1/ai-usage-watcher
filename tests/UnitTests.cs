@@ -1260,6 +1260,41 @@ namespace Tests
             Assert.True(restored2.AutoUpdateCheck, "AutoUpdateCheck should deserialize as true");
         }
 
+        public static void Test_AutoUpdater_Cleanup_Old_Versions()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "au_clean_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string targetExe = Path.Combine(tempDir, "AIUsageWatcher.exe");
+                File.WriteAllText(targetExe, "MZ_dummy_target");
+
+                string oldExe = targetExe + ".old";
+                File.WriteAllText(oldExe, "MZ_dummy_old");
+
+                string oldGuidExe = targetExe + ".old-" + Guid.NewGuid().ToString("N");
+                File.WriteAllText(oldGuidExe, "MZ_dummy_old_guid");
+
+                string tmpFile = Path.Combine(tempDir, "update-test.tmp");
+                File.WriteAllText(tmpFile, "dummy_tmp");
+
+                Assert.True(File.Exists(oldExe), "oldExe exists before cleanup");
+                Assert.True(File.Exists(oldGuidExe), "oldGuidExe exists before cleanup");
+                Assert.True(File.Exists(tmpFile), "tmpFile exists before cleanup");
+
+                AutoUpdater.CleanupOldVersion(targetExe);
+
+                Assert.True(File.Exists(targetExe), "targetExe must be preserved");
+                Assert.False(File.Exists(oldExe), "oldExe should be cleaned up");
+                Assert.False(File.Exists(oldGuidExe), "oldGuidExe should be cleaned up");
+                Assert.False(File.Exists(tmpFile), "tmpFile should be cleaned up");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
         public static void Test_TrayApp_Menu_Grouping()
         {
             using (TrayApp app = new TrayApp())
