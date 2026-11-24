@@ -111,6 +111,9 @@ namespace ClaudeUsageWidget
 
             // ---- tray ----
             { "tray.show",         new[] { "Show widget", "Tampilkan widget" } },
+            { "tray.menu.view",    new[] { "View & Layout", "Tampilan & Posisi" } },
+            { "tray.menu.tools",   new[] { "Reports & Tools", "Laporan & Alat" } },
+            { "tray.menu.help",    new[] { "Help & Updates", "Bantuan & Pembaruan" } },
             { "tray.dock",         new[] { "Dock to top edge (expands on hover)", "Tempel di tepi atas (lengkap saat kursor di atasnya)" } },
             { "tray.compact",      new[] { "Compact mode", "Mode ringkas" } },
             { "tray.clickthrough", new[] { "Click-through (widget can't be clicked)", "Klik-tembus (widget tak bisa diklik)" } },

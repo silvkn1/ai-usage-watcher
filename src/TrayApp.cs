@@ -30,12 +30,17 @@ namespace ClaudeUsageWidget
         private readonly SynchronizationContext _ui;
 
         private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miData, _miExit, _miCsv, _miReport, _miProjects;
+        private ToolStripMenuItem _miViewGroup, _miToolsGroup, _miHelpGroup;
+        private ToolStripSeparator _sepProject;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
         private void ApplyLanguage()
         {
             _miShow.Text = L.T("tray.show");
+            if (_miViewGroup != null) _miViewGroup.Text = L.T("tray.menu.view");
+            if (_miToolsGroup != null) _miToolsGroup.Text = L.T("tray.menu.tools");
+            if (_miHelpGroup != null) _miHelpGroup.Text = L.T("tray.menu.help");
             _miDock.Text = L.T("tray.dock");
             if (_miSnap != null) { _miSnap.Text = L.T("tray.snap"); PopulateSnapMenu(_miSnap); }
             _miCompact.Text = L.T("tray.compact");
@@ -518,6 +523,7 @@ namespace ClaudeUsageWidget
             bool hasCwd = !string.IsNullOrEmpty(cwd) && Directory.Exists(cwd);
             _miOpenFolder.Visible = hasCwd;
             _miOpenTerminal.Visible = hasCwd;
+            if (_sepProject != null) _sepProject.Visible = hasCwd;
             if (hasCwd)
             {
                 _miOpenFolder.Text = L.T("tray.openfolder", proj ?? "Project");
@@ -577,64 +583,96 @@ namespace ClaudeUsageWidget
         {
             ContextMenuStrip m = new ContextMenuStrip();
             _miShow = new ToolStripMenuItem(L.T("tray.show"), null, delegate { ToggleFloating(); });
-            _miCompact = new ToolStripMenuItem(L.T("tray.compact"), null, delegate { SetCompact(!_float.Compact); });
-            _miCompact.Checked = _cfg.Compact;
-            _miClickThrough = new ToolStripMenuItem(L.T("tray.clickthrough"), null, delegate { SetClickThrough(!_cfg.ClickThrough); });
-            _miClickThrough.Checked = _cfg.ClickThrough;
-            _miRemaining = new ToolStripMenuItem(L.T("tray.remaining"), null, delegate { SetRemaining(!_cfg.ShowRemaining); });
-            _miRemaining.Checked = _cfg.ShowRemaining;
-            _miAutostart = new ToolStripMenuItem(L.T("tray.autostart"), null, delegate { ToggleAutostart(); });
-            try { _miAutostart.Checked = Autostart.IsEnabled; } catch { }
-
-            _miDock = new ToolStripMenuItem(L.T("tray.dock"), null, delegate { SetDockTop(!_float.DockTop); });
-            _miDock.Checked = _cfg.DockTop;
-            _miCompact.Enabled = !_cfg.DockTop;
-            _miClickThrough.Enabled = !_cfg.DockTop;
-
-            _miSnap = new ToolStripMenuItem(L.T("tray.snap"));
-            PopulateSnapMenu(_miSnap);
-
-            m.Items.Add(_miShow);
-            m.Items.Add(_miDock);
-            m.Items.Add(_miSnap);
-            m.Items.Add(_miCompact);
-            m.Items.Add(_miRemaining);
-            m.Items.Add(_miClickThrough);
-            m.Items.Add(new ToolStripSeparator());
             _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); MaybeFetchAntigravityRate(true); MaybeCheckOllama(true); });
             _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
-            _miWizard = new ToolStripMenuItem(L.T("tray.wizard"), null, delegate { ShowWizard(); });
-            _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
-            _miUpdate = new ToolStripMenuItem(L.T("tray.update"), null, delegate { CheckForUpdates(true); });
-            _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
-            _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
-            _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
-            _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
-            _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
-            _miExit = new ToolStripMenuItem(L.T("tray.exit"), null, delegate { ExitThread(); });
-            m.Items.Add(_miRefresh);
-            m.Items.Add(_miCopy);
-            m.Items.Add(_miWizard);
-            m.Items.Add(_miSettings);
-            m.Items.Add(_miUpdate);
-            m.Items.Add(_miProjects);
-            m.Items.Add(_miCompanion);
-            m.Items.Add(_miData);
-            m.Items.Add(_miCsv);
-            m.Items.Add(_miReport);
-            m.Items.Add(_miAutostart);
 
+            // 1. Submenu: Tampilan & Posisi (View & Layout)
+            _miViewGroup = new ToolStripMenuItem(L.T("tray.menu.view"));
+            _miDock = new ToolStripMenuItem(L.T("tray.dock"), null, delegate { SetDockTop(!_float.DockTop); });
+            _miDock.Checked = _cfg.DockTop;
+            _miSnap = new ToolStripMenuItem(L.T("tray.snap"));
+            PopulateSnapMenu(_miSnap);
+            _miCompact = new ToolStripMenuItem(L.T("tray.compact"), null, delegate { SetCompact(!_float.Compact); });
+            _miCompact.Checked = _cfg.Compact;
+            _miCompact.Enabled = !_cfg.DockTop;
+            _miRemaining = new ToolStripMenuItem(L.T("tray.remaining"), null, delegate { SetRemaining(!_cfg.ShowRemaining); });
+            _miRemaining.Checked = _cfg.ShowRemaining;
+            _miClickThrough = new ToolStripMenuItem(L.T("tray.clickthrough"), null, delegate { SetClickThrough(!_cfg.ClickThrough); });
+            _miClickThrough.Checked = _cfg.ClickThrough;
+            _miClickThrough.Enabled = !_cfg.DockTop;
+
+            _miViewGroup.DropDownItems.Add(_miDock);
+            _miViewGroup.DropDownItems.Add(_miSnap);
+            _miViewGroup.DropDownItems.Add(new ToolStripSeparator());
+            _miViewGroup.DropDownItems.Add(_miCompact);
+            _miViewGroup.DropDownItems.Add(_miRemaining);
+            _miViewGroup.DropDownItems.Add(_miClickThrough);
+
+            // 2. Submenu: Laporan & Alat (Reports & Tools)
+            _miToolsGroup = new ToolStripMenuItem(L.T("tray.menu.tools"));
+            _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
+            _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
+            _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
+            _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
+            _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
+
+            _miToolsGroup.DropDownItems.Add(_miProjects);
+            _miToolsGroup.DropDownItems.Add(_miReport);
+            _miToolsGroup.DropDownItems.Add(_miCsv);
+            _miToolsGroup.DropDownItems.Add(new ToolStripSeparator());
+            _miToolsGroup.DropDownItems.Add(_miData);
+            _miToolsGroup.DropDownItems.Add(_miCompanion);
+
+            // 3. Submenu: Bantuan & Pembaruan (Help & Updates)
+            _miHelpGroup = new ToolStripMenuItem(L.T("tray.menu.help"));
+            _miUpdate = new ToolStripMenuItem(L.T("tray.update"), null, delegate { CheckForUpdates(true); });
+            _miWizard = new ToolStripMenuItem(L.T("tray.wizard"), null, delegate { ShowWizard(); });
+
+            _miHelpGroup.DropDownItems.Add(_miUpdate);
+            _miHelpGroup.DropDownItems.Add(_miWizard);
+
+            // Pengaturan & Umum
+            _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
+            _miAutostart = new ToolStripMenuItem(L.T("tray.autostart"), null, delegate { ToggleAutostart(); });
+            try { _miAutostart.Checked = Autostart.IsEnabled; } catch { }
+            _miExit = new ToolStripMenuItem(L.T("tray.exit"), null, delegate { ExitThread(); });
+
+            // Aksi Konteks Proyek Aktif
             _miOpenFolder = new ToolStripMenuItem("", null, delegate { OpenProjectFolder(); });
             _miOpenTerminal = new ToolStripMenuItem("", null, delegate { OpenProjectTerminal(); });
             _miOpenFolder.Visible = false;
             _miOpenTerminal.Visible = false;
+            _sepProject = new ToolStripSeparator();
+            _sepProject.Visible = false;
+
+            // Susun menu utama
+            m.Items.Add(_miShow);
+            m.Items.Add(_miRefresh);
+            m.Items.Add(_miCopy);
             m.Items.Add(new ToolStripSeparator());
+
+            m.Items.Add(_miViewGroup);
+            m.Items.Add(_miToolsGroup);
+            m.Items.Add(new ToolStripSeparator());
+
+            m.Items.Add(_miSettings);
+            m.Items.Add(_miAutostart);
+            m.Items.Add(_miHelpGroup);
+
+            m.Items.Add(_sepProject);
             m.Items.Add(_miOpenFolder);
             m.Items.Add(_miOpenTerminal);
 
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(_miExit);
-            m.Opening += delegate { _miShow.Checked = _cfg.ShowFloating; if (_miSnap != null) PopulateSnapMenu(_miSnap); UpdateQuickJumpMenu(); };
+
+            m.Opening += delegate
+            {
+                _miShow.Checked = _cfg.ShowFloating;
+                if (_miSnap != null) PopulateSnapMenu(_miSnap);
+                UpdateQuickJumpMenu();
+                MenuTheme.Apply(m);
+            };
             return m;
         }
 
@@ -1446,6 +1484,15 @@ namespace ClaudeUsageWidget
                     }
                 }
             });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ExitThreadCore();
+            }
+            base.Dispose(disposing);
         }
 
         protected override void ExitThreadCore()

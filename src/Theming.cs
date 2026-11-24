@@ -66,11 +66,32 @@ namespace ClaudeUsageWidget
         /// <summary>Terapkan palet aktif ke menu (dipanggil lagi saat tema berganti).</summary>
         public static void Apply(ContextMenuStrip m)
         {
+            if (m == null) return;
             m.Renderer = new ThemedRenderer();
             m.BackColor = Palette.Surface;
             m.ForeColor = Palette.Text;
-            foreach (ToolStripItem it in m.Items)
-                if (!(it is ToolStripSeparator)) it.ForeColor = Palette.Text;
+            ApplyItems(m.Items);
+        }
+
+        public static void ApplyItems(ToolStripItemCollection items)
+        {
+            if (items == null) return;
+            foreach (ToolStripItem it in items)
+            {
+                if (!(it is ToolStripSeparator))
+                {
+                    it.ForeColor = Palette.Text;
+                    it.BackColor = Palette.Surface;
+                }
+                ToolStripMenuItem mi = it as ToolStripMenuItem;
+                if (mi != null && mi.HasDropDownItems)
+                {
+                    mi.DropDown.Renderer = new ThemedRenderer();
+                    mi.DropDown.BackColor = Palette.Surface;
+                    mi.DropDown.ForeColor = Palette.Text;
+                    ApplyItems(mi.DropDownItems);
+                }
+            }
         }
     }
 

@@ -1259,6 +1259,37 @@ namespace Tests
             AppConfig restored2 = J.Ser.Deserialize<AppConfig>(json2);
             Assert.True(restored2.AutoUpdateCheck, "AutoUpdateCheck should deserialize as true");
         }
+
+        public static void Test_TrayApp_Menu_Grouping()
+        {
+            using (TrayApp app = new TrayApp())
+            {
+                FieldInfo fiMenu = typeof(TrayApp).GetField("_menu", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(fiMenu, "_menu field must exist");
+                ContextMenuStrip menu = fiMenu.GetValue(app) as ContextMenuStrip;
+                Assert.NotNull(menu, "_menu must not be null");
+
+                FieldInfo fiView = typeof(TrayApp).GetField("_miViewGroup", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(fiView, "_miViewGroup field must exist");
+                ToolStripMenuItem miView = fiView.GetValue(app) as ToolStripMenuItem;
+                Assert.NotNull(miView, "_miViewGroup must not be null");
+                Assert.True(miView.DropDownItems.Count >= 5, "View group should contain view & layout items");
+
+                FieldInfo fiTools = typeof(TrayApp).GetField("_miToolsGroup", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(fiTools, "_miToolsGroup field must exist");
+                ToolStripMenuItem miTools = fiTools.GetValue(app) as ToolStripMenuItem;
+                Assert.NotNull(miTools, "_miToolsGroup must not be null");
+                Assert.True(miTools.DropDownItems.Count >= 5, "Tools group should contain report & tool items");
+
+                FieldInfo fiHelp = typeof(TrayApp).GetField("_miHelpGroup", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(fiHelp, "_miHelpGroup field must exist");
+                ToolStripMenuItem miHelp = fiHelp.GetValue(app) as ToolStripMenuItem;
+                Assert.NotNull(miHelp, "_miHelpGroup must not be null");
+                Assert.True(miHelp.DropDownItems.Count >= 2, "Help group should contain update and wizard");
+
+                Assert.True(menu.Items.Count <= 15, "Top-level menu must be compact and grouped (<= 15 items)");
+            }
+        }
     }
 
     public static class TestRunner
