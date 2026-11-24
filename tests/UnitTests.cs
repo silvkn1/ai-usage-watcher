@@ -1087,6 +1087,56 @@ namespace Tests
             }
         }
 
+        public static void Test_Setup_Wizard_Layout_No_Overlap()
+        {
+            AppConfig cfg = new AppConfig();
+            using (SetupWizardForm wiz = new SetupWizardForm(cfg))
+            {
+                wiz.StartPosition = FormStartPosition.Manual;
+                wiz.Location = new Point(-3000, -3000);
+                wiz.Show();
+                Application.DoEvents();
+
+                Assert.True(wiz.HeaderPanel.Height > 0, "Header height must be positive");
+                Assert.True(wiz.BodyPanel.Height > 0, "Body height must be positive");
+                Assert.True(wiz.FooterPanel.Height > 0, "Footer height must be positive");
+
+                // Header and Body must never overlap!
+                Assert.True(wiz.HeaderPanel.Bottom <= wiz.BodyPanel.Top,
+                    string.Format("Header bottom ({0}) must be <= Body top ({1})", wiz.HeaderPanel.Bottom, wiz.BodyPanel.Top));
+
+                // Body and Footer must never overlap!
+                Assert.True(wiz.BodyPanel.Bottom <= wiz.FooterPanel.Top,
+                    string.Format("Body bottom ({0}) must be <= Footer top ({1})", wiz.BodyPanel.Bottom, wiz.FooterPanel.Top));
+
+                // UseMnemonic must be false on buttons to preserve '&' in 'Finish & Start!'
+                Assert.False(wiz.NextButton.UseMnemonic, "NextButton.UseMnemonic must be false");
+
+                string artifactDir = @"C:\Users\william\.gemini\antigravity\brain\0ed433c2-32f0-4b0b-bb3e-491c44a2aea0";
+                for (int step = 0; step < 3; step++)
+                {
+                    wiz.GoToStep(step);
+                    Application.DoEvents();
+
+                    if (step == 2)
+                    {
+                        Assert.True(wiz.NextButton.Text.Contains("&"), "Step 3 finish button text must contain '&'");
+                    }
+
+                using (Bitmap bmp = new Bitmap(wiz.Width, wiz.Height))
+                {
+                    wiz.DrawToBitmap(bmp, new Rectangle(0, 0, wiz.Width, wiz.Height));
+                    if (Directory.Exists(artifactDir))
+                    {
+                        string savePath = Path.Combine(artifactDir, string.Format("wizard_step{0}.png", step + 1));
+                        bmp.Save(savePath, System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                }
+                }
+                wiz.Close();
+            }
+        }
+
         public static void Test_SettingsForm_Apply_Button_And_LiveTheme()
         {
             AppConfig cfg = new AppConfig();
