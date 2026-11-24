@@ -39,16 +39,24 @@ namespace ClaudeUsageWidget
         private readonly List<string> _langCodes = new List<string>();
         private readonly CheckBox _chkClaude = new CheckBox();
         private readonly Label _lblClaudeStatus = new Label();
+        private readonly Label _lblClaudeDesc = new Label();
         private readonly CheckBox _chkGemini = new CheckBox();
         private readonly Label _lblGeminiStatus = new Label();
+        private readonly Label _lblGeminiDesc = new Label();
         private readonly CheckBox _chkOllama = new CheckBox();
         private readonly Label _lblOllamaStatus = new Label();
+        private readonly Label _lblOllamaDesc = new Label();
+        private readonly Label _lblLang = new Label();
 
         // Step 2 controls (Theme, Backdrop & Placement)
+        private readonly Label _lblTheme = new Label();
         private readonly ComboBox _cboTheme = new ComboBox();
+        private readonly Label _lblBackdrop = new Label();
         private readonly ComboBox _cboBackdrop = new ComboBox();
         private readonly CheckBox _chkDock = new CheckBox();
+        private readonly Label _lblEdge = new Label();
         private readonly ComboBox _cboEdge = new ComboBox();
+        private readonly Label _lblMode = new Label();
         private readonly RadioButton _rbDualCards = new RadioButton();
         private readonly RadioButton _rbPill = new RadioButton();
 
@@ -77,7 +85,8 @@ namespace ClaudeUsageWidget
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
             Font = new Font("Segoe UI", 9f);
-            ClientSize = new Size(580, 520);
+            ClientSize = new Size(620, 560);
+            MinimumSize = new Size(580, 520);
 
             BuildHeader();
             BuildFooter();
@@ -94,28 +103,37 @@ namespace ClaudeUsageWidget
         private void BuildHeader()
         {
             _headerPanel.Dock = DockStyle.Top;
-            _headerPanel.Height = 85;
-            _headerPanel.Padding = new Padding(20, 14, 20, 8);
+            _headerPanel.AutoSize = true;
+            _headerPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            _headerPanel.Padding = new Padding(24, 16, 24, 12);
             _headerPanel.Paint += delegate(object s, PaintEventArgs e)
             {
                 using (Pen p = new Pen(Palette.Border, 1f))
                     e.Graphics.DrawLine(p, 0, _headerPanel.Height - 1, _headerPanel.Width, _headerPanel.Height - 1);
             };
 
+            TableLayoutPanel tHeader = new TableLayoutPanel();
+            tHeader.ColumnCount = 1;
+            tHeader.AutoSize = true;
+            tHeader.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            tHeader.Dock = DockStyle.Top;
+
             _titleLabel.Text = L.T("wizard.welcome");
             _titleLabel.Font = new Font("Segoe UI Semibold", 13f, FontStyle.Bold);
             _titleLabel.AutoSize = true;
-            _titleLabel.Location = new Point(20, 12);
+            _titleLabel.Margin = new Padding(0, 0, 0, 4);
 
             _subtitleLabel.Text = L.T("wizard.welcome.sub");
             _subtitleLabel.Font = new Font("Segoe UI", 8.5f);
             _subtitleLabel.AutoSize = true;
-            _subtitleLabel.Location = new Point(22, 38);
+            _subtitleLabel.MaximumSize = new Size(560, 0);
+            _subtitleLabel.Margin = new Padding(0, 0, 0, 10);
 
             FlowLayoutPanel pills = new FlowLayoutPanel();
             pills.FlowDirection = FlowDirection.LeftToRight;
             pills.AutoSize = true;
-            pills.Location = new Point(20, 60);
+            pills.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            pills.Margin = new Padding(0, 2, 0, 2);
 
             InitPill(_stepPill1, L.T("wizard.step1"));
             InitPill(_stepPill2, L.T("wizard.step2"));
@@ -124,17 +142,19 @@ namespace ClaudeUsageWidget
             pills.Controls.Add(_stepPill2);
             pills.Controls.Add(_stepPill3);
 
-            _headerPanel.Controls.Add(_titleLabel);
-            _headerPanel.Controls.Add(_subtitleLabel);
-            _headerPanel.Controls.Add(pills);
+            tHeader.Controls.Add(_titleLabel);
+            tHeader.Controls.Add(_subtitleLabel);
+            tHeader.Controls.Add(pills);
+
+            _headerPanel.Controls.Add(tHeader);
             Controls.Add(_headerPanel);
         }
 
         private void InitPill(Label lbl, string text)
         {
             lbl.Text = text;
-            lbl.Font = new Font("Segoe UI", 8f, FontStyle.Bold);
-            lbl.Padding = new Padding(6, 2, 6, 2);
+            lbl.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            lbl.Padding = new Padding(8, 3, 8, 3);
             lbl.Margin = new Padding(0, 0, 8, 0);
             lbl.AutoSize = true;
         }
@@ -142,8 +162,8 @@ namespace ClaudeUsageWidget
         private void BuildFooter()
         {
             _footer.Dock = DockStyle.Bottom;
-            _footer.Height = 52;
-            _footer.Padding = new Padding(16, 10, 16, 10);
+            _footer.Height = 54;
+            _footer.Padding = new Padding(20, 10, 20, 10);
             _footer.Paint += delegate(object s, PaintEventArgs e)
             {
                 using (Pen p = new Pen(Palette.Border, 1f))
@@ -152,26 +172,34 @@ namespace ClaudeUsageWidget
 
             _btnSkip.Text = L.T("wizard.btn.skip");
             _btnSkip.AutoSize = true;
-            _btnSkip.Location = new Point(16, 12);
+            _btnSkip.Dock = DockStyle.Left;
             _btnSkip.Click += delegate { FinishAndSave(); };
 
-            _btnBack.Text = L.T("wizard.btn.back");
-            _btnBack.AutoSize = true;
-            _btnBack.Location = new Point(370, 12);
-            _btnBack.Click += delegate { if (_step > 0) GoToStep(_step - 1); };
+            FlowLayoutPanel rightButtons = new FlowLayoutPanel();
+            rightButtons.FlowDirection = FlowDirection.RightToLeft;
+            rightButtons.AutoSize = true;
+            rightButtons.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rightButtons.Dock = DockStyle.Right;
 
             _btnNext.Text = L.T("wizard.btn.next");
             _btnNext.AutoSize = true;
-            _btnNext.Location = new Point(460, 12);
+            _btnNext.Margin = new Padding(6, 0, 0, 0);
             _btnNext.Click += delegate
             {
                 if (_step < 2) GoToStep(_step + 1);
                 else FinishAndSave();
             };
 
+            _btnBack.Text = L.T("wizard.btn.back");
+            _btnBack.AutoSize = true;
+            _btnBack.Margin = new Padding(6, 0, 0, 0);
+            _btnBack.Click += delegate { if (_step > 0) GoToStep(_step - 1); };
+
+            rightButtons.Controls.Add(_btnNext);
+            rightButtons.Controls.Add(_btnBack);
+
             _footer.Controls.Add(_btnSkip);
-            _footer.Controls.Add(_btnBack);
-            _footer.Controls.Add(_btnNext);
+            _footer.Controls.Add(rightButtons);
             Controls.Add(_footer);
         }
 
@@ -181,8 +209,11 @@ namespace ClaudeUsageWidget
             _body.Padding = new Padding(24, 16, 24, 16);
 
             _page1.Dock = DockStyle.Fill;
+            _page1.AutoScroll = true;
             _page2.Dock = DockStyle.Fill;
+            _page2.AutoScroll = true;
             _page3.Dock = DockStyle.Fill;
+            _page3.AutoScroll = true;
 
             _body.Controls.Add(_page1);
             _body.Controls.Add(_page2);
@@ -192,19 +223,27 @@ namespace ClaudeUsageWidget
 
         private void BuildPage1()
         {
-            int y = 4;
+            TableLayoutPanel t = new TableLayoutPanel();
+            t.ColumnCount = 1;
+            t.AutoSize = true;
+            t.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            t.Dock = DockStyle.Top;
+            t.Padding = new Padding(0, 0, 12, 0);
 
-            // Language Selector
-            Label lblLang = new Label();
-            lblLang.Text = L.T("set.language");
-            lblLang.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
-            lblLang.AutoSize = true;
-            lblLang.Location = new Point(0, y);
-            _page1.Controls.Add(lblLang);
+            // Language Row
+            FlowLayoutPanel langRow = new FlowLayoutPanel();
+            langRow.FlowDirection = FlowDirection.LeftToRight;
+            langRow.AutoSize = true;
+            langRow.Margin = new Padding(0, 0, 0, 12);
+
+            _lblLang.Text = L.T("set.language");
+            _lblLang.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            _lblLang.AutoSize = true;
+            _lblLang.Margin = new Padding(0, 4, 12, 0);
+            langRow.Controls.Add(_lblLang);
 
             _cboLang.DropDownStyle = ComboBoxStyle.DropDownList;
             _cboLang.Width = 200;
-            _cboLang.Location = new Point(220, y - 2);
             _cboLang.Items.Add("English"); _langCodes.Add("en");
             _cboLang.Items.Add("Bahasa Indonesia"); _langCodes.Add("id");
             foreach (LangPackInfo p in LangPacks.Discover()) { _cboLang.Items.Add(p.Name); _langCodes.Add(p.Code); }
@@ -219,152 +258,156 @@ namespace ClaudeUsageWidget
                     UpdateAllTexts();
                 }
             };
-            _page1.Controls.Add(_cboLang);
-            y += 36;
+            langRow.Controls.Add(_cboLang);
+            t.Controls.Add(langRow);
 
             // Divider
-            Label div1 = new Label(); div1.BorderStyle = BorderStyle.Fixed3D; div1.Height = 2; div1.Width = 510; div1.Location = new Point(0, y);
-            _page1.Controls.Add(div1);
-            y += 14;
+            Label div = new Label();
+            div.BorderStyle = BorderStyle.Fixed3D;
+            div.Height = 2;
+            div.Dock = DockStyle.Top;
+            div.Margin = new Padding(0, 0, 0, 14);
+            t.Controls.Add(div);
 
             // Detection logic
             bool claudeFound = Directory.Exists(Paths.ProjectsDir);
             bool geminiFound = Directory.Exists(Paths.AntigravityBrainDir);
 
-            // Card 1: Claude Code
-            _chkClaude.Text = L.T("wizard.claude.title");
-            _chkClaude.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
-            _chkClaude.AutoSize = true;
-            _chkClaude.Location = new Point(4, y);
-            _chkClaude.Checked = _cfg.ScanClaude || claudeFound;
-            _page1.Controls.Add(_chkClaude);
+            // Provider 1: Claude Code
+            t.Controls.Add(BuildProviderCard(
+                _chkClaude, L.T("wizard.claude.title"), _cfg.ScanClaude || claudeFound,
+                _lblClaudeStatus, claudeFound ? L.T("wizard.detected") : L.T("wizard.notdetected"), claudeFound,
+                _lblClaudeDesc, L.T("wizard.claude.desc")
+            ));
 
-            _lblClaudeStatus.Text = claudeFound ? L.T("wizard.detected") : L.T("wizard.notdetected");
-            _lblClaudeStatus.ForeColor = claudeFound ? Palette.Green : Palette.Dim;
-            _lblClaudeStatus.AutoSize = true;
-            _lblClaudeStatus.Location = new Point(260, y + 2);
-            _page1.Controls.Add(_lblClaudeStatus);
-            y += 22;
+            // Provider 2: Google Antigravity
+            t.Controls.Add(BuildProviderCard(
+                _chkGemini, L.T("wizard.gemini.title"), _cfg.ScanGemini || geminiFound,
+                _lblGeminiStatus, geminiFound ? L.T("wizard.detected") : L.T("wizard.notdetected"), geminiFound,
+                _lblGeminiDesc, L.T("wizard.gemini.desc")
+            ));
 
-            Label lblClaudeDesc = new Label();
-            lblClaudeDesc.Text = L.T("wizard.claude.desc");
-            lblClaudeDesc.ForeColor = Palette.Dim;
-            lblClaudeDesc.AutoSize = true;
-            lblClaudeDesc.Location = new Point(24, y);
-            _page1.Controls.Add(lblClaudeDesc);
-            y += 38;
+            // Provider 3: Ollama
+            t.Controls.Add(BuildProviderCard(
+                _chkOllama, L.T("wizard.ollama.title"), _cfg.OllamaEnabled,
+                _lblOllamaStatus, "Port " + _cfg.OllamaPort, false,
+                _lblOllamaDesc, L.T("wizard.ollama.desc")
+            ));
 
-            // Card 2: Google Antigravity
-            _chkGemini.Text = L.T("wizard.gemini.title");
-            _chkGemini.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
-            _chkGemini.AutoSize = true;
-            _chkGemini.Location = new Point(4, y);
-            _chkGemini.Checked = _cfg.ScanGemini || geminiFound;
-            _page1.Controls.Add(_chkGemini);
+            _page1.Controls.Add(t);
+        }
 
-            _lblGeminiStatus.Text = geminiFound ? L.T("wizard.detected") : L.T("wizard.notdetected");
-            _lblGeminiStatus.ForeColor = geminiFound ? Palette.Green : Palette.Dim;
-            _lblGeminiStatus.AutoSize = true;
-            _lblGeminiStatus.Location = new Point(260, y + 2);
-            _page1.Controls.Add(_lblGeminiStatus);
-            y += 22;
+        private Panel BuildProviderCard(CheckBox chk, string title, bool isChecked, Label lblStatus, string statusText, bool isDetected, Label lblDesc, string descText)
+        {
+            Panel card = new Panel();
+            card.AutoSize = true;
+            card.Dock = DockStyle.Top;
+            card.Margin = new Padding(0, 0, 0, 14);
 
-            Label lblGeminiDesc = new Label();
-            lblGeminiDesc.Text = L.T("wizard.gemini.desc");
-            lblGeminiDesc.ForeColor = Palette.Dim;
-            lblGeminiDesc.AutoSize = true;
-            lblGeminiDesc.Location = new Point(24, y);
-            _page1.Controls.Add(lblGeminiDesc);
-            y += 38;
+            FlowLayoutPanel topRow = new FlowLayoutPanel();
+            topRow.FlowDirection = FlowDirection.LeftToRight;
+            topRow.AutoSize = true;
+            topRow.Dock = DockStyle.Top;
 
-            // Card 3: Ollama
-            _chkOllama.Text = L.T("wizard.ollama.title");
-            _chkOllama.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
-            _chkOllama.AutoSize = true;
-            _chkOllama.Location = new Point(4, y);
-            _chkOllama.Checked = _cfg.OllamaEnabled;
-            _page1.Controls.Add(_chkOllama);
+            chk.Text = title;
+            chk.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            chk.AutoSize = true;
+            chk.Checked = isChecked;
+            chk.Margin = new Padding(0, 0, 10, 0);
+            topRow.Controls.Add(chk);
 
-            _lblOllamaStatus.Text = "Port " + _cfg.OllamaPort;
-            _lblOllamaStatus.ForeColor = Palette.Dim;
-            _lblOllamaStatus.AutoSize = true;
-            _lblOllamaStatus.Location = new Point(260, y + 2);
-            _page1.Controls.Add(_lblOllamaStatus);
-            y += 22;
+            lblStatus.Text = statusText;
+            lblStatus.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+            lblStatus.ForeColor = isDetected ? Palette.Green : Palette.Dim;
+            lblStatus.AutoSize = true;
+            lblStatus.Margin = new Padding(0, 2, 0, 0);
+            topRow.Controls.Add(lblStatus);
 
-            Label lblOllamaDesc = new Label();
-            lblOllamaDesc.Text = L.T("wizard.ollama.desc");
-            lblOllamaDesc.ForeColor = Palette.Dim;
-            lblOllamaDesc.AutoSize = true;
-            lblOllamaDesc.Location = new Point(24, y);
-            _page1.Controls.Add(lblOllamaDesc);
+            lblDesc.Text = descText;
+            lblDesc.ForeColor = Palette.Dim;
+            lblDesc.Font = new Font("Segoe UI", 8.5f);
+            lblDesc.AutoSize = true;
+            lblDesc.MaximumSize = new Size(540, 0);
+            lblDesc.Margin = new Padding(22, 3, 0, 0);
+            lblDesc.Dock = DockStyle.Top;
+
+            card.Controls.Add(lblDesc);
+            card.Controls.Add(topRow);
+            return card;
         }
 
         private void BuildPage2()
         {
-            int y = 8;
+            TableLayoutPanel t = new TableLayoutPanel();
+            t.ColumnCount = 2;
+            t.AutoSize = true;
+            t.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            t.Dock = DockStyle.Top;
+            t.Padding = new Padding(0, 0, 12, 0);
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            // Theme selector
-            Label lblTheme = new Label();
-            lblTheme.Text = L.T("wizard.theme");
-            lblTheme.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-            lblTheme.AutoSize = true;
-            lblTheme.Location = new Point(4, y + 3);
-            _page2.Controls.Add(lblTheme);
+            // Theme row
+            _lblTheme.Text = L.T("wizard.theme");
+            _lblTheme.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblTheme.AutoSize = true;
+            _lblTheme.Anchor = AnchorStyles.Left;
+            t.Controls.Add(_lblTheme, 0, 0);
 
             _cboTheme.DropDownStyle = ComboBoxStyle.DropDownList;
             _cboTheme.Width = 220;
-            _cboTheme.Location = new Point(220, y);
             _cboTheme.Items.Add(L.T("set.theme.dark"));
             _cboTheme.Items.Add(L.T("set.theme.light"));
             _cboTheme.Items.Add(L.T("set.theme.system"));
             _cboTheme.SelectedIndex = _cfg.Theme == "light" ? 1 : (_cfg.Theme == "system" ? 2 : 0);
-            _page2.Controls.Add(_cboTheme);
-            y += 40;
+            _cboTheme.Margin = new Padding(0, 4, 0, 8);
+            t.Controls.Add(_cboTheme, 1, 0);
 
-            // Backdrop selector
-            Label lblBackdrop = new Label();
-            lblBackdrop.Text = L.T("wizard.backdrop");
-            lblBackdrop.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-            lblBackdrop.AutoSize = true;
-            lblBackdrop.Location = new Point(4, y + 3);
-            _page2.Controls.Add(lblBackdrop);
+            // Backdrop row
+            _lblBackdrop.Text = L.T("wizard.backdrop");
+            _lblBackdrop.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblBackdrop.AutoSize = true;
+            _lblBackdrop.Anchor = AnchorStyles.Left;
+            t.Controls.Add(_lblBackdrop, 0, 1);
 
             _cboBackdrop.DropDownStyle = ComboBoxStyle.DropDownList;
             _cboBackdrop.Width = 220;
-            _cboBackdrop.Location = new Point(220, y);
             _cboBackdrop.Items.Add(L.T("backdrop.acrylic"));
             _cboBackdrop.Items.Add(L.T("backdrop.mica"));
             _cboBackdrop.Items.Add(L.T("backdrop.mica_alt"));
             _cboBackdrop.Items.Add(L.T("backdrop.solid"));
             int bi = Array.IndexOf(Backdrops, _cfg.Backdrop);
             _cboBackdrop.SelectedIndex = bi >= 0 ? bi : 0;
-            _page2.Controls.Add(_cboBackdrop);
-            y += 44;
+            _cboBackdrop.Margin = new Padding(0, 4, 0, 14);
+            t.Controls.Add(_cboBackdrop, 1, 1);
 
-            // Divider
-            Label div2 = new Label(); div2.BorderStyle = BorderStyle.Fixed3D; div2.Height = 2; div2.Width = 510; div2.Location = new Point(0, y);
-            _page2.Controls.Add(div2);
-            y += 16;
+            // Divider row
+            Label div = new Label();
+            div.BorderStyle = BorderStyle.Fixed3D;
+            div.Height = 2;
+            div.Dock = DockStyle.Top;
+            div.Margin = new Padding(0, 4, 0, 14);
+            t.Controls.Add(div, 0, 2);
+            t.SetColumnSpan(div, 2);
 
-            // Placement: Dock
+            // Dock Checkbox row
             _chkDock.Text = L.T("wizard.dock.enable");
             _chkDock.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
             _chkDock.AutoSize = true;
-            _chkDock.Location = new Point(4, y);
             _chkDock.Checked = _cfg.DockTop;
-            _page2.Controls.Add(_chkDock);
-            y += 32;
+            _chkDock.Margin = new Padding(0, 0, 0, 8);
+            t.Controls.Add(_chkDock, 0, 3);
+            t.SetColumnSpan(_chkDock, 2);
 
-            Label lblEdge = new Label();
-            lblEdge.Text = L.T("wizard.dock.pos");
-            lblEdge.AutoSize = true;
-            lblEdge.Location = new Point(24, y + 3);
-            _page2.Controls.Add(lblEdge);
+            // Dock Position row
+            _lblEdge.Text = L.T("wizard.dock.pos");
+            _lblEdge.AutoSize = true;
+            _lblEdge.Anchor = AnchorStyles.Left;
+            _lblEdge.Margin = new Padding(22, 0, 0, 0);
+            t.Controls.Add(_lblEdge, 0, 4);
 
             _cboEdge.DropDownStyle = ComboBoxStyle.DropDownList;
-            _cboEdge.Width = 200;
-            _cboEdge.Location = new Point(220, y);
+            _cboEdge.Width = 220;
             _cboEdge.Items.Add(L.T("edge.top"));
             _cboEdge.Items.Add(L.T("edge.top_left"));
             _cboEdge.Items.Add(L.T("edge.top_right"));
@@ -373,110 +416,125 @@ namespace ClaudeUsageWidget
             _cboEdge.Items.Add(L.T("edge.bottom_right"));
             int ei = Array.IndexOf(Edges, _cfg.DockEdge);
             _cboEdge.SelectedIndex = ei >= 0 ? ei : 0;
-            _page2.Controls.Add(_cboEdge);
-            y += 44;
+            _cboEdge.Margin = new Padding(0, 2, 0, 16);
+            t.Controls.Add(_cboEdge, 1, 4);
 
-            // Mode: Dual Cards vs Mini Pill
-            Label lblMode = new Label();
-            lblMode.Text = L.T("wizard.view.mode");
-            lblMode.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
-            lblMode.AutoSize = true;
-            lblMode.Location = new Point(4, y);
-            _page2.Controls.Add(lblMode);
-            y += 24;
+            // View Mode row
+            _lblMode.Text = L.T("wizard.view.mode");
+            _lblMode.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblMode.AutoSize = true;
+            _lblMode.Margin = new Padding(0, 0, 0, 6);
+            t.Controls.Add(_lblMode, 0, 5);
+            t.SetColumnSpan(_lblMode, 2);
 
             _rbDualCards.Text = L.T("wizard.view.dual");
             _rbDualCards.AutoSize = true;
-            _rbDualCards.Location = new Point(24, y);
             _rbDualCards.Checked = !_cfg.Compact;
-            _page2.Controls.Add(_rbDualCards);
-            y += 26;
+            _rbDualCards.Margin = new Padding(22, 0, 0, 4);
+            t.Controls.Add(_rbDualCards, 0, 6);
+            t.SetColumnSpan(_rbDualCards, 2);
 
             _rbPill.Text = L.T("wizard.view.pill");
             _rbPill.AutoSize = true;
-            _rbPill.Location = new Point(24, y);
             _rbPill.Checked = _cfg.Compact;
-            _page2.Controls.Add(_rbPill);
+            _rbPill.Margin = new Padding(22, 0, 0, 8);
+            t.Controls.Add(_rbPill, 0, 7);
+            t.SetColumnSpan(_rbPill, 2);
+
+            _page2.Controls.Add(t);
         }
 
         private void BuildPage3()
         {
-            int y = 8;
+            TableLayoutPanel t = new TableLayoutPanel();
+            t.ColumnCount = 1;
+            t.AutoSize = true;
+            t.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            t.Dock = DockStyle.Top;
+            t.Padding = new Padding(0, 0, 12, 0);
 
-            // Autostart Checkbox
+            // Autostart
             _chkAutostart.Text = L.T("wizard.autostart");
             _chkAutostart.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             _chkAutostart.AutoSize = true;
-            _chkAutostart.Location = new Point(4, y);
             _chkAutostart.Checked = true;
             try { _chkAutostart.Checked = Autostart.IsEnabled; } catch { }
-            _page3.Controls.Add(_chkAutostart);
-            y += 34;
+            _chkAutostart.Margin = new Padding(0, 0, 0, 10);
+            t.Controls.Add(_chkAutostart);
 
-            // Companion Extension Checkbox
+            // Companion
             _chkCompanion.Text = L.T("wizard.companion");
             _chkCompanion.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             _chkCompanion.AutoSize = true;
-            _chkCompanion.Location = new Point(4, y);
             string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             bool hasIde = Directory.Exists(Path.Combine(userProfile, ".vscode")) || Directory.Exists(Path.Combine(userProfile, ".cursor"));
             _chkCompanion.Checked = hasIde;
-            _page3.Controls.Add(_chkCompanion);
-            y += 22;
+            _chkCompanion.Margin = new Padding(0, 0, 0, 2);
+            t.Controls.Add(_chkCompanion);
 
             _lblCompanionDesc.Text = L.T("wizard.companion.desc");
             _lblCompanionDesc.ForeColor = Palette.Dim;
+            _lblCompanionDesc.Font = new Font("Segoe UI", 8.5f);
             _lblCompanionDesc.AutoSize = true;
-            _lblCompanionDesc.Location = new Point(24, y);
-            _page3.Controls.Add(_lblCompanionDesc);
-            y += 34;
+            _lblCompanionDesc.MaximumSize = new Size(540, 0);
+            _lblCompanionDesc.Margin = new Padding(22, 0, 0, 12);
+            t.Controls.Add(_lblCompanionDesc);
 
-            // Currency Checkbox
+            // Currency
             _chkCurrency.Text = L.T("wizard.currency");
             _chkCurrency.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
             _chkCurrency.AutoSize = true;
-            _chkCurrency.Location = new Point(4, y);
             _chkCurrency.Checked = _cfg.CurrencyCustomEnabled || string.Equals(_cfg.Language, "id", StringComparison.OrdinalIgnoreCase);
-            _page3.Controls.Add(_chkCurrency);
-            y += 36;
+            _chkCurrency.Margin = new Padding(0, 0, 0, 16);
+            t.Controls.Add(_chkCurrency);
 
             // Tips Card
-            _tipsCard.Location = new Point(4, y);
-            _tipsCard.Size = new Size(516, 128);
-            _tipsCard.Padding = new Padding(12);
+            _tipsCard.AutoSize = true;
+            _tipsCard.Dock = DockStyle.Top;
+            _tipsCard.Padding = new Padding(14, 10, 14, 10);
+            _tipsCard.Margin = new Padding(0, 0, 0, 8);
             _tipsCard.Paint += delegate(object s, PaintEventArgs e)
             {
                 using (Pen p = new Pen(Palette.Border, 1f))
                     e.Graphics.DrawRectangle(p, 0, 0, _tipsCard.Width - 1, _tipsCard.Height - 1);
             };
 
+            TableLayoutPanel tTips = new TableLayoutPanel();
+            tTips.ColumnCount = 1;
+            tTips.AutoSize = true;
+            tTips.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            tTips.Dock = DockStyle.Top;
+
             _lblTipsTitle.Text = L.T("wizard.tips.title");
             _lblTipsTitle.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
             _lblTipsTitle.AutoSize = true;
-            _lblTipsTitle.Location = new Point(10, 8);
-            _tipsCard.Controls.Add(_lblTipsTitle);
+            _lblTipsTitle.Margin = new Padding(0, 0, 0, 6);
+            tTips.Controls.Add(_lblTipsTitle);
 
-            _lblTip1.Text = L.T("wizard.tip.hotkey");
-            _lblTip1.AutoSize = true;
-            _lblTip1.Location = new Point(12, 30);
-            _tipsCard.Controls.Add(_lblTip1);
+            InitTipLabel(_lblTip1, L.T("wizard.tip.hotkey"));
+            InitTipLabel(_lblTip2, L.T("wizard.tip.hover"));
+            InitTipLabel(_lblTip3, L.T("wizard.tip.doubleclick"));
+            InitTipLabel(_lblTip4, L.T("wizard.tip.tray"));
 
-            _lblTip2.Text = L.T("wizard.tip.hover");
-            _lblTip2.AutoSize = true;
-            _lblTip2.Location = new Point(12, 50);
-            _tipsCard.Controls.Add(_lblTip2);
+            tTips.Controls.Add(_lblTip1);
+            tTips.Controls.Add(_lblTip2);
+            tTips.Controls.Add(_lblTip3);
+            tTips.Controls.Add(_lblTip4);
 
-            _lblTip3.Text = L.T("wizard.tip.doubleclick");
-            _lblTip3.AutoSize = true;
-            _lblTip3.Location = new Point(12, 70);
-            _tipsCard.Controls.Add(_lblTip3);
+            _tipsCard.Controls.Add(tTips);
+            t.Controls.Add(_tipsCard);
 
-            _lblTip4.Text = L.T("wizard.tip.tray");
-            _lblTip4.AutoSize = true;
-            _lblTip4.Location = new Point(12, 90);
-            _tipsCard.Controls.Add(_lblTip4);
+            _page3.Controls.Add(t);
+        }
 
-            _page3.Controls.Add(_tipsCard);
+        private void InitTipLabel(Label lbl, string text)
+        {
+            lbl.Text = text;
+            lbl.Font = new Font("Segoe UI", 8.5f);
+            lbl.ForeColor = Palette.Dim;
+            lbl.AutoSize = true;
+            lbl.MaximumSize = new Size(510, 0);
+            lbl.Margin = new Padding(0, 0, 0, 4);
         }
 
         private void GoToStep(int s)
@@ -509,11 +567,22 @@ namespace ClaudeUsageWidget
             _stepPill2.Text = L.T("wizard.step2");
             _stepPill3.Text = L.T("wizard.step3");
 
-            _chkClaude.Text = L.T("wizard.claude.title");
-            _chkGemini.Text = L.T("wizard.gemini.title");
-            _chkOllama.Text = L.T("wizard.ollama.title");
+            _lblLang.Text = L.T("set.language");
 
+            _chkClaude.Text = L.T("wizard.claude.title");
+            _lblClaudeDesc.Text = L.T("wizard.claude.desc");
+
+            _chkGemini.Text = L.T("wizard.gemini.title");
+            _lblGeminiDesc.Text = L.T("wizard.gemini.desc");
+
+            _chkOllama.Text = L.T("wizard.ollama.title");
+            _lblOllamaDesc.Text = L.T("wizard.ollama.desc");
+
+            _lblTheme.Text = L.T("wizard.theme");
+            _lblBackdrop.Text = L.T("wizard.backdrop");
             _chkDock.Text = L.T("wizard.dock.enable");
+            _lblEdge.Text = L.T("wizard.dock.pos");
+            _lblMode.Text = L.T("wizard.view.mode");
             _rbDualCards.Text = L.T("wizard.view.dual");
             _rbPill.Text = L.T("wizard.view.pill");
 
