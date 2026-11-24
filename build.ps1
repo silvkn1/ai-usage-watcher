@@ -46,6 +46,10 @@ $extra = @(
     (Join-Path $root 'README.md')
 )
 foreach ($f in $extra) { Copy-Item $f $dist -Force }
+$compSrc = Join-Path $root 'companion'
+if (Test-Path $compSrc) {
+    Copy-Item -Path $compSrc -Destination $dist -Recurse -Force
+}
 $exe = Get-Item "$dist\AIUsageWatcher.exe"
 Write-Host ("OK: {0} ({1:N0} KB)" -f $exe.FullName, ($exe.Length / 1KB))
 
@@ -53,8 +57,10 @@ if ($Package) {
     $ver = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName).FileVersion
     $zip = Join-Path $dist "AIUsageWatcher-$ver.zip"
     if (Test-Path $zip) { Remove-Item $zip }
-    # Hanya exe, skrip, README. Tidak pernah config/snapshot/log pengguna.
+    # Hanya exe, skrip, README, companion. Tidak pernah config/snapshot/log pengguna.
     $items = @($exe.FullName) + ($extra | ForEach-Object { Join-Path $dist (Split-Path $_ -Leaf) })
+    $distComp = Join-Path $dist 'companion'
+    if (Test-Path $distComp) { $items += $distComp }
     Compress-Archive -Path $items -DestinationPath $zip
     Write-Host "Paket: $zip"
     # Checksum untuk catatan rilis (bukan tanda tangan penerbit; hanya memudahkan verifikasi unduhan).

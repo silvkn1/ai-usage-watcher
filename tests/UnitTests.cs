@@ -1014,6 +1014,65 @@ namespace Tests
             Assert.Equal(8080, cfg.OllamaPort);
             Assert.False(cfg.OllamaEnabled);
         }
+
+        public static void Test_Backdrop_Configuration_And_Validation()
+        {
+            AppConfig cfg = new AppConfig();
+            Assert.NotNull(cfg.Backdrop, "Backdrop must not be null");
+            Assert.True(DwmBackdrop.IsBackdropActive("acrylic"), "acrylic must be active");
+            Assert.True(DwmBackdrop.IsBackdropActive("mica"), "mica must be active");
+            Assert.True(DwmBackdrop.IsBackdropActive("mica-alt"), "mica-alt must be active");
+            Assert.False(DwmBackdrop.IsBackdropActive("solid"), "solid must not be active backdrop");
+            Assert.False(DwmBackdrop.IsBackdropActive("none"), "none must not be active backdrop");
+            Assert.False(DwmBackdrop.IsBackdropActive(""), "empty must not be active backdrop");
+        }
+
+        public static void Test_Corner_Snap_Docking_Coordinates()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                IntPtr h = f.Handle;
+                Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+
+                f.SnapTo("top-left", "");
+                Assert.True(f.Left >= wa.Left, "top-left X within screen");
+                Assert.True(f.Top >= wa.Top, "top-left Y within screen");
+
+                f.SnapTo("top-right", "");
+                Assert.True(f.Right <= wa.Right, "top-right X within screen");
+                Assert.True(f.Top >= wa.Top, "top-right Y within screen");
+
+                f.SnapTo("bottom-left", "");
+                Assert.True(f.Left >= wa.Left, "bottom-left X within screen");
+                Assert.True(f.Bottom <= wa.Bottom, "bottom-left Y within screen");
+
+                f.SnapTo("bottom-right", "");
+                Assert.True(f.Right <= wa.Right, "bottom-right X within screen");
+                Assert.True(f.Bottom <= wa.Bottom, "bottom-right Y within screen");
+            }
+        }
+
+        public static void Test_Companion_Extension_Manifest()
+        {
+            string paths, error;
+            string testDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test-extensions", "ai-usage-watcher");
+            if (Directory.Exists(testDir)) Directory.Delete(testDir, true);
+
+            bool ok = CompanionInstaller.InstallTo(testDir, out paths, out error);
+            Assert.True(ok, "Companion installer should succeed: " + error);
+            Assert.True(!string.IsNullOrEmpty(paths), "Installed paths should not be empty");
+
+            string pkgFile = Path.Combine(testDir, "package.json");
+            Assert.True(File.Exists(pkgFile), "package.json must be written");
+            string json = File.ReadAllText(pkgFile);
+            Assert.True(json.Contains("ai-usage-watcher"), "Package json must contain extension name");
+            Assert.True(json.Contains("aiUsageWatcher.openStatus"), "Package json must contain openStatus command");
+
+            string extFile = Path.Combine(testDir, "extension.js");
+            Assert.True(File.Exists(extFile), "extension.js must be written");
+            string js = File.ReadAllText(extFile);
+            Assert.True(js.Contains("createStatusBarItem"), "extension.js must create status bar item");
+        }
     }
 
     public static class TestRunner

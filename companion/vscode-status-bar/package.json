@@ -1,0 +1,33 @@
+{
+  "name": "ai-usage-watcher",
+  "displayName": "AI Usage Watcher Companion",
+  "description": "Live status bar metrics for Claude Code & Antigravity quotas, cost, and Ollama",
+  "version": "1.0.0",
+  "publisher": "silvkn1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/silvkn1/ai-usage-watcher.git"
+  },
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiUsageWatcher.openStatus",
+        "title": "AI Usage: Open Status File"
+      },
+      {
+        "command": "aiUsageWatcher.refresh",
+        "title": "AI Usage: Refresh Metrics"
+      }
+    ]
+  }
+}

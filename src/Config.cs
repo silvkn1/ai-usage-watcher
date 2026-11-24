@@ -88,6 +88,9 @@ namespace ClaudeUsageWidget
         public bool OllamaEnabled { get; set; }
         public int OllamaPort { get; set; }
 
+        // Efek visual latar belakang: "solid", "acrylic", "mica", "mica-alt"
+        public string Backdrop { get; set; }
+
         public AppConfig()
         {
             OpacityPercent = 90;
@@ -127,6 +130,7 @@ namespace ClaudeUsageWidget
             AntigravityQuota7dTokens = 10000000;
             OllamaEnabled = true;
             OllamaPort = 11434;
+            Backdrop = DwmBackdrop.IsWindows11 ? "acrylic" : "solid";
         }
 
         public static AppConfig Load()
@@ -144,7 +148,11 @@ namespace ClaudeUsageWidget
                         if (c.Theme != "light" && c.Theme != "system") c.Theme = "dark";
                         if (!LangPacks.Exists(c.Language)) c.Language = "en";   // "en", "id", atau kode paket bahasa terpasang
                         if (c.HistoryDays != 30) c.HistoryDays = 14;
-                        if (c.DockEdge != "bottom" && c.DockEdge != "left" && c.DockEdge != "right") c.DockEdge = "top";
+                        if (c.DockEdge != "bottom" && c.DockEdge != "left" && c.DockEdge != "right" &&
+                            c.DockEdge != "top-left" && c.DockEdge != "top-right" &&
+                            c.DockEdge != "bottom-left" && c.DockEdge != "bottom-right" &&
+                            c.DockEdge != "top-center" && c.DockEdge != "bottom-center")
+                            c.DockEdge = "top";
                         if (c.DockMonitor == null) c.DockMonitor = "";
                         if (double.IsNaN(c.BudgetDaily) || c.BudgetDaily < 0) c.BudgetDaily = 0;
                         if (double.IsNaN(c.BudgetMonthly) || c.BudgetMonthly < 0) c.BudgetMonthly = 0;
@@ -156,6 +164,8 @@ namespace ClaudeUsageWidget
                         if (c.BurnRateThresholdTokens <= 0) c.BurnRateThresholdTokens = 100000;
                         if (c.WebhookUrl == null) c.WebhookUrl = "";
                         if (c.OllamaPort <= 0 || c.OllamaPort > 65535) c.OllamaPort = 11434;
+                        if (c.Backdrop != "solid" && c.Backdrop != "acrylic" && c.Backdrop != "mica" && c.Backdrop != "mica-alt")
+                            c.Backdrop = DwmBackdrop.IsWindows11 ? "acrylic" : "solid";
                         c.ShowInTaskbar = false;
                         return c;
                     }

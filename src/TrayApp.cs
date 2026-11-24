@@ -29,7 +29,7 @@ namespace ClaudeUsageWidget
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miRefresh, _miCopy, _miSettings, _miData, _miExit, _miCsv, _miReport, _miProjects;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miSettings, _miData, _miExit, _miCsv, _miReport, _miProjects;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
@@ -37,12 +37,14 @@ namespace ClaudeUsageWidget
         {
             _miShow.Text = L.T("tray.show");
             _miDock.Text = L.T("tray.dock");
+            if (_miSnap != null) { _miSnap.Text = L.T("tray.snap"); PopulateSnapMenu(_miSnap); }
             _miCompact.Text = L.T("tray.compact");
             _miClickThrough.Text = L.T("tray.clickthrough");
             _miRemaining.Text = L.T("tray.remaining");
             _miRefresh.Text = L.T("tray.refresh");
             if (_miCopy != null) _miCopy.Text = L.T("tray.copystatus");
             _miSettings.Text = L.T("tray.settings");
+            if (_miCompanion != null) _miCompanion.Text = L.T("tray.companion");
             _miData.Text = L.T("tray.datafolder");
             _miCsv.Text = L.T("tray.exportcsv");
             if (_miReport != null) _miReport.Text = L.T("tray.exportreport");
@@ -89,6 +91,7 @@ namespace ClaudeUsageWidget
 
             Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
             _float = new FloatingForm();
+            _float.Backdrop = _cfg.Backdrop;
             _float.Compact = _cfg.Compact;
             _float.ClickThrough = _cfg.ClickThrough;
             ApplyOpacity();
@@ -114,6 +117,7 @@ namespace ClaudeUsageWidget
             _float.PlaceAt(_cfg.FloatX, _cfg.FloatY, _cfg.HasPosition);
             _float.Edge = _cfg.DockEdge;
             _float.MonitorName = _cfg.DockMonitor;
+            _float.Backdrop = _cfg.Backdrop;
             Point dockCenter = _float.DockDefaultCenter();
             _float.DockCenterX = _cfg.HasDockX ? _cfg.DockCenterX : dockCenter.X;
             _float.DockCenterY = _cfg.HasDockY ? _cfg.DockCenterY : dockCenter.Y;
@@ -175,6 +179,7 @@ namespace ClaudeUsageWidget
             if (_popup == null)
             {
                 _popup = new FloatingForm(true);
+                _popup.Backdrop = _cfg.Backdrop;
                 _popup.Dismissed += delegate { _popupHiddenAt = DateTime.Now; };
                 IntPtr force = _popup.Handle;   // buat handle agar ukuran/DPI benar
             }
@@ -565,8 +570,12 @@ namespace ClaudeUsageWidget
             _miCompact.Enabled = !_cfg.DockTop;
             _miClickThrough.Enabled = !_cfg.DockTop;
 
+            _miSnap = new ToolStripMenuItem(L.T("tray.snap"));
+            PopulateSnapMenu(_miSnap);
+
             m.Items.Add(_miShow);
             m.Items.Add(_miDock);
+            m.Items.Add(_miSnap);
             m.Items.Add(_miCompact);
             m.Items.Add(_miRemaining);
             m.Items.Add(_miClickThrough);
@@ -575,6 +584,7 @@ namespace ClaudeUsageWidget
             _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
             _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
+            _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
             _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
@@ -583,6 +593,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miCopy);
             m.Items.Add(_miSettings);
             m.Items.Add(_miProjects);
+            m.Items.Add(_miCompanion);
             m.Items.Add(_miData);
             m.Items.Add(_miCsv);
             m.Items.Add(_miReport);
@@ -598,8 +609,79 @@ namespace ClaudeUsageWidget
 
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(_miExit);
-            m.Opening += delegate { _miShow.Checked = _cfg.ShowFloating; UpdateQuickJumpMenu(); };
+            m.Opening += delegate { _miShow.Checked = _cfg.ShowFloating; if (_miSnap != null) PopulateSnapMenu(_miSnap); UpdateQuickJumpMenu(); };
             return m;
+        }
+
+        private void PopulateSnapMenu(ToolStripMenuItem snapRoot)
+        {
+            snapRoot.DropDownItems.Clear();
+            Screen[] screens = Screen.AllScreens;
+            for (int i = 0; i < screens.Length; i++)
+            {
+                Screen s = screens[i];
+                string scName = s.Primary
+                    ? string.Format("Display {0} ({1}) - {2}x{3}", i + 1, L.T("monitor.primary"), s.Bounds.Width, s.Bounds.Height)
+                    : string.Format("Display {0} - {1}x{2}", i + 1, s.Bounds.Width, s.Bounds.Height);
+
+                ToolStripMenuItem miScreen = new ToolStripMenuItem(scName);
+                string devName = s.DeviceName;
+                bool isCurrentScreen = string.IsNullOrEmpty(_cfg.DockMonitor) ? s.Primary : string.Equals(_cfg.DockMonitor, devName, StringComparison.OrdinalIgnoreCase);
+
+                AddSnapItem(miScreen, L.T("edge.top_left"), "top-left", devName, isCurrentScreen);
+                AddSnapItem(miScreen, L.T("edge.top_right"), "top-right", devName, isCurrentScreen);
+                AddSnapItem(miScreen, L.T("edge.bottom_left"), "bottom-left", devName, isCurrentScreen);
+                AddSnapItem(miScreen, L.T("edge.bottom_right"), "bottom-right", devName, isCurrentScreen);
+                miScreen.DropDownItems.Add(new ToolStripSeparator());
+                AddSnapItem(miScreen, L.T("edge.top"), "top", devName, isCurrentScreen);
+                AddSnapItem(miScreen, L.T("edge.bottom"), "bottom", devName, isCurrentScreen);
+                AddSnapItem(miScreen, L.T("edge.left"), "left", devName, isCurrentScreen);
+                AddSnapItem(miScreen, L.T("edge.right"), "right", devName, isCurrentScreen);
+
+                snapRoot.DropDownItems.Add(miScreen);
+            }
+        }
+
+        private void AddSnapItem(ToolStripMenuItem parent, string label, string edge, string monitorDevice, bool isCurrentScreen)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(label, null, delegate
+            {
+                SnapToPosition(edge, monitorDevice);
+            });
+            if (_cfg.DockTop && isCurrentScreen && string.Equals(_cfg.DockEdge, edge, StringComparison.OrdinalIgnoreCase))
+            {
+                item.Checked = true;
+            }
+            parent.DropDownItems.Add(item);
+        }
+
+        private void SnapToPosition(string edge, string monitorDevice)
+        {
+            _cfg.DockTop = true;
+            _cfg.DockEdge = edge;
+            _cfg.DockMonitor = monitorDevice;
+            _float.SnapTo(edge, monitorDevice);
+            _cfg.DockCenterX = _float.DockCenterX;
+            _cfg.DockCenterY = _float.DockCenterY;
+            _cfg.HasDockX = true;
+            _cfg.HasDockY = true;
+            _cfg.Save();
+            _miDock.Checked = true;
+            if (_miSnap != null) PopulateSnapMenu(_miSnap);
+        }
+
+        private void InstallCompanion()
+        {
+            string paths;
+            string error;
+            if (CompanionInstaller.Install(out paths, out error))
+            {
+                MessageBox.Show(L.T("companion.success", paths), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show(L.T("companion.fail", error), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         /// <summary>Pilihan user (ShowFloating) terpisah dari sembunyi otomatis saat layar penuh.
@@ -803,6 +885,7 @@ namespace ClaudeUsageWidget
             _scanner.SetTrackProjects(_cfg.ShowProjects);   // aktif/nonaktif memicu pindai ulang
             _float.Edge = _cfg.DockEdge;
             _float.MonitorName = _cfg.DockMonitor;
+            _float.Backdrop = _cfg.Backdrop;
             if (oldEdge != _cfg.DockEdge || oldMonitor != _cfg.DockMonitor)
             {
                 Point c = _float.DockDefaultCenter();   // tepi/monitor baru: mulai dari tengah tepi itu

@@ -19,7 +19,8 @@ namespace ClaudeUsageWidget
     /// </summary>
     internal class SettingsForm : Form
     {
-        private static readonly string[] Edges = { "top", "bottom", "left", "right" };
+        private static readonly string[] Edges = { "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right" };
+        private static readonly string[] Backdrops = { "solid", "acrylic", "mica", "mica-alt" };
 
         private readonly AppConfig _cfg;
         private readonly SettingsCallbacks _cb;
@@ -30,7 +31,7 @@ namespace ClaudeUsageWidget
         private readonly NumericUpDown _probeMin = new NumericUpDown();
         private readonly CheckBox _mirror = new CheckBox(), _dock = new CheckBox(), _onTop = new CheckBox(), _hideFs = new CheckBox();
         private readonly ComboBox _theme = new ComboBox(), _lang = new ComboBox();
-        private readonly ComboBox _histDays = new ComboBox(), _edge = new ComboBox(), _monitor = new ComboBox();
+        private readonly ComboBox _histDays = new ComboBox(), _edge = new ComboBox(), _monitor = new ComboBox(), _backdrop = new ComboBox();
         private readonly List<string> _langCodes = new List<string>();
         private readonly List<string> _monitorNames = new List<string>();
         private readonly CheckBox _remaining = new CheckBox(), _hotkeyOn = new CheckBox(), _alertsOn = new CheckBox(), _resetOn = new CheckBox(), _wsl = new CheckBox();
@@ -194,8 +195,15 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.histdays"), _histDays);
 
             AddCheck(t, _dock, L.T("set.dock"), _cfg.DockTop);
-            _edge.DropDownStyle = ComboBoxStyle.DropDownList; _edge.Width = 160;
-            _edge.Items.Add(L.T("edge.top")); _edge.Items.Add(L.T("edge.bottom")); _edge.Items.Add(L.T("edge.left")); _edge.Items.Add(L.T("edge.right"));
+            _edge.DropDownStyle = ComboBoxStyle.DropDownList; _edge.Width = 180;
+            _edge.Items.Add(L.T("edge.top"));
+            _edge.Items.Add(L.T("edge.bottom"));
+            _edge.Items.Add(L.T("edge.left"));
+            _edge.Items.Add(L.T("edge.right"));
+            _edge.Items.Add(L.T("edge.top_left"));
+            _edge.Items.Add(L.T("edge.top_right"));
+            _edge.Items.Add(L.T("edge.bottom_left"));
+            _edge.Items.Add(L.T("edge.bottom_right"));
             int ei = Array.IndexOf(Edges, _cfg.DockEdge);
             _edge.SelectedIndex = ei >= 0 ? ei : 0;
             AddRow(t, L.T("set.dock.edge"), _edge);
@@ -210,6 +218,15 @@ namespace ClaudeUsageWidget
             int mi = string.IsNullOrEmpty(_cfg.DockMonitor) ? 0 : _monitorNames.IndexOf(_cfg.DockMonitor);
             _monitor.SelectedIndex = mi >= 0 ? mi : 0;
             AddRow(t, L.T("set.dock.monitor"), _monitor);
+
+            _backdrop.DropDownStyle = ComboBoxStyle.DropDownList; _backdrop.Width = 200;
+            _backdrop.Items.Add(L.T("backdrop.solid"));
+            _backdrop.Items.Add(L.T("backdrop.acrylic"));
+            _backdrop.Items.Add(L.T("backdrop.mica"));
+            _backdrop.Items.Add(L.T("backdrop.mica_alt"));
+            int bi = Array.IndexOf(Backdrops, _cfg.Backdrop);
+            _backdrop.SelectedIndex = bi >= 0 ? bi : 0;
+            AddRow(t, L.T("set.backdrop"), _backdrop);
 
             AddCheck(t, _compact, L.T("set.compact"), _cfg.Compact);
             AddCheck(t, _click, L.T("set.click"), _cfg.ClickThrough);
@@ -605,6 +622,7 @@ namespace ClaudeUsageWidget
             _cfg.HistoryDays = _histDays.SelectedIndex == 1 ? 30 : 14;
             _cfg.DockEdge = _edge.SelectedIndex >= 0 && _edge.SelectedIndex < Edges.Length ? Edges[_edge.SelectedIndex] : "top";
             _cfg.DockMonitor = _monitor.SelectedIndex >= 0 && _monitor.SelectedIndex < _monitorNames.Count ? _monitorNames[_monitor.SelectedIndex] : "";
+            _cfg.Backdrop = _backdrop.SelectedIndex >= 0 && _backdrop.SelectedIndex < Backdrops.Length ? Backdrops[_backdrop.SelectedIndex] : "solid";
             _cfg.OpacityPercent = _opacity.Value;
             _cfg.ShowFloating = _showFloat.Checked;
             _cfg.Compact = _compact.Checked;

@@ -96,6 +96,128 @@ namespace ClaudeUsageWidget
         }
     }
 
+    // ---------------- efek kaca buram Windows 11 Mica / Acrylic ----------------
+    internal static class DwmBackdrop
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MARGINS { public int cxLeftWidth, cxRightWidth, cyTopHeight, cyBottomHeight; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AccentPolicy
+        {
+            public int AccentState;
+            public int AccentFlags;
+            public int GradientColor;
+            public int AnimationId;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WindowCompositionAttributeData
+        {
+            public int Attribute;
+            public IntPtr Data;
+            public int SizeOfData;
+        }
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmExtendFrameIntoClientArea(IntPtr hWnd, ref MARGINS pMarInset);
+
+        [DllImport("user32.dll")]
+        private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
+
+        public const int DWMWA_MICA_EFFECT = 1029;
+        public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+
+        public const int BACKDROP_AUTO = 0;
+        public const int BACKDROP_NONE = 1;
+        public const int BACKDROP_MICA = 2;
+        public const int BACKDROP_ACRYLIC = 3;
+        public const int BACKDROP_MICA_ALT = 4;
+
+        public static bool IsWindows11
+        {
+            get
+            {
+                try { return Environment.OSVersion.Version.Major >= 10 && Environment.OSVersion.Version.Build >= 22000; }
+                catch { return false; }
+            }
+        }
+
+        public static bool IsBackdropActive(string type)
+        {
+            return !string.IsNullOrEmpty(type) && type != "solid" && type != "none";
+        }
+
+        public static void Apply(IntPtr hwnd, string type, bool isDark)
+        {
+            if (hwnd == IntPtr.Zero) return;
+            try
+            {
+                if (string.IsNullOrEmpty(type) || type == "solid" || type == "none")
+                {
+                    if (IsWindows11 && Environment.OSVersion.Version.Build >= 22621)
+                    {
+                        int none = BACKDROP_NONE;
+                        DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref none, 4);
+                    }
+                    return;
+                }
+
+                MARGINS margins = new MARGINS { cxLeftWidth = -1, cxRightWidth = -1, cyTopHeight = -1, cyBottomHeight = -1 };
+                DwmExtendFrameIntoClientArea(hwnd, ref margins);
+
+                if (IsWindows11 && Environment.OSVersion.Version.Build >= 22621)
+                {
+                    int bType = BACKDROP_ACRYLIC;
+                    if (type == "mica") bType = BACKDROP_MICA;
+                    else if (type == "mica-alt") bType = BACKDROP_MICA_ALT;
+                    DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref bType, 4);
+                }
+                else if (IsWindows11)
+                {
+                    int micaVal = 1;
+                    DwmSetWindowAttribute(hwnd, DWMWA_MICA_EFFECT, ref micaVal, 4);
+                }
+
+                if (type == "acrylic" || !IsWindows11)
+                {
+                    int gradientColor = isDark ? unchecked((int)0xCC202024) : unchecked((int)0xCCF4F5F7);
+                    AccentPolicy policy = new AccentPolicy
+                    {
+                        AccentState = 4, // ACCENT_ENABLE_ACRYLICBLURBEHIND
+                        AccentFlags = 2,
+                        GradientColor = gradientColor,
+                        AnimationId = 0
+                    };
+                    int size = Marshal.SizeOf(policy);
+                    IntPtr pPolicy = Marshal.AllocHGlobal(size);
+                    try
+                    {
+                        Marshal.StructureToPtr(policy, pPolicy, false);
+                        WindowCompositionAttributeData data = new WindowCompositionAttributeData
+                        {
+                            Attribute = 19, // WCA_ACCENT_POLICY
+                            Data = pPolicy,
+                            SizeOfData = size
+                        };
+                        SetWindowCompositionAttribute(hwnd, ref data);
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(pPolicy);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("dwm.backdrop", ex);
+            }
+        }
+    }
+
     // ---------------- ikon tray: satu angka besar ----------------
     internal static class TrayIconPainter
     {

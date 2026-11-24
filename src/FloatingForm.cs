@@ -145,6 +145,7 @@ namespace ClaudeUsageWidget
         {
             base.OnHandleCreated(e);
             try { int round = 2; DwmSetWindowAttribute(Handle, 33, ref round, 4); } catch { }  // sudut membulat Win11
+            DwmBackdrop.Apply(Handle, Backdrop, !Palette.IsLight);
             Relayout();
         }
 
@@ -157,6 +158,7 @@ namespace ClaudeUsageWidget
         public void ApplyTheme()
         {
             BackColor = Palette.Bg;
+            if (IsHandleCreated) DwmBackdrop.Apply(Handle, Backdrop, !Palette.IsLight);
             Relayout();
             Invalidate();
         }
@@ -263,12 +265,14 @@ namespace ClaudeUsageWidget
             }
         }
 
-        /// <summary>Tepi tempel: "top", "bottom", "left", atau "right". Widget menempel rata pada tepi area kerja monitor tempel.</summary>
+        /// <summary>Tepi tempel: "top", "bottom", "left", "right", atau 4 sudut: "top-left", "top-right", "bottom-left", "bottom-right".</summary>
         public string Edge = "top";
         /// <summary>Screen.DeviceName monitor tempel; kosong atau tidak ditemukan = monitor utama.</summary>
         public string MonitorName = "";
         /// <summary>Titik tengah vertikal widget saat menempel di tepi kiri/kanan (koordinat layar).</summary>
         public int DockCenterY { get; set; }
+        /// <summary>Jenis efek latar belakang Windows 11: "solid", "acrylic", "mica", "mica-alt".</summary>
+        public string Backdrop { get; set; }
 
         private Screen DockScreen()
         {
@@ -296,14 +300,58 @@ namespace ClaudeUsageWidget
         {
             Rectangle wa = DockScreen().WorkingArea;
             int x, y;
+            float s = DpiScale;
+            int margin = (int)(8 * s);
             switch (Edge)
             {
-                case "bottom": x = Clamp(DockCenterX - Width / 2, wa.Left, wa.Right - Width); y = wa.Bottom - Height; break;   // tumbuh ke atas
-                case "left":   x = wa.Left; y = Clamp(DockCenterY - Height / 2, wa.Top, wa.Bottom - Height); break;
-                case "right":  x = wa.Right - Width; y = Clamp(DockCenterY - Height / 2, wa.Top, wa.Bottom - Height); break;
-                default:       x = Clamp(DockCenterX - Width / 2, wa.Left, wa.Right - Width); y = wa.Top; break;
+                case "top-left":
+                    x = wa.Left + margin;
+                    y = wa.Top + margin;
+                    break;
+                case "top-right":
+                    x = wa.Right - Width - margin;
+                    y = wa.Top + margin;
+                    break;
+                case "bottom-left":
+                    x = wa.Left + margin;
+                    y = wa.Bottom - Height - margin;
+                    break;
+                case "bottom-right":
+                    x = wa.Right - Width - margin;
+                    y = wa.Bottom - Height - margin;
+                    break;
+                case "bottom":
+                case "bottom-center":
+                    x = Clamp(DockCenterX - Width / 2, wa.Left, wa.Right - Width);
+                    y = wa.Bottom - Height;
+                    break;
+                case "left":
+                    x = wa.Left;
+                    y = Clamp(DockCenterY - Height / 2, wa.Top, wa.Bottom - Height);
+                    break;
+                case "right":
+                    x = wa.Right - Width;
+                    y = Clamp(DockCenterY - Height / 2, wa.Top, wa.Bottom - Height);
+                    break;
+                default: // "top", "top-center"
+                    x = Clamp(DockCenterX - Width / 2, wa.Left, wa.Right - Width);
+                    y = wa.Top;
+                    break;
             }
             Location = new Point(x, y);
+        }
+
+        public void SnapTo(string position, string monitorDeviceName)
+        {
+            if (!string.IsNullOrEmpty(monitorDeviceName))
+                MonitorName = monitorDeviceName;
+            Edge = position;
+            _dockTop = true;
+            PositionDocked();
+            DockCenterX = Left + Width / 2;
+            DockCenterY = Top + Height / 2;
+            if (PositionCommitted != null) PositionCommitted(this, EventArgs.Empty);
+            Invalidate();
         }
 
         public void SetData(ViewModel vm)
@@ -911,6 +959,23 @@ namespace ClaudeUsageWidget
                     g.DrawLine(mp, mx, by - 1, mx, by + bh + 1);
             }
             cy += bh + (int)(4 * s);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            if (DwmBackdrop.IsBackdropActive(Backdrop))
+            {
+                int alpha = (Backdrop == "acrylic") ? 160 : 100;
+                Color bg = Palette.IsLight ? Color.FromArgb(alpha, 245, 245, 248) : Color.FromArgb(alpha, 22, 22, 26);
+                using (SolidBrush b = new SolidBrush(bg))
+                {
+                    e.Graphics.FillRectangle(b, ClientRectangle);
+                }
+            }
+            else
+            {
+                base.OnPaintBackground(e);
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)

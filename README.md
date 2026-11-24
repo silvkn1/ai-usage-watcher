@@ -120,6 +120,9 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 - **Flexible Provider Selection**: Independently enable or disable Claude, Gemini/Antigravity, or Admin API monitoring in Settings. The widget automatically switches between Single Card and Dual Cards layout.
 
 ### ⚡ Productivity & Reporting (Quick Actions)
+- **VS Code & Cursor Status Bar Companion**: Live status bar metrics inside VS Code and Cursor! One-click installation from the tray menu (**"Install VS Code / Cursor Status Bar..."**) copies the lightweight extension to `%USERPROFILE%\.vscode\extensions` and `%USERPROFILE%\.cursor\extensions`. Displays live quota percentages, costs, and cache savings (`$(dashboard) C: 42% | AG: 20% | $0.85`) in the footer status bar with rich markdown tooltips.
+- **Windows 11 Mica & Acrylic Blur**: Native frosted glass translucency using Windows Desktop Window Manager (DWM) APIs. Choose between **Acrylic Blur**, **Mica**, **Mica Alt**, or **Solid** in Settings.
+- **Multi-Monitor Snap & 4-Corner Docking**: Quickly snap the widget to any monitor (Display 1, Display 2, etc.) and dock to all 4 corners (**Top-Left**, **Top-Right**, **Bottom-Left**, **Bottom-Right**) or edge centers via the tray menu or Settings.
 - **Project Cost Explorer & 35-Day Activity Heatmap**: Dedicated GUI dialog (`Project Cost Explorer...` from tray) with a GitHub-style 35-day activity contribution heatmap (5 weeks x 7 days) visualizing daily token density and hover tooltips. Includes a per-project breakdown with "Open Folder", "Open Terminal", and "Copy Markdown" table export.
 - **Prompt Cache Savings & Hit Rate**: Live indicator displaying exact dollar savings and cache hit percentage (`⚡ Saved ≈$X.XX (Cache YY%)`) on provider cards and status summaries.
 - **Default Global Hotkey**: Press `Win+Alt+U` (with automatic fallback to `Ctrl+Alt+U`) anywhere across Windows to instantly toggle widget visibility on and off.
