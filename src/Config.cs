@@ -84,6 +84,10 @@ namespace ClaudeUsageWidget
         public long AntigravityQuota5hTokens { get; set; }
         public long AntigravityQuota7dTokens { get; set; }
 
+        // Detektor LLM Lokal Ollama
+        public bool OllamaEnabled { get; set; }
+        public int OllamaPort { get; set; }
+
         public AppConfig()
         {
             OpacityPercent = 90;
@@ -121,6 +125,8 @@ namespace ClaudeUsageWidget
             ScanGemini = true;
             AntigravityQuota5hTokens = 1000000;
             AntigravityQuota7dTokens = 10000000;
+            OllamaEnabled = true;
+            OllamaPort = 11434;
         }
 
         public static AppConfig Load()
@@ -149,6 +155,7 @@ namespace ClaudeUsageWidget
                         if (c.CurrencyRate <= 0 || double.IsNaN(c.CurrencyRate)) c.CurrencyRate = 16200;
                         if (c.BurnRateThresholdTokens <= 0) c.BurnRateThresholdTokens = 100000;
                         if (c.WebhookUrl == null) c.WebhookUrl = "";
+                        if (c.OllamaPort <= 0 || c.OllamaPort > 65535) c.OllamaPort = 11434;
                         c.ShowInTaskbar = false;
                         return c;
                     }

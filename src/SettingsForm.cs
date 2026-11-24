@@ -48,6 +48,8 @@ namespace ClaudeUsageWidget
         private readonly TextBox _currencySymbol = new TextBox();
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
         private readonly CheckBox _scanClaude = new CheckBox(), _scanGemini = new CheckBox(), _adminData = new CheckBox();
+        private readonly CheckBox _ollamaOn = new CheckBox();
+        private readonly NumericUpDown _ollamaPort = new NumericUpDown();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
         private readonly CheckBox _burnRateOn = new CheckBox();
         private readonly NumericUpDown _burnRateTokens = new NumericUpDown();
@@ -354,6 +356,12 @@ namespace ClaudeUsageWidget
             _adminData.CheckedChanged += delegate { if (_admin.Checked != _adminData.Checked) _admin.Checked = _adminData.Checked; };
             _admin.CheckedChanged += delegate { if (_adminData.Checked != _admin.Checked) _adminData.Checked = _admin.Checked; };
 
+            AddNote(t, L.T("set.h.ollama"), "head");
+            AddCheck(t, _ollamaOn, L.T("set.ollama.enable"), _cfg.OllamaEnabled);
+            _ollamaPort.Minimum = 1; _ollamaPort.Maximum = 65535; _ollamaPort.Width = 100;
+            _ollamaPort.Value = _cfg.OllamaPort > 0 && _cfg.OllamaPort <= 65535 ? _cfg.OllamaPort : 11434;
+            AddRow(t, L.T("set.ollama.port"), _ollamaPort);
+
             AddCheck(t, _wsl, L.T("set.wsl"), _cfg.ScanWsl);
             _extraDirs.Width = 260; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
             AddRow(t, L.T("set.extradirs"), _extraDirs);
@@ -624,6 +632,8 @@ namespace ClaudeUsageWidget
             _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
             _cfg.WebhookEnabled = _webhookOn.Checked;
             _cfg.WebhookUrl = _webhookUrl.Text.Trim();
+            _cfg.OllamaEnabled = _ollamaOn.Checked;
+            _cfg.OllamaPort = (int)_ollamaPort.Value;
 
             if (_clearKey) _cfg.SetAdminKey(null);
             if (key.Length > 0) _cfg.SetAdminKey(key);

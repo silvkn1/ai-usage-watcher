@@ -124,7 +124,7 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 - **Penghematan Prompt Cache & Hit Rate**: Indikator hijau langsung di kartu provider: `⚡ Hemat ≈$X.XX (Cache YY%)` untuk mengetahui seberapa besar efisiensi biaya dari caching prompt.
 - **Global Hotkey Bawaan**: Tekan `Win+Alt+U` (dengan fallback otomatis ke `Ctrl+Alt+U`) di mana saja untuk menampilkan/menyembunyikan widget secara instan.
 - **Ekspor Status JSON Pendamping**: Mengekspor ringkasan status real-time ke `~/.ai-usage-status.json` dan `<AppData>\status.json` untuk integrasi status bar terminal, tmux, shell prompt, atau skrip eksternal.
-- **Detektor Otomatis LLM Lokal Ollama**: Mendeteksi instans lokal Ollama (`http://127.0.0.1:11434`) secara otomatis dan mengekspor jumlah serta daftar model ke status JSON.
+- **Detektor Otomatis LLM Lokal Ollama**: Mendeteksi instans lokal Ollama secara otomatis (port dapat dikonfigurasi di Pengaturan, default `11434`) dan mengekspor jumlah serta daftar model ke status JSON.
 - **Quick Launch via Double-Click**:
   - *Klik ganda kartu Claude*: Membuka terminal CMD baru langsung di folder direktori kerja proyek terakhir (`LastActiveCwd`).
   - *Klik ganda kartu Antigravity*: Membuka folder Antigravity langsung di Windows Explorer.

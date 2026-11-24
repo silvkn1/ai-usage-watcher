@@ -828,6 +828,7 @@ namespace ClaudeUsageWidget
             try { _miAutostart.Checked = Autostart.IsEnabled; } catch { }
             if (!_cfg.AdminEnabled) _org = null;
             MaybeFetchOrg(true);
+            MaybeCheckOllama(true);
             RequestScan();   // folder pindai (WSL / tambahan) mungkin berubah
             Refresh();
         }
@@ -1102,11 +1103,17 @@ namespace ClaudeUsageWidget
         private DateTime _lastOllamaCheck = DateTime.MinValue;
         private async void MaybeCheckOllama(bool force)
         {
+            if (!_cfg.OllamaEnabled)
+            {
+                if (OllamaProbe.Current != null && OllamaProbe.Current.Online)
+                    OllamaProbe.Current = new OllamaStatus();
+                return;
+            }
             if (!force && (DateTime.Now - _lastOllamaCheck).TotalMinutes < 5) return;
             _lastOllamaCheck = DateTime.Now;
             try
             {
-                await OllamaProbe.CheckAsync();
+                await OllamaProbe.CheckAsync(_cfg.OllamaPort);
             }
             catch { }
         }

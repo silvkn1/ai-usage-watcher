@@ -124,7 +124,7 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 - **Prompt Cache Savings & Hit Rate**: Live indicator displaying exact dollar savings and cache hit percentage (`⚡ Saved ≈$X.XX (Cache YY%)`) on provider cards and status summaries.
 - **Default Global Hotkey**: Press `Win+Alt+U` (with automatic fallback to `Ctrl+Alt+U`) anywhere across Windows to instantly toggle widget visibility on and off.
 - **Companion Status JSON Exporter**: Exports real-time usage metrics to `~/.ai-usage-status.json` and `<AppData>\status.json` for external terminal status bars, tmux, shell prompts, or custom scripts.
-- **Ollama Local LLM Auto-Detector**: Automatically detects local Ollama instances (`http://127.0.0.1:11434`) and exports model counts and names.
+- **Ollama Local LLM Auto-Detector**: Automatically detects local Ollama instances (customizable port in Settings, default `11434`) and exports model counts and names.
 - **Quick Launch via Double-Click**:
   - *Double-click Claude card*: Opens a new CMD terminal directly in the last active project directory (`LastActiveCwd`).
   - *Double-click Antigravity card*: Opens the Google Antigravity storage directory in Windows Explorer.

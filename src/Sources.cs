@@ -767,6 +767,13 @@ namespace ClaudeUsageWidget
             return status;
         }
 
+        public static async Task<OllamaStatus> CheckAsync(int port, int timeoutMs = 1500)
+        {
+            if (port <= 0 || port > 65535) port = 11434;
+            string endpoint = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/tags", port);
+            return await CheckAsync(endpoint, timeoutMs);
+        }
+
         public static async Task<OllamaStatus> CheckAsync(string endpoint = "http://127.0.0.1:11434/api/tags", int timeoutMs = 1500)
         {
             OllamaStatus st = new OllamaStatus();

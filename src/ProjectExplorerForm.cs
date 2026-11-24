@@ -188,16 +188,12 @@ namespace ClaudeUsageWidget
     }
 
     /// <summary>
-    /// Dialog Penjelajah Biaya dan Aktivitas per Proyek (dengan Heatmap & Tombol Aksi Cepat).
+    /// Dialog Penjelajah Biaya dan Aktivitas per Proyek (dengan Heatmap & Menu Konteks).
     /// </summary>
     internal class ProjectExplorerForm : Form
     {
         private readonly ActivityHeatmapControl _heatmap = new ActivityHeatmapControl();
         private readonly ListView _list = new ListView();
-        private readonly Button _btnFolder = new Button();
-        private readonly Button _btnTerminal = new Button();
-        private readonly Button _btnCopy = new Button();
-        private readonly Button _btnClose = new Button();
         private readonly List<ProjectRow> _rows = new List<ProjectRow>();
 
         public ProjectExplorerForm(UsageSnapshot usage, HistoryStore history)
@@ -207,11 +203,16 @@ namespace ClaudeUsageWidget
             StartPosition = FormStartPosition.CenterScreen;
             Icon = AppIcon.Get();
             FormBorderStyle = FormBorderStyle.Sizable;
+            KeyPreview = true;
+            KeyDown += delegate(object sender, KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Escape) Close();
+            };
 
             float s = CreateGraphics().DpiX / 96f;
             Width = (int)Math.Round(760 * s);
-            Height = (int)Math.Round(560 * s);
-            MinimumSize = new Size((int)Math.Round(600 * s), (int)Math.Round(450 * s));
+            Height = (int)Math.Round(500 * s);
+            MinimumSize = new Size((int)Math.Round(600 * s), (int)Math.Round(380 * s));
 
             BackColor = Palette.Bg;
             ForeColor = Palette.Text;
@@ -289,63 +290,37 @@ namespace ClaudeUsageWidget
             _list.Columns.Add(L.T("proj.col.reqs"), (int)Math.Round(75 * s), HorizontalAlignment.Right);
             _list.Columns.Add(L.T("proj.col.path"), (int)Math.Round(220 * s), HorizontalAlignment.Left);
 
+            // Menu Klik Kanan (Context Menu)
+            ContextMenuStrip menu = new ContextMenuStrip();
+            ToolStripMenuItem miFolder = new ToolStripMenuItem(L.T("proj.btn.folder"), null, delegate { OpenFolderSelected(); });
+            ToolStripMenuItem miTerminal = new ToolStripMenuItem(L.T("proj.btn.terminal"), null, delegate { OpenTerminalSelected(); });
+            ToolStripMenuItem miCopy = new ToolStripMenuItem(L.T("proj.btn.copy"), null, delegate { CopyMarkdownTable(); });
+            menu.Items.Add(miFolder);
+            menu.Items.Add(miTerminal);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(miCopy);
+            MenuTheme.Apply(menu);
+            _list.ContextMenuStrip = menu;
+
+            menu.Opening += delegate
+            {
+                bool hasSel = _list.SelectedItems.Count > 0;
+                string path = null;
+                if (hasSel)
+                {
+                    ProjectRow r = _list.SelectedItems[0].Tag as ProjectRow;
+                    if (r != null && !string.IsNullOrEmpty(r.Path)) path = r.Path;
+                }
+                bool pathOk = !string.IsNullOrEmpty(path) && Directory.Exists(path);
+                miFolder.Enabled = pathOk;
+                miTerminal.Enabled = pathOk;
+            };
+
             PopulateList();
-            _list.SelectedIndexChanged += delegate { UpdateButtonStates(); };
             _list.DoubleClick += delegate { OpenTerminalSelected(); };
-
-            // Panel Bawah: Tombol Aksi
-            Panel bottom = new Panel();
-            bottom.Dock = DockStyle.Bottom;
-            bottom.Height = (int)Math.Round(48 * s);
-            bottom.BackColor = Palette.Bg;
-
-            FlowLayoutPanel leftBtns = new FlowLayoutPanel();
-            leftBtns.Dock = DockStyle.Left;
-            leftBtns.AutoSize = true;
-            leftBtns.Padding = new Padding((int)Math.Round(8 * s));
-
-            FlowLayoutPanel rightBtns = new FlowLayoutPanel();
-            rightBtns.Dock = DockStyle.Right;
-            rightBtns.AutoSize = true;
-            rightBtns.Padding = new Padding((int)Math.Round(8 * s));
-
-            StyleButton(_btnFolder, L.T("proj.btn.folder"), s);
-            _btnFolder.Click += delegate { OpenFolderSelected(); };
-
-            StyleButton(_btnTerminal, L.T("proj.btn.terminal"), s);
-            _btnTerminal.Click += delegate { OpenTerminalSelected(); };
-
-            StyleButton(_btnCopy, L.T("proj.btn.copy"), s);
-            _btnCopy.Click += delegate { CopyMarkdownTable(); };
-
-            StyleButton(_btnClose, L.T("proj.btn.close"), s);
-            _btnClose.Click += delegate { Close(); };
-
-            leftBtns.Controls.Add(_btnFolder);
-            leftBtns.Controls.Add(_btnTerminal);
-            leftBtns.Controls.Add(_btnCopy);
-            rightBtns.Controls.Add(_btnClose);
-
-            bottom.Controls.Add(leftBtns);
-            bottom.Controls.Add(rightBtns);
 
             Controls.Add(_list);
             Controls.Add(_heatmap);
-            Controls.Add(bottom);
-
-            UpdateButtonStates();
-        }
-
-        private void StyleButton(Button b, string text, float s)
-        {
-            b.Text = text;
-            b.AutoSize = true;
-            b.FlatStyle = FlatStyle.Flat;
-            b.BackColor = Palette.Surface;
-            b.ForeColor = Palette.Text;
-            b.FlatAppearance.BorderColor = Palette.Border;
-            b.Margin = new Padding(0, 0, (int)Math.Round(8 * s), 0);
-            b.Cursor = Cursors.Hand;
         }
 
         private void PopulateList()
@@ -365,20 +340,6 @@ namespace ClaudeUsageWidget
                 item.Tag = r;
                 _list.Items.Add(item);
             }
-        }
-
-        private void UpdateButtonStates()
-        {
-            bool hasSel = _list.SelectedItems.Count > 0;
-            string path = null;
-            if (hasSel)
-            {
-                ProjectRow r = _list.SelectedItems[0].Tag as ProjectRow;
-                if (r != null && !string.IsNullOrEmpty(r.Path)) path = r.Path;
-            }
-            bool pathOk = !string.IsNullOrEmpty(path) && Directory.Exists(path);
-            _btnFolder.Enabled = pathOk;
-            _btnTerminal.Enabled = pathOk;
         }
 
         private void OpenFolderSelected()

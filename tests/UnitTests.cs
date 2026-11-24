@@ -1002,6 +1002,18 @@ namespace Tests
             Assert.False(alerts[0].Monthly, "Alert should be daily");
             Assert.Equal(100, alerts[0].Percent, "Alert percent should be 100%");
         }
+
+        public static void Test_Config_Ollama_Settings()
+        {
+            AppConfig cfg = new AppConfig();
+            Assert.True(cfg.OllamaEnabled, "Default OllamaEnabled should be true");
+            Assert.Equal(11434, cfg.OllamaPort, "Default OllamaPort should be 11434");
+
+            cfg.OllamaPort = 8080;
+            cfg.OllamaEnabled = false;
+            Assert.Equal(8080, cfg.OllamaPort);
+            Assert.False(cfg.OllamaEnabled);
+        }
     }
 
     public static class TestRunner
