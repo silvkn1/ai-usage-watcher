@@ -200,6 +200,7 @@ namespace ClaudeUsageWidget
             { "set.pricing.open", new[] { "Open pricing.json", "Buka pricing.json" } },
             { "set.pricing.note", new[] { "Changes are applied automatically within 1 minute.", "Perubahan diterapkan otomatis dalam 1 menit." } },
             { "set.save",         new[] { "Save", "Simpan" } },
+            { "set.apply",        new[] { "Apply", "Terapkan" } },
             { "set.cancel",       new[] { "Cancel", "Batal" } },
             { "msg.probe.title",  new[] { "Enable CLI probe", "Aktifkan probe CLI" } },
             { "msg.probe.body",   new[] {

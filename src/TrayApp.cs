@@ -875,6 +875,12 @@ namespace ClaudeUsageWidget
             SettingsCallbacks cb = new SettingsCallbacks();
             cb.ExportCsv = ExportCsv;
             cb.Diagnostics = delegate { return Diag.Build(_cfg, _limits, _usage, _probeFailed, _org, _history.Count); };
+            cb.Apply = delegate
+            {
+                ApplyConfigChanges(oldEdge, oldMonitor);
+                oldEdge = _cfg.DockEdge;
+                oldMonitor = _cfg.DockMonitor;
+            };
             using (SettingsForm f = new SettingsForm(_cfg, cb))
             {
                 if (f.ShowDialog() != DialogResult.OK) return;

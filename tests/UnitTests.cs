@@ -1086,6 +1086,26 @@ namespace Tests
                 Assert.True(wiz.Controls.Count > 0, "Wizard should have controls");
             }
         }
+
+        public static void Test_SettingsForm_Apply_Button_And_LiveTheme()
+        {
+            AppConfig cfg = new AppConfig();
+            bool applied = false;
+            SettingsCallbacks cb = new SettingsCallbacks();
+            cb.Apply = delegate { applied = true; };
+
+            using (SettingsForm sf = new SettingsForm(cfg, cb))
+            {
+                IntPtr h = sf.Handle;
+                Assert.NotNull(sf.Text, "Settings form title not null");
+
+                MethodInfo mi = typeof(SettingsForm).GetMethod("OnApply", BindingFlags.NonPublic | BindingFlags.Instance);
+                Assert.NotNull(mi, "OnApply method must exist in SettingsForm");
+                mi.Invoke(sf, new object[] { null, EventArgs.Empty });
+
+                Assert.True(applied, "cb.Apply must be invoked when OnApply runs");
+            }
+        }
     }
 
     public static class TestRunner

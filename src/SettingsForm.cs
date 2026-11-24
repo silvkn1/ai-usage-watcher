@@ -11,6 +11,7 @@ namespace ClaudeUsageWidget
     {
         public Action ExportCsv;
         public Func<string> Diagnostics;
+        public Action Apply;
     }
 
     /// <summary>
@@ -62,7 +63,7 @@ namespace ClaudeUsageWidget
         private readonly List<Button> _tabBtns = new List<Button>();
         private readonly List<Panel> _pages = new List<Panel>();
         private int _tab;
-        private Button _saveBtn, _cancelBtn;
+        private Button _saveBtn, _cancelBtn, _applyBtn;
 
         public SettingsForm(AppConfig cfg) : this(cfg, null) { }
 
@@ -90,8 +91,11 @@ namespace ClaudeUsageWidget
             buttons.FlowDirection = FlowDirection.RightToLeft; buttons.AutoSize = true; buttons.Dock = DockStyle.Bottom;
             buttons.Padding = new Padding(12, 8, 12, 10);
             _cancelBtn = new Button(); _cancelBtn.Text = L.T("set.cancel"); _cancelBtn.DialogResult = DialogResult.Cancel; _cancelBtn.AutoSize = true;
+            _applyBtn = new Button(); _applyBtn.Text = L.T("set.apply"); _applyBtn.AutoSize = true; _applyBtn.Click += OnApply;
             _saveBtn = new Button(); _saveBtn.Text = L.T("set.save"); _saveBtn.AutoSize = true; _saveBtn.Click += OnSave;
-            buttons.Controls.Add(_cancelBtn); buttons.Controls.Add(_saveBtn);
+            buttons.Controls.Add(_cancelBtn);
+            buttons.Controls.Add(_applyBtn);
+            buttons.Controls.Add(_saveBtn);
             Controls.Add(buttons);
 
             _tabStrip.Dock = DockStyle.Top; _tabStrip.Height = 40; _tabStrip.WrapContents = false;
@@ -518,8 +522,20 @@ namespace ClaudeUsageWidget
                 b.BackColor = Palette.Bg; b.ForeColor = Palette.Dim;
                 b.FlatAppearance.MouseOverBackColor = Palette.Hover; b.FlatAppearance.MouseDownBackColor = Palette.Hover;
             }
+            if (_tab >= 0 && _tab < _tabBtns.Count) _tabBtns[_tab].ForeColor = Palette.Text;
             _saveBtn.BackColor = Palette.Accent; _saveBtn.ForeColor = Color.White;
             _saveBtn.FlatAppearance.BorderColor = Palette.Accent;
+            if (_applyBtn != null)
+            {
+                _applyBtn.BackColor = Palette.Surface; _applyBtn.ForeColor = Palette.Text;
+                _applyBtn.FlatAppearance.BorderColor = Palette.Border;
+            }
+            if (IsHandleCreated) DarkUi.TitleBar(Handle, !Palette.IsLight);
+            foreach (Panel p in _pages)
+            {
+                if (p.IsHandleCreated) DarkUi.ControlTheme(p.Handle, !Palette.IsLight);
+            }
+            Invalidate(true);
         }
 
         private void ThemeControls(Control root)
@@ -558,47 +574,47 @@ namespace ClaudeUsageWidget
             DarkUi.TitleBar(Handle, !Palette.IsLight);
         }
 
-        // ---------------- simpan ----------------
-        private void OnSave(object sender, EventArgs e)
+        // ---------------- simpan & terapkan ----------------
+        private bool SaveToConfig()
         {
             // Konfirmasi eksplisit setiap kali probe dinyalakan (dari mati ke hidup). Default tombol: Tidak.
             if (_probe.Checked && !_cfg.ProbeEnabled)
             {
                 DialogResult r = MessageBox.Show(this, L.T("msg.probe.body"), L.T("msg.probe.title"),
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-                if (r != DialogResult.Yes) { _probe.Checked = false; SelectTab(4); return; }
+                if (r != DialogResult.Yes) { _probe.Checked = false; SelectTab(4); return false; }
             }
             string key = _key.Text.Trim();
             if (key.Length > 0 && !key.StartsWith("sk-ant-admin", StringComparison.Ordinal))
             {
                 SelectTab(5);
                 MessageBox.Show(this, L.T("msg.key.prefix"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                return false;
             }
             if (_admin.Checked && key.Length == 0 && (_clearKey || string.IsNullOrEmpty(_cfg.AdminKeyProtected)))
             {
                 SelectTab(5);
                 MessageBox.Show(this, L.T("msg.key.required"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                return false;
             }
             if (_mirror.Checked && !System.IO.File.Exists(_mirrorPath.Text.Trim()))
             {
                 SelectTab(4);
                 MessageBox.Show(this, L.T("msg.mirror.missing"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                return false;
             }
             if (AlertEngine.ParseThresholds(_alertTh.Text) == null)
             {
                 SelectTab(2);
                 MessageBox.Show(this, L.T("msg.thresholds.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                return false;
             }
             uint hm, hv;
             if (_hotkeyOn.Checked && !HotkeyUtil.TryParse(_hotkeyText.Text, out hm, out hv))
             {
                 SelectTab(1);
                 MessageBox.Show(this, L.T("msg.hotkey.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                return false;
             }
             try { Autostart.Set(_auto.Checked); } catch (Exception ex) { Log.Write("autostart", ex); }
 
@@ -653,11 +669,29 @@ namespace ClaudeUsageWidget
             _cfg.OllamaEnabled = _ollamaOn.Checked;
             _cfg.OllamaPort = (int)_ollamaPort.Value;
 
-            if (_clearKey) _cfg.SetAdminKey(null);
+            if (_clearKey) { _cfg.SetAdminKey(null); _clearKey = false; }
             if (key.Length > 0) _cfg.SetAdminKey(key);
             _cfg.AdminApiKeyIds = _keyIds.Text.Trim();
             _cfg.AdminWorkspaceIds = _wsIds.Text.Trim();
             _key.Text = "";
+            _cfg.Save();
+            return true;
+        }
+
+        private void OnApply(object sender, EventArgs e)
+        {
+            if (!SaveToConfig()) return;
+            Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
+            ApplyTheme();
+            if (_cb != null && _cb.Apply != null) _cb.Apply();
+        }
+
+        private void OnSave(object sender, EventArgs e)
+        {
+            if (!SaveToConfig()) return;
+            Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
+            ApplyTheme();
+            if (_cb != null && _cb.Apply != null) _cb.Apply();
             DialogResult = DialogResult.OK;
             Close();
         }
