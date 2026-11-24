@@ -1073,6 +1073,19 @@ namespace Tests
             string js = File.ReadAllText(extFile);
             Assert.True(js.Contains("createStatusBarItem"), "extension.js must create status bar item");
         }
+
+        public static void Test_Setup_Wizard_Initialization_And_Config()
+        {
+            AppConfig cfg = new AppConfig();
+            Assert.False(cfg.FirstRunCompleted, "New config should have FirstRunCompleted false");
+
+            using (SetupWizardForm wiz = new SetupWizardForm(cfg))
+            {
+                IntPtr h = wiz.Handle;
+                Assert.NotNull(wiz.Text, "Wizard title should not be null");
+                Assert.True(wiz.Controls.Count > 0, "Wizard should have controls");
+            }
+        }
     }
 
     public static class TestRunner

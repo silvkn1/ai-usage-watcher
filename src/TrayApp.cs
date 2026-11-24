@@ -29,7 +29,7 @@ namespace ClaudeUsageWidget
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miSettings, _miData, _miExit, _miCsv, _miReport, _miProjects;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miData, _miExit, _miCsv, _miReport, _miProjects;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
@@ -43,6 +43,7 @@ namespace ClaudeUsageWidget
             _miRemaining.Text = L.T("tray.remaining");
             _miRefresh.Text = L.T("tray.refresh");
             if (_miCopy != null) _miCopy.Text = L.T("tray.copystatus");
+            if (_miWizard != null) _miWizard.Text = L.T("tray.wizard");
             _miSettings.Text = L.T("tray.settings");
             if (_miCompanion != null) _miCompanion.Text = L.T("tray.companion");
             _miData.Text = L.T("tray.datafolder");
@@ -153,6 +154,10 @@ namespace ClaudeUsageWidget
             MaybeFetchOfficialPricing(false);
             MaybeFetchAntigravityRate(false);
             MaybeCheckOllama(false);
+            if (!_cfg.FirstRunCompleted)
+            {
+                _ui.Post(delegate { ShowWizard(); }, null);
+            }
         }
 
         // ---------------- jendela detail di atas ikon tray ----------------
@@ -582,6 +587,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(new ToolStripSeparator());
             _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); MaybeFetchAntigravityRate(true); MaybeCheckOllama(true); });
             _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
+            _miWizard = new ToolStripMenuItem(L.T("tray.wizard"), null, delegate { ShowWizard(); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
             _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
             _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
@@ -591,6 +597,7 @@ namespace ClaudeUsageWidget
             _miExit = new ToolStripMenuItem(L.T("tray.exit"), null, delegate { ExitThread(); });
             m.Items.Add(_miRefresh);
             m.Items.Add(_miCopy);
+            m.Items.Add(_miWizard);
             m.Items.Add(_miSettings);
             m.Items.Add(_miProjects);
             m.Items.Add(_miCompanion);
@@ -872,6 +879,22 @@ namespace ClaudeUsageWidget
             {
                 if (f.ShowDialog() != DialogResult.OK) return;
             }
+            ApplyConfigChanges(oldEdge, oldMonitor);
+        }
+
+        private void ShowWizard()
+        {
+            string oldEdge = _cfg.DockEdge, oldMonitor = _cfg.DockMonitor;
+            using (SetupWizardForm wiz = new SetupWizardForm(_cfg))
+            {
+                if (wiz.ShowDialog() != DialogResult.OK) return;
+            }
+            ApplyConfigChanges(oldEdge, oldMonitor);
+            ShowBalloon(L.T("wizard.done.tip"), ToolTipIcon.Info);
+        }
+
+        private void ApplyConfigChanges(string oldEdge, string oldMonitor)
+        {
             _cfg.Save();
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
@@ -911,6 +934,9 @@ namespace ClaudeUsageWidget
             try { _miAutostart.Checked = Autostart.IsEnabled; } catch { }
             if (!_cfg.AdminEnabled) _org = null;
             MaybeFetchOrg(true);
+            MaybeFetchGoogleRate(true);
+            MaybeFetchOfficialPricing(true);
+            MaybeFetchAntigravityRate(true);
             MaybeCheckOllama(true);
             RequestScan();   // folder pindai (WSL / tambahan) mungkin berubah
             Refresh();

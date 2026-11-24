@@ -91,6 +91,9 @@ namespace ClaudeUsageWidget
         // Efek visual latar belakang: "solid", "acrylic", "mica", "mica-alt"
         public string Backdrop { get; set; }
 
+        // Penyiapan awal (Setup Wizard) sudah diselesaikan
+        public bool FirstRunCompleted { get; set; }
+
         public AppConfig()
         {
             OpacityPercent = 90;
@@ -167,6 +170,7 @@ namespace ClaudeUsageWidget
                         if (c.Backdrop != "solid" && c.Backdrop != "acrylic" && c.Backdrop != "mica" && c.Backdrop != "mica-alt")
                             c.Backdrop = DwmBackdrop.IsWindows11 ? "acrylic" : "solid";
                         c.ShowInTaskbar = false;
+                        c.FirstRunCompleted = true;
                         return c;
                     }
                 }
