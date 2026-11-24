@@ -94,8 +94,12 @@ namespace ClaudeUsageWidget
         // Penyiapan awal (Setup Wizard) sudah diselesaikan
         public bool FirstRunCompleted { get; set; }
 
+        // Pembaruan otomatis (GitHub Releases)
+        public bool AutoUpdateCheck { get; set; }
+
         public AppConfig()
         {
+            AutoUpdateCheck = true;
             OpacityPercent = 90;
             ShowFloating = true;
             ProbeMinMinutes = 10;

@@ -1156,6 +1156,109 @@ namespace Tests
                 Assert.True(applied, "cb.Apply must be invoked when OnApply runs");
             }
         }
+
+        public static void Test_AutoUpdater_Version_Parsing()
+        {
+            Version v1 = AutoUpdater.ParseVersion("v1.0.1");
+            Assert.NotNull(v1, "v1.0.1 must parse");
+            Assert.Equal(1, v1.Major);
+            Assert.Equal(0, v1.Minor);
+            Assert.Equal(1, v1.Build);
+
+            Version v2 = AutoUpdater.ParseVersion("2.5.3.4");
+            Assert.NotNull(v2, "2.5.3.4 must parse");
+            Assert.Equal(2, v2.Major);
+            Assert.Equal(5, v2.Minor);
+            Assert.Equal(3, v2.Build);
+            Assert.Equal(4, v2.Revision);
+
+            Version v3 = AutoUpdater.ParseVersion("v3.0");
+            Assert.NotNull(v3, "v3.0 must parse");
+            Assert.Equal(3, v3.Major);
+            Assert.Equal(0, v3.Minor);
+
+            Assert.True(AutoUpdater.ParseVersion(null) == null, "null returns null");
+            Assert.True(AutoUpdater.ParseVersion("not-a-version") == null, "invalid returns null");
+        }
+
+        public static void Test_AutoUpdater_ReleaseJson_Parsing()
+        {
+            string json = "{" +
+                "\"tag_name\": \"v1.1.0\"," +
+                "\"name\": \"v1.1.0 Feature Release\"," +
+                "\"body\": \"New auto-update feature!\"," +
+                "\"html_url\": \"https://github.com/silvkn1/ai-usage-watcher/releases/tag/v1.1.0\"," +
+                "\"assets\": [" +
+                    "{\"name\": \"AIUsageWatcher-1.1.0.0.zip\", \"browser_download_url\": \"https://github.com/silvkn1/ai-usage-watcher/releases/download/v1.1.0/AIUsageWatcher-1.1.0.0.zip\", \"size\": 500000}," +
+                    "{\"name\": \"AIUsageWatcher.exe\", \"browser_download_url\": \"https://github.com/silvkn1/ai-usage-watcher/releases/download/v1.1.0/AIUsageWatcher.exe\", \"size\": 380000}" +
+                "]" +
+            "}";
+
+            // When current version is 1.0.0.0, 1.1.0 is newer
+            ReleaseInfo info = AutoUpdater.ParseReleaseJson(json, new Version(1, 0, 0, 0));
+            Assert.NotNull(info, "ParseReleaseJson should succeed");
+            Assert.True(info.IsNewer, "v1.1.0 must be recognized as newer than 1.0.0.0");
+            Assert.Equal("v1.1.0", info.TagName);
+            Assert.Equal("AIUsageWatcher.exe", info.AssetName);
+            Assert.Equal("https://github.com/silvkn1/ai-usage-watcher/releases/download/v1.1.0/AIUsageWatcher.exe", info.AssetDownloadUrl);
+            Assert.Equal(380000L, info.AssetSize);
+
+            // When current version is 1.2.0.0, 1.1.0 is NOT newer
+            ReleaseInfo infoOld = AutoUpdater.ParseReleaseJson(json, new Version(1, 2, 0, 0));
+            Assert.NotNull(infoOld, "ParseReleaseJson should succeed");
+            Assert.False(infoOld.IsNewer, "v1.1.0 must NOT be recognized as newer than 1.2.0.0");
+
+            // When only zip asset exists
+            string jsonZipOnly = "{" +
+                "\"tag_name\": \"v2.0.0\"," +
+                "\"name\": \"v2.0.0\"," +
+                "\"assets\": [" +
+                    "{\"name\": \"AIUsageWatcher-2.0.0.0.zip\", \"browser_download_url\": \"https://example.com/asset.zip\", \"size\": 450000}" +
+                "]" +
+            "}";
+            ReleaseInfo infoZip = AutoUpdater.ParseReleaseJson(jsonZipOnly, new Version(1, 0, 0, 0));
+            Assert.NotNull(infoZip);
+            Assert.True(infoZip.IsNewer);
+            Assert.Equal("AIUsageWatcher-2.0.0.0.zip", infoZip.AssetName);
+        }
+
+        public static void Test_AutoUpdater_Executable_Validation()
+        {
+            string currentExe = typeof(AutoUpdater).Assembly.Location;
+            if (File.Exists(currentExe))
+            {
+                Assert.True(AutoUpdater.IsValidExecutable(currentExe), "Current assembly should be valid PE executable");
+            }
+
+            Assert.False(AutoUpdater.IsValidExecutable("non-existent-path-12345.exe"), "Non existent file is not valid");
+
+            string fakeFile = Path.Combine(Path.GetTempPath(), "fake_exe_" + Guid.NewGuid().ToString("N") + ".tmp");
+            File.WriteAllText(fakeFile, "Hello world, this is a plain text file, not a PE executable!");
+            try
+            {
+                Assert.False(AutoUpdater.IsValidExecutable(fakeFile), "Text file must not be validated as executable");
+            }
+            finally
+            {
+                try { File.Delete(fakeFile); } catch { }
+            }
+        }
+
+        public static void Test_AutoUpdater_Config_Persistence()
+        {
+            AppConfig cfg = new AppConfig();
+            Assert.True(cfg.AutoUpdateCheck, "AutoUpdateCheck should default to true");
+
+            cfg.AutoUpdateCheck = false;
+            string json = J.Ser.Serialize(cfg);
+            AppConfig restored = J.Ser.Deserialize<AppConfig>(json);
+            Assert.False(restored.AutoUpdateCheck, "AutoUpdateCheck should deserialize as false");
+
+            cfg.AutoUpdateCheck = true;
+            string json2 = J.Ser.Serialize(cfg);
+            AppConfig restored2 = J.Ser.Deserialize<AppConfig>(json2);
+            Assert.True(restored2.AutoUpdateCheck, "AutoUpdateCheck should deserialize as true");
+        }
     }
 
     public static class TestRunner

@@ -21,7 +21,8 @@ if (-not (Test-Path (Join-Path $RootDir "dist"))) {
 }
 
 $Refs = "System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", `
-        "System.Net.Http.dll", "System.Security.dll", "System.Web.Extensions.dll"
+        "System.Net.Http.dll", "System.Security.dll", "System.Web.Extensions.dll", `
+        "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll"
 $RefArgs = $Refs -join ","
 
 Write-Host "Compiling unit tests..." -ForegroundColor Cyan

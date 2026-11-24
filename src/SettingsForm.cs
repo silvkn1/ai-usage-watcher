@@ -12,6 +12,7 @@ namespace ClaudeUsageWidget
         public Action ExportCsv;
         public Func<string> Diagnostics;
         public Action Apply;
+        public Action CheckUpdates;
     }
 
     /// <summary>
@@ -28,6 +29,7 @@ namespace ClaudeUsageWidget
         private readonly TrackBar _opacity = new TrackBar();
         private readonly Label _opacityLbl = new Label();
         private readonly CheckBox _showFloat = new CheckBox(), _compact = new CheckBox(), _click = new CheckBox(), _auto = new CheckBox();
+        private readonly CheckBox _autoUpdate = new CheckBox();
         private readonly CheckBox _admin = new CheckBox(), _probe = new CheckBox();
         private readonly NumericUpDown _probeMin = new NumericUpDown();
         private readonly CheckBox _mirror = new CheckBox(), _dock = new CheckBox(), _onTop = new CheckBox(), _hideFs = new CheckBox();
@@ -291,6 +293,18 @@ namespace ClaudeUsageWidget
             }
             AddCheck(t, _onTop, L.T("set.ontop"), _cfg.AlwaysOnTop);
             AddCheck(t, _hideFs, L.T("set.hidefs"), _cfg.HideOnFullscreen);
+            AddCheck(t, _autoUpdate, L.T("set.autoupdate"), _cfg.AutoUpdateCheck);
+            Button btnCheckUpdate = new Button();
+            btnCheckUpdate.Text = L.T("set.checknow");
+            btnCheckUpdate.AutoSize = true;
+            btnCheckUpdate.Click += delegate
+            {
+                if (_cb != null && _cb.CheckUpdates != null)
+                {
+                    _cb.CheckUpdates();
+                }
+            };
+            AddRow(t, L.T("tray.update"), btnCheckUpdate);
             AddCheck(t, _hotkeyOn, L.T("set.hotkey.enable"), _cfg.HotkeyEnabled);
             _hotkeyText.Width = 160; _hotkeyText.Text = _cfg.Hotkey ?? "Ctrl+Alt+U";
             AddRow(t, L.T("set.hotkey.keys"), _hotkeyText);
@@ -645,6 +659,7 @@ namespace ClaudeUsageWidget
             _cfg.DockTop = _dock.Checked;
             _cfg.AlwaysOnTop = _onTop.Checked;
             _cfg.HideOnFullscreen = _hideFs.Checked;
+            _cfg.AutoUpdateCheck = _autoUpdate.Checked;
             _cfg.Theme = _theme.SelectedIndex == 1 ? "light" : (_theme.SelectedIndex == 2 ? "system" : "dark");
             _cfg.ClickThrough = _click.Checked;
             _cfg.AdminEnabled = _admin.Checked;

@@ -33,6 +33,7 @@ $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.
     "/resource:$root\app.ico,app.ico" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     /r:System.Net.Http.dll /r:System.Security.dll /r:System.Web.Extensions.dll `
+    /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
     $src
 if ($LASTEXITCODE -ne 0) { throw "Build gagal (exit $LASTEXITCODE)." }
 Copy-Item "$dist\AIUsageWatcher.exe" "$dist\ClaudeUsageWidget.exe" -Force

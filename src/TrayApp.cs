@@ -29,7 +29,7 @@ namespace ClaudeUsageWidget
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miData, _miExit, _miCsv, _miReport, _miProjects;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miData, _miExit, _miCsv, _miReport, _miProjects;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
@@ -45,6 +45,7 @@ namespace ClaudeUsageWidget
             if (_miCopy != null) _miCopy.Text = L.T("tray.copystatus");
             if (_miWizard != null) _miWizard.Text = L.T("tray.wizard");
             _miSettings.Text = L.T("tray.settings");
+            if (_miUpdate != null) _miUpdate.Text = L.T("tray.update");
             if (_miCompanion != null) _miCompanion.Text = L.T("tray.companion");
             _miData.Text = L.T("tray.datafolder");
             _miCsv.Text = L.T("tray.exportcsv");
@@ -76,6 +77,7 @@ namespace ClaudeUsageWidget
         public TrayApp()
         {
             Paths.Ensure();
+            AutoUpdater.CleanupOldVersion();
             _cfg = AppConfig.Load();
             L.Set(_cfg.Language);   // sebelum menu dan layout pertama
             ApplyCurrencyOpts();
@@ -111,6 +113,7 @@ namespace ClaudeUsageWidget
             _tray.ContextMenuStrip = _menu;
             _tray.Text = L.AppName;
             _tray.MouseClick += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OnTrayClick(); };
+            _tray.BalloonTipClicked += delegate { if (_pendingUpdate != null) HandleUpdateResult(_pendingUpdate, true); };
             UpdateTrayIcon();
             _tray.Visible = true;
 
@@ -136,6 +139,19 @@ namespace ClaudeUsageWidget
             _tick.Interval = 60 * 1000;
             _tick.Tick += delegate { OnTick(); };
             _tick.Start();
+
+            if (_cfg.AutoUpdateCheck)
+            {
+                System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
+                updateTimer.Interval = 5000;
+                updateTimer.Tick += delegate
+                {
+                    updateTimer.Stop();
+                    updateTimer.Dispose();
+                    CheckForUpdates(false);
+                };
+                updateTimer.Start();
+            }
 
             _debounce = new System.Windows.Forms.Timer();
             _debounce.Interval = 2000;
@@ -589,6 +605,7 @@ namespace ClaudeUsageWidget
             _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
             _miWizard = new ToolStripMenuItem(L.T("tray.wizard"), null, delegate { ShowWizard(); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
+            _miUpdate = new ToolStripMenuItem(L.T("tray.update"), null, delegate { CheckForUpdates(true); });
             _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
             _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
@@ -599,6 +616,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miCopy);
             m.Items.Add(_miWizard);
             m.Items.Add(_miSettings);
+            m.Items.Add(_miUpdate);
             m.Items.Add(_miProjects);
             m.Items.Add(_miCompanion);
             m.Items.Add(_miData);
@@ -875,6 +893,7 @@ namespace ClaudeUsageWidget
             SettingsCallbacks cb = new SettingsCallbacks();
             cb.ExportCsv = ExportCsv;
             cb.Diagnostics = delegate { return Diag.Build(_cfg, _limits, _usage, _probeFailed, _org, _history.Count); };
+            cb.CheckUpdates = delegate { CheckForUpdates(true); };
             cb.Apply = delegate
             {
                 ApplyConfigChanges(oldEdge, oldMonitor);
@@ -1042,6 +1061,10 @@ namespace ClaudeUsageWidget
             MaybeFetchGoogleRate(false);
             MaybeFetchAntigravityRate(false);
             MaybeCheckOllama(false);
+            if (_cfg.AutoUpdateCheck && (DateTime.Now - _lastUpdateCheck).TotalHours >= 24)
+            {
+                CheckForUpdates(false);
+            }
         }
 
         /// <summary>
@@ -1306,6 +1329,123 @@ namespace ClaudeUsageWidget
                 catch (Exception ex) { Log.Write("tray.tip", ex); }
             }
             _tray.Text = text.Substring(0, 62) + "…";
+        }
+
+        // ---------------- auto updater ----------------
+        private ReleaseInfo _pendingUpdate;
+        private DateTime _lastUpdateCheck = DateTime.MinValue;
+
+        private void CheckForUpdates(bool manual)
+        {
+            _lastUpdateCheck = DateTime.Now;
+            if (manual)
+            {
+                _tray.ShowBalloonTip(3000, L.T("update.title"), L.T("update.checking"), ToolTipIcon.Info);
+            }
+
+            AutoUpdater.CheckForUpdatesAsync(delegate(ReleaseInfo rel)
+            {
+                if (_float != null && _float.IsHandleCreated)
+                {
+                    try
+                    {
+                        _float.BeginInvoke(new Action(delegate { HandleUpdateResult(rel, manual); }));
+                        return;
+                    }
+                    catch { }
+                }
+                HandleUpdateResult(rel, manual);
+            });
+        }
+
+        private void HandleUpdateResult(ReleaseInfo rel, bool manual)
+        {
+            if (rel == null)
+            {
+                if (manual)
+                {
+                    MessageBox.Show(
+                        L.T("update.failed", "Unable to connect to GitHub / periksa koneksi internet."),
+                        L.T("update.title"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            if (!rel.IsNewer)
+            {
+                if (manual)
+                {
+                    MessageBox.Show(
+                        L.T("update.uptodate", AutoUpdater.CurrentVersionStr),
+                        L.T("update.title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return;
+            }
+
+            _pendingUpdate = rel;
+
+            if (!manual)
+            {
+                _tray.ShowBalloonTip(10000, L.T("update.title"), L.T("update.balloon", rel.TagName), ToolTipIcon.Info);
+                return;
+            }
+
+            string body = string.IsNullOrWhiteSpace(rel.Body) ? "-" : (rel.Body.Length > 500 ? rel.Body.Substring(0, 500) + "..." : rel.Body);
+            string msg = L.T("update.available",
+                rel.TagName ?? rel.Version.ToString(),
+                AutoUpdater.CurrentVersionStr,
+                body);
+
+            DialogResult dr = MessageBox.Show(msg, L.T("update.title"), MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (dr == DialogResult.Yes)
+            {
+                PerformUpdate(rel);
+            }
+        }
+
+        private void PerformUpdate(ReleaseInfo rel)
+        {
+            _tray.ShowBalloonTip(5000, L.T("update.title"), L.T("update.downloading", rel.AssetName ?? "update"), ToolTipIcon.Info);
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    bool ok = AutoUpdater.DownloadAndApplyUpdate(rel, null, delegate(int pct, string status)
+                    {
+                    });
+                    if (ok)
+                    {
+                        if (_float != null && _float.IsHandleCreated)
+                        {
+                            try { _float.BeginInvoke(new Action(delegate { Application.Exit(); })); return; }
+                            catch { }
+                        }
+                        Application.Exit();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("update.apply", ex);
+                    if (_float != null && _float.IsHandleCreated)
+                    {
+                        try
+                        {
+                            _float.BeginInvoke(new Action(delegate
+                            {
+                                DialogResult dr = MessageBox.Show(
+                                    L.T("update.failed", ex.Message),
+                                    L.T("update.title"), MessageBoxButtons.YesNo, MessageBoxIcon.Error);
+                                if (dr == DialogResult.Yes && !string.IsNullOrEmpty(rel.HtmlUrl))
+                                {
+                                    try { Process.Start(new ProcessStartInfo(rel.HtmlUrl) { UseShellExecute = true }); } catch { }
+                                }
+                            }));
+                            return;
+                        }
+                        catch { }
+                    }
+                }
+            });
         }
 
         protected override void ExitThreadCore()
