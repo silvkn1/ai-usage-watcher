@@ -120,6 +120,11 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 - **Flexible Provider Selection**: Independently enable or disable Claude, Gemini/Antigravity, or Admin API monitoring in Settings. The widget automatically switches between Single Card and Dual Cards layout.
 
 ### ⚡ Productivity & Reporting (Quick Actions)
+- **Project Cost Explorer & 35-Day Activity Heatmap**: Dedicated GUI dialog (`Project Cost Explorer...` from tray) with a GitHub-style 35-day activity contribution heatmap (5 weeks x 7 days) visualizing daily token density and hover tooltips. Includes a per-project breakdown with "Open Folder", "Open Terminal", and "Copy Markdown" table export.
+- **Prompt Cache Savings & Hit Rate**: Live indicator displaying exact dollar savings and cache hit percentage (`⚡ Saved ≈$X.XX (Cache YY%)`) on provider cards and status summaries.
+- **Default Global Hotkey**: Press `Win+Alt+U` (with automatic fallback to `Ctrl+Alt+U`) anywhere across Windows to instantly toggle widget visibility on and off.
+- **Companion Status JSON Exporter**: Exports real-time usage metrics to `~/.ai-usage-status.json` and `<AppData>\status.json` for external terminal status bars, tmux, shell prompts, or custom scripts.
+- **Ollama Local LLM Auto-Detector**: Automatically detects local Ollama instances (`http://127.0.0.1:11434`) and exports model counts and names.
 - **Quick Launch via Double-Click**:
   - *Double-click Claude card*: Opens a new CMD terminal directly in the last active project directory (`LastActiveCwd`).
   - *Double-click Antigravity card*: Opens the Google Antigravity storage directory in Windows Explorer.

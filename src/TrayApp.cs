@@ -29,7 +29,7 @@ namespace ClaudeUsageWidget
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miRefresh, _miCopy, _miSettings, _miData, _miExit, _miCsv, _miReport;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miRefresh, _miCopy, _miSettings, _miData, _miExit, _miCsv, _miReport, _miProjects;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
@@ -148,6 +148,7 @@ namespace ClaudeUsageWidget
             MaybeFetchGoogleRate(false);
             MaybeFetchOfficialPricing(false);
             MaybeFetchAntigravityRate(false);
+            MaybeCheckOllama(false);
         }
 
         // ---------------- jendela detail di atas ikon tray ----------------
@@ -282,6 +283,11 @@ namespace ClaudeUsageWidget
             if (!_cfg.HotkeyEnabled) { _hotkey.Unregister(); return; }
             if (!_hotkey.Register(_cfg.Hotkey))
             {
+                if (_cfg.Hotkey != "Ctrl+Alt+U" && _hotkey.Register("Ctrl+Alt+U"))
+                {
+                    Log.Write("hotkey: registered Ctrl+Alt+U as fallback");
+                    return;
+                }
                 Log.Write("hotkey: registration failed");
                 if (reportFailure) MessageBox.Show(L.T("msg.hotkey.fail", _cfg.Hotkey), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -303,11 +309,20 @@ namespace ClaudeUsageWidget
             foreach (BudgetAlert a in _budget.Evaluate(_usage.TodayTotal.Cost, _history.MonthToDateCost(DateTime.Now),
                          _cfg.BudgetDaily, _cfg.BudgetMonthly, DateTime.Now))
             {
-                string text = L.T(a.Monthly ? "alert.budget.month" : "alert.budget.day", Fmt.Usd(a.Cost), a.Percent, Fmt.Usd(a.Budget));
+                bool exceeded = a.Percent >= 100;
+                string text = exceeded
+                    ? L.T("alert.budget.exceeded", Fmt.Usd(a.Cost), a.Percent, Fmt.Usd(a.Budget))
+                    : L.T(a.Monthly ? "alert.budget.month" : "alert.budget.day", Fmt.Usd(a.Cost), a.Percent, Fmt.Usd(a.Budget));
+
                 Log.Write("alert budget " + (a.Monthly ? "month " : "day ") + a.Percent);
-                ShowBalloon(text, ToolTipIcon.Warning);
-                if (_cfg.AudioAlertsEnabled) AudioAlert.PlayWarning();
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.WebhookUrl, "Claude Budget Alert", text);
+                ShowBalloon(text, exceeded ? ToolTipIcon.Error : ToolTipIcon.Warning);
+                if (_cfg.AudioAlertsEnabled)
+                {
+                    AudioAlert.PlayWarning();
+                    if (exceeded) AudioAlert.PlayWarning();
+                }
+                if (_cfg.WebhookEnabled)
+                    WebhookSender.Send(_cfg.WebhookUrl, exceeded ? "⚠️ Budget Limit Exceeded!" : "AI Usage Watcher Budget Alert", text);
             }
         }
 
@@ -556,9 +571,10 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miRemaining);
             m.Items.Add(_miClickThrough);
             m.Items.Add(new ToolStripSeparator());
-            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); MaybeFetchAntigravityRate(true); });
+            _miRefresh = new ToolStripMenuItem(L.T("tray.refresh"), null, delegate { ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeProbe(true); MaybeFetchGoogleRate(true); MaybeFetchOfficialPricing(true); MaybeFetchAntigravityRate(true); MaybeCheckOllama(true); });
             _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
+            _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
             _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
@@ -566,6 +582,7 @@ namespace ClaudeUsageWidget
             m.Items.Add(_miRefresh);
             m.Items.Add(_miCopy);
             m.Items.Add(_miSettings);
+            m.Items.Add(_miProjects);
             m.Items.Add(_miData);
             m.Items.Add(_miCsv);
             m.Items.Add(_miReport);
@@ -748,6 +765,21 @@ namespace ClaudeUsageWidget
             ApplyTopMost(true);
         }
 
+        private void OpenProjectExplorer()
+        {
+            try
+            {
+                using (ProjectExplorerForm dlg = new ProjectExplorerForm(_usage, _history))
+                {
+                    dlg.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("project.explorer", ex);
+            }
+        }
+
         private void OpenSettings()
         {
             string oldEdge = _cfg.DockEdge, oldMonitor = _cfg.DockMonitor;
@@ -893,6 +925,7 @@ namespace ClaudeUsageWidget
             MaybeProbe(false);
             MaybeFetchGoogleRate(false);
             MaybeFetchAntigravityRate(false);
+            MaybeCheckOllama(false);
         }
 
         /// <summary>
@@ -1066,6 +1099,18 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private DateTime _lastOllamaCheck = DateTime.MinValue;
+        private async void MaybeCheckOllama(bool force)
+        {
+            if (!force && (DateTime.Now - _lastOllamaCheck).TotalMinutes < 5) return;
+            _lastOllamaCheck = DateTime.Now;
+            try
+            {
+                await OllamaProbe.CheckAsync();
+            }
+            catch { }
+        }
+
         private ViewModel BuildVm()
         {
             ViewModel vm = new ViewModel();
@@ -1085,9 +1130,11 @@ namespace ClaudeUsageWidget
 
         private void Refresh()
         {
-            _float.SetData(BuildVm());
-            if (_popup != null && _popup.Visible) { _popup.SetData(BuildVm()); PositionPopup(); }
+            ViewModel vm = BuildVm();
+            _float.SetData(vm);
+            if (_popup != null && _popup.Visible) { _popup.SetData(vm); PositionPopup(); }
             UpdateTrayIcon();
+            StatusExporter.Export(_usage, _limits, vm);
         }
 
         // ---------------- ikon tray dinamis ----------------

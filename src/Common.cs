@@ -103,6 +103,8 @@ namespace ClaudeUsageWidget
         public static string ConfigFile { get { return Path.Combine(AppDir, "config.json"); } }
         public static string PricingFile { get { return Path.Combine(AppDir, "pricing.json"); } }
         public static string LogFile { get { return Path.Combine(AppDir, "widget.log"); } }
+        public static string StatusExportJson { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ai-usage-status.json"); } }
+        public static string AppStatusJson { get { return Path.Combine(AppDir, "status.json"); } }
 
         public static void Ensure() { Directory.CreateDirectory(AppDir); }
     }

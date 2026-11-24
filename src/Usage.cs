@@ -116,6 +116,7 @@ namespace ClaudeUsageWidget
         public Tally AntigravityWeek = new Tally();
         public Dictionary<string, Tally> TodayProjects = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekProjects = new Dictionary<string, Tally>();
+        public Dictionary<string, string> ProjectPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public LimitWindow AntigravityFiveHour = new LimitWindow();
         public LimitWindow AntigravitySevenDay = new LimitWindow();
         public long SkippedLines;
@@ -150,6 +151,7 @@ namespace ClaudeUsageWidget
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _days = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysAg = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _proj = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<string, string> _projPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Lacak total per proyek (nama folder terakhir dari 'cwd'). Default mati.</summary>
         public bool TrackProjects;
 
@@ -170,7 +172,7 @@ namespace ClaudeUsageWidget
             {
                 if (TrackProjects == on) return;
                 TrackProjects = on;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _projPaths.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -210,7 +212,7 @@ namespace ClaudeUsageWidget
             lock (_gate)
             {
                 _pricing = pricing;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _projPaths.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -475,7 +477,9 @@ namespace ClaudeUsageWidget
 
             if (TrackProjects)   // opsional; nama proyek hanya di memori, tidak disimpan ke berkas mana pun
             {
-                string proj = ProjectName(J.Str(o, "cwd"));
+                string rawCwd = J.Str(o, "cwd");
+                string proj = ProjectName(rawCwd);
+                if (!string.IsNullOrEmpty(rawCwd) && !_projPaths.ContainsKey(proj)) _projPaths[proj] = rawCwd;
                 Dictionary<string, Tally> pd;
                 if (!_proj.TryGetValue(local.Date, out pd)) { pd = new Dictionary<string, Tally>(); _proj[local.Date] = pd; }
                 Tally pa;
@@ -678,6 +682,7 @@ namespace ClaudeUsageWidget
                             if (pd.Key == today) AddTo(s.TodayProjects, m.Key, m.Value);
                         }
                     }
+                s.ProjectPaths = new Dictionary<string, string>(_projPaths, StringComparer.OrdinalIgnoreCase);
                 s.SkippedLines = _skipped;
                 s.LastRecord = _lastRecord;
                 s.ScannedAt = DateTime.Now;

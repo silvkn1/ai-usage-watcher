@@ -467,7 +467,12 @@ namespace ClaudeUsageWidget
                     meta.Add(L.T("runway", Fmt.Runway(runwayMins)));
             }
             if (u.WeekTotal.InputSide > 0)
-                meta.Add(string.Format("Cache: {0}%", (int)Math.Round(u.WeekTotal.CacheHit * 100)));
+            {
+                string cacheStr = string.Format("Cache: {0}%", (int)Math.Round(u.WeekTotal.CacheHit * 100));
+                if (u.TodayTotal.Saved > 0.005)
+                    cacheStr += string.Format(" (≈{0})", Fmt.Usd(u.TodayTotal.Saved));
+                meta.Add(cacheStr);
+            }
 
             if (meta.Count > 0)
                 rows.Add(new Row(Kind.Small, string.Join("  ·  ", meta.ToArray()), null));
@@ -602,7 +607,10 @@ namespace ClaudeUsageWidget
             switch (r.Kind)
             {
                 case Kind.Pill: return (int)(22 * s);
-                case Kind.DualCards: return (int)(118 * s);
+                case Kind.DualCards:
+                    bool hasSaved = (r.LeftCol != null && r.LeftCol.Today != null && r.LeftCol.Today.Saved > 0.005)
+                                 || (r.RightCol != null && r.RightCol.Today != null && r.RightCol.Today.Saved > 0.005);
+                    return (int)((hasSaved ? 134 : 118) * s);
                 case Kind.Title: return (int)(22 * s);
                 case Kind.Bar: return (int)(30 * s);
                 case Kind.Spark: return (int)(50 * s);
@@ -816,6 +824,16 @@ namespace ClaudeUsageWidget
                 TextRenderer.DrawText(g, rightStr, _fSmall, useRect, Palette.Dim,
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 cy += useH + (int)(2 * s);
+
+                if (col.Today.Saved > 0.005)
+                {
+                    int saveH = (int)(12 * s);
+                    Rectangle saveRect = new Rectangle(cx, cy, cw, saveH);
+                    string saveStr = "⚡ " + L.T("cache.saved", Fmt.Usd(col.Today.Saved), (int)Math.Round(col.Today.CacheHit * 100));
+                    TextRenderer.DrawText(g, saveStr, _fSmall, saveRect, Palette.Green,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                    cy += saveH + (int)(2 * s);
+                }
             }
 
             if (col.Models != null && col.Models.Count > 0)

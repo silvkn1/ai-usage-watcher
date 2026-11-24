@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -575,6 +576,76 @@ namespace ClaudeUsageWidget
                 }
             }
             return sb.ToString();
+        }
+    }
+
+    internal static class StatusExporter
+    {
+        public static void Export(UsageSnapshot u, RateLimitSnapshot rl, ViewModel vm)
+        {
+            if (u == null) return;
+            try
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["updated_at"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+
+                if (rl != null)
+                {
+                    if (rl.FiveHour != null && rl.FiveHour.Available)
+                    {
+                        d["claude_5h_percent"] = Math.Round(rl.FiveHour.UsedPercent, 1);
+                        d["five_hour_percent"] = Math.Round(rl.FiveHour.UsedPercent, 1);
+                        if (rl.FiveHour.ResetsAt != DateTime.MinValue)
+                            d["claude_5h_resets_at"] = rl.FiveHour.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
+                    if (rl.SevenDay != null && rl.SevenDay.Available)
+                    {
+                        d["claude_7d_percent"] = Math.Round(rl.SevenDay.UsedPercent, 1);
+                        d["seven_day_percent"] = Math.Round(rl.SevenDay.UsedPercent, 1);
+                        if (rl.SevenDay.ResetsAt != DateTime.MinValue)
+                            d["claude_7d_resets_at"] = rl.SevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
+                    if (rl.AntigravityFiveHour != null && rl.AntigravityFiveHour.Available)
+                    {
+                        d["antigravity_5h_percent"] = Math.Round(rl.AntigravityFiveHour.UsedPercent, 1);
+                        if (rl.AntigravityFiveHour.ResetsAt != DateTime.MinValue)
+                            d["antigravity_5h_resets_at"] = rl.AntigravityFiveHour.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
+                    if (rl.AntigravitySevenDay != null && rl.AntigravitySevenDay.Available)
+                    {
+                        d["antigravity_7d_percent"] = Math.Round(rl.AntigravitySevenDay.UsedPercent, 1);
+                        if (rl.AntigravitySevenDay.ResetsAt != DateTime.MinValue)
+                            d["antigravity_7d_resets_at"] = rl.AntigravitySevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
+                }
+
+                d["today_tokens"] = u.TodayTotal.Total;
+                d["today_cost_usd"] = Math.Round(u.TodayTotal.Cost, 4);
+                d["today_cost_formatted"] = Fmt.Usd(u.TodayTotal.Cost);
+                d["today_saved_usd"] = Math.Round(u.TodayTotal.Saved, 4);
+                d["cache_hit_percent"] = Math.Round(u.TodayTotal.CacheHit * 100, 1);
+                d["burn_rate_10m"] = u.TokensLast10m;
+                d["last_context_tokens"] = u.LastContextTokens;
+                d["last_active_project"] = u.LastActiveProject ?? "";
+
+                double runway = RunwayEstimator.EstimateMinutes(rl, u);
+                if (runway > 0) d["runway_minutes"] = Math.Round(runway, 1);
+
+                if (OllamaProbe.Current != null && OllamaProbe.Current.Online)
+                {
+                    d["ollama_online"] = true;
+                    d["ollama_model_count"] = OllamaProbe.Current.ModelCount;
+                    d["ollama_models"] = OllamaProbe.Current.ModelNames;
+                }
+
+                string json = PrettyJson.Write(d);
+                try { File.WriteAllText(Paths.StatusExportJson, json, Encoding.UTF8); } catch { }
+                try { File.WriteAllText(Paths.AppStatusJson, json, Encoding.UTF8); } catch { }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("status.export", ex);
+            }
         }
     }
 }

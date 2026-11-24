@@ -903,6 +903,105 @@ namespace Tests
             Assert.True(md.Contains("## Daily Breakdown"), "Report must include daily breakdown table");
             Assert.True(md.Contains("2026-11-01"), "Report must include date entries");
         }
+
+        public static void Test_StatusExporter_Export()
+        {
+            UsageSnapshot u = new UsageSnapshot();
+            u.TodayTotal = new Tally { Input = 75000, CacheRead = 75000, Output = 2000, Cost = 0.75, Saved = 0.25 };
+            u.TokensLast10m = 5000;
+            u.LastContextTokens = 12000;
+            u.LastActiveProject = "widget-claude";
+
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.FiveHour = new LimitWindow { Available = true, UsedPercent = 42.5, ResetsAt = DateTime.UtcNow.AddHours(2) };
+            rl.SevenDay = new LimitWindow { Available = true, UsedPercent = 15.0, ResetsAt = DateTime.UtcNow.AddDays(3) };
+            rl.AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 20.0 };
+
+            ViewModel vm = new ViewModel();
+
+            StatusExporter.Export(u, rl, vm);
+
+            Assert.True(File.Exists(Paths.AppStatusJson), "Status JSON file must be created");
+            string txt = File.ReadAllText(Paths.AppStatusJson, System.Text.Encoding.UTF8);
+            Dictionary<string, object> d = J.Parse(txt);
+
+            Assert.Equal(152000L, J.Long(d, "today_tokens"), "Today tokens mismatch");
+            Assert.Equal(0.75, J.Num(d, "today_cost_usd"), "Today cost mismatch");
+            Assert.Equal(0.25, J.Num(d, "today_saved_usd"), "Today saved mismatch");
+            Assert.Equal(50.0, J.Num(d, "cache_hit_percent"), "Cache hit percent mismatch");
+            Assert.Equal(42.5, J.Num(d, "five_hour_percent"), "Five hour percent mismatch");
+            Assert.Equal(15.0, J.Num(d, "seven_day_percent"), "Seven day percent mismatch");
+            Assert.Equal(20.0, J.Num(d, "antigravity_5h_percent"), "Antigravity 5h percent mismatch");
+            Assert.Equal("widget-claude", J.Str(d, "last_active_project"), "Last active project mismatch");
+        }
+
+        public static void Test_OllamaProbe_Parse()
+        {
+            string sampleJson = "{\"models\":[{\"name\":\"llama3:latest\",\"size\":4661224676},{\"name\":\"deepseek-coder:6.7b\",\"size\":3800000000}]}";
+            OllamaStatus st = OllamaProbe.ParseResponse(sampleJson);
+
+            Assert.True(st.Online, "Ollama must be marked online");
+            Assert.Equal(2, st.ModelCount, "Model count must be 2");
+            Assert.True(st.ModelNames.Contains("llama3:latest"), "Must contain llama3:latest");
+            Assert.True(st.ModelNames.Contains("deepseek-coder:6.7b"), "Must contain deepseek-coder:6.7b");
+
+            OllamaStatus emptySt = OllamaProbe.ParseResponse("");
+            Assert.False(emptySt.Online, "Empty response must be offline");
+        }
+
+        public static void Test_ProjectExplorer_Markdown()
+        {
+            List<ProjectRow> rows = new List<ProjectRow>();
+            ProjectRow r1 = new ProjectRow();
+            r1.Name = "widget-claude";
+            r1.TodayCost = 0.45;
+            r1.WeekCost = 3.12;
+            r1.WeekTokens = 450000;
+            r1.WeekRequests = 82;
+            r1.Path = @"d:\1.Development\widget-claude";
+
+            ProjectRow r2 = new ProjectRow();
+            r2.Name = "ai-usage-watcher";
+            r2.TodayCost = 0.10;
+            r2.WeekCost = 0.50;
+            r2.WeekTokens = 80000;
+            r2.WeekRequests = 15;
+            r2.Path = @"d:\1.Development\ai-usage-watcher";
+
+            rows.Add(r1);
+            rows.Add(r2);
+
+            string md = ProjectExplorerForm.BuildMarkdownTable(rows);
+            Assert.True(md.Contains("| Project | Today Cost | 7-Day Cost |"), "Table header missing");
+            Assert.True(md.Contains("| widget-claude | $0.45 | $3.12 |"), "Row 1 format missing");
+            Assert.True(md.Contains("| ai-usage-watcher | $0.10 | $0.50 |"), "Row 2 format missing");
+            Assert.True(md.Contains(@"d:\1.Development\widget-claude"), "Path 1 missing");
+        }
+
+        public static void Test_CacheSavings_Calculation()
+        {
+            Tally t = new Tally();
+            t.Input = 50000;
+            t.CacheRead = 50000;
+            t.Cost = 0.50;
+            t.Saved = 0.25;
+
+            Assert.Equal(100000L, t.Total, "Total tokens calculation");
+            Assert.Equal(100000L, t.InputSide, "InputSide tokens calculation");
+            Assert.Equal(0.5, t.CacheHit, "Cache hit ratio calculation");
+            Assert.Equal(0.25, t.Saved, "Cache saved calculation");
+        }
+
+        public static void Test_BudgetEngine_ThresholdAlert()
+        {
+            BudgetEngine engine = new BudgetEngine();
+            DateTime now = DateTime.Today;
+            engine.Evaluate(0, 0, 10.0, 100.0, now);
+            List<BudgetAlert> alerts = engine.Evaluate(10.5, 0, 10.0, 100.0, now);
+            Assert.True(alerts.Count > 0, "Should generate daily budget alert");
+            Assert.False(alerts[0].Monthly, "Alert should be daily");
+            Assert.Equal(100, alerts[0].Percent, "Alert percent should be 100%");
+        }
     }
 
     public static class TestRunner

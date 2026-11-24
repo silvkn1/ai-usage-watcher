@@ -97,7 +97,8 @@ namespace ClaudeUsageWidget
             AlertsEnabled = true;
             AlertThresholds = "80,95";
             ResetNotify = true;
-            Hotkey = "Ctrl+Alt+U";
+            HotkeyEnabled = true;
+            Hotkey = "Win+Alt+U";
             HistoryDays = 14;
             DockEdge = "top";
             DockMonitor = "";
@@ -143,7 +144,7 @@ namespace ClaudeUsageWidget
                         if (double.IsNaN(c.BudgetMonthly) || c.BudgetMonthly < 0) c.BudgetMonthly = 0;
                         if (c.HookNotifyMinSeconds < 0 || c.HookNotifyMinSeconds > 3600) c.HookNotifyMinSeconds = 30;
                         if (AlertEngine.ParseThresholds(c.AlertThresholds) == null) c.AlertThresholds = "80,95";
-                        if (string.IsNullOrWhiteSpace(c.Hotkey)) c.Hotkey = "Ctrl+Alt+U";
+                        if (string.IsNullOrWhiteSpace(c.Hotkey)) c.Hotkey = "Win+Alt+U";
                         if (string.IsNullOrEmpty(c.CurrencySymbol)) c.CurrencySymbol = "Rp";
                         if (c.CurrencyRate <= 0 || double.IsNaN(c.CurrencyRate)) c.CurrencyRate = 16200;
                         if (c.BurnRateThresholdTokens <= 0) c.BurnRateThresholdTokens = 100000;

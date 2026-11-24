@@ -722,4 +722,75 @@ namespace ClaudeUsageWidget
             File.WriteAllText(Paths.AntigravityRateLimitsFile, sb.ToString(), Encoding.UTF8);
         }
     }
+
+    /// <summary>Status deteksi instans lokal Ollama.</summary>
+    internal class OllamaStatus
+    {
+        public bool Online;
+        public int ModelCount;
+        public List<string> ModelNames = new List<string>();
+        public DateTime LastChecked = DateTime.MinValue;
+    }
+
+    /// <summary>
+    /// Probe ringan ke server lokal Ollama (http://127.0.0.1:11434/api/tags)
+    /// untuk mendeteksi ketersediaan LLM lokal secara otomatis.
+    /// </summary>
+    internal static class OllamaProbe
+    {
+        public static OllamaStatus Current = new OllamaStatus();
+
+        public static OllamaStatus ParseResponse(string json)
+        {
+            OllamaStatus status = new OllamaStatus();
+            if (string.IsNullOrWhiteSpace(json)) return status;
+            try
+            {
+                Dictionary<string, object> root = J.Parse(json);
+                IList models = J.Arr(root, "models");
+                if (models != null)
+                {
+                    status.Online = true;
+                    status.ModelCount = models.Count;
+                    foreach (object o in models)
+                    {
+                        Dictionary<string, object> m = o as Dictionary<string, object>;
+                        string name = J.Str(m, "name");
+                        if (!string.IsNullOrEmpty(name)) status.ModelNames.Add(name);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("ollama.parse", ex);
+            }
+            return status;
+        }
+
+        public static async Task<OllamaStatus> CheckAsync(string endpoint = "http://127.0.0.1:11434/api/tags", int timeoutMs = 1500)
+        {
+            OllamaStatus st = new OllamaStatus();
+            try
+            {
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(endpoint);
+                req.Method = "GET";
+                req.Timeout = timeoutMs;
+                req.ReadWriteTimeout = timeoutMs;
+                using (WebResponse resp = await req.GetResponseAsync())
+                using (Stream s = resp.GetResponseStream())
+                using (StreamReader r = new StreamReader(s, Encoding.UTF8))
+                {
+                    string json = await r.ReadToEndAsync();
+                    st = ParseResponse(json);
+                }
+            }
+            catch
+            {
+                st.Online = false;
+            }
+            st.LastChecked = DateTime.Now;
+            Current = st;
+            return st;
+        }
+    }
 }
