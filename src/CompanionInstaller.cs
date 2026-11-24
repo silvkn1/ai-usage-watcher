@@ -74,7 +74,7 @@ namespace ClaudeUsageWidget
   ""name"": ""ai-usage-watcher"",
   ""displayName"": ""AI Usage Watcher Companion"",
   ""description"": ""Live status bar metrics for Claude Code & Antigravity quotas, cost, and Ollama"",
-  ""version"": ""1.0.0"",
+  ""version"": ""1.1.0"",
   ""publisher"": ""silvkn1"",
   ""repository"": {
     ""type"": ""git"",
