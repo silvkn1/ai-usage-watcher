@@ -23,7 +23,7 @@
 
 **AI Usage Watcher** adalah aplikasi widget desktop ringan (native Windows) dan monitor system tray untuk memantau konsumsi token, estimasi biaya API, serta batas kuota (*rate limits*) dari **Claude Code** dan **Google Antigravity (Gemini)** secara *real-time*.
 
-Dibuat menggunakan C# Windows Forms murni pada **.NET Framework 4.8** bawaan Windows: berukuran sangat kecil (~300 KB), tanpa instalasi runtime tambahan, tanpa dependensi Visual Studio atau paket NuGet eksternal, dan **tanpa pernah memakan taskbar** (*zero taskbar clutter*).
+Dibuat menggunakan C# Windows Forms murni pada **.NET Framework 4.8** bawaan Windows: berukuran sangat kecil (~385 KB), tanpa instalasi runtime tambahan, tanpa dependensi Visual Studio atau paket NuGet eksternal, dan **tanpa pernah memakan taskbar** (*zero taskbar clutter*).
 
 ---
 
@@ -85,7 +85,7 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 | **Dukungan Provider** | **Claude Code + Antigravity (Gemini)** | Hanya Claude Code | Hanya Claude Code | Umumnya hanya 1 provider |
 | **Bentuk Antarmuka (UI)** | **Mini HUD Pill (26px) + Dual Cards** | Teks terminal (harus diketik) | Bar status terminal | Jendela berat / webview |
 | **System Tray Dinamis** | **Ada** (angka badge & warna dinamis) | Tidak ada | Tidak ada | Jarang / ikon statis |
-| **Ukuran Biner / Distro** | **~300 KB** (Single Standalone .exe) | ~5 - 50 MB (Node.js/npm) | Berkas skrip bash/ps1 | 150 MB - 300 MB+ |
+| **Ukuran Biner / Distro** | **~385 KB** (Single Standalone .exe) | ~5 - 50 MB (Node.js/npm) | Berkas skrip bash/ps1 | 150 MB - 300 MB+ |
 | **Konsumsi Memori (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Menumpang runtime CLI | 0 MB (hanya saat print) | 200 MB - 600 MB+ |
 | **Dependensi Eksternal** | **Nol** (Bawaan Windows 10/11) | Perlu Node.js / Python | Perlu wrapper CLI | Perlu Node / Chromium |
 | **Prediksi Habis Kuota (Runway)**| **Ada** (`Runway: ~45m` + pacing marker) | Tidak ada | Tidak ada | Tidak ada |
@@ -102,7 +102,7 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 2. **Koneksi Resmi Connect-RPC ke Antigravity**: Membaca kuota resmi Antigravity langsung dari Language Server lokal (`127.0.0.1`) melalui daemon socket `hub_*.json` tanpa scraping web atau risiko token expired.
 3. **Mini HUD Pill & Zero Taskbar Clutter**: Widget mengambang setinggi 26 piksel yang menempel di tepi layar, tembus klik (*click-through*), dan otomatis membesar saat disentuh kursor (*instant hover-expand*) tanpa pernah memakan ruang taskbar Windows atau mengganggu jendela kerja `Alt+Tab`.
 4. **Analitik Cerdas & Runway Forecast**: Tidak hanya menampilkan persentase pasif, aplikasi memprediksi kapan kuota Anda habis berdasarkan laju konsumsi 10 menit terakhir, lengkap dengan penanda *pacing marker* untuk mencegah limit terputus di tengah sesi coding.
-5. **Kompak, Mandiri, dan Portabel**: Tanpa installer rumit, tanpa dependensi Node.js/npm/Python, dan cukup satu berkas `.exe` portabel berukuran 300 KB yang langsung jalan di setiap PC Windows 10 dan 11.
+5. **Kompak, Mandiri, dan Portabel**: Tanpa installer rumit, tanpa dependensi Node.js/npm/Python, dan cukup satu berkas `.exe` portabel berukuran ~385 KB yang langsung jalan di setiap PC Windows 10 dan 11.
 
 ---
 
@@ -194,7 +194,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Kompilasi paket distribusi rilis lengkap (.zip + SHA256)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Menjalankan 33 automated unit test suite
+# Menjalankan 54 automated unit test suite
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -205,25 +205,32 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 ai-usage-watcher/
 ├── src/
-│   ├── AudioAlert.cs      # Pengelola audio chime peringatan ambang batas
-│   ├── Common.cs          # Path sistem, formatting token/mata uang, dan minimal JSON parser
-│   ├── Config.cs          # Model konfigurasi aplikasi & penyimpanan terenkripsi DPAPI
-│   ├── FloatingForm.cs    # Jendela mengambang (Dual-Column Cards, Mini HUD Pill, GDI+ paint)
-│   ├── History.cs         # Penyimpanan riwayat harian mandiri (120 hari), ekspor CSV & Markdown
-│   ├── Hooks.cs           # Global keyboard shortcut / hotkey listener
-│   ├── Logic.cs           # Mesin evaluasi ambang limit, pacing, runway, status, & eksportir laporan
-│   ├── Probe.cs           # Eksekutor probe CLI untuk pembacaan limit Claude desktop
-│   ├── Program.cs         # Entry point aplikasi Windows Forms & single-instance mutex
-│   ├── SettingsForm.cs    # Dialog antarmuka pengaturan bertab (Display, Behavior, Alerts, Data)
-│   ├── Sources.cs         # Rate limit reader, Official Pricing fetcher, dan Connect-RPC client
-│   ├── Strings.cs         # Sistem lokalisasi dwibahasa (English & Bahasa Indonesia)
-│   ├── Theming.cs         # Palette warna, tema gelap/terang, dan ekstraksi app icon
-│   ├── TrayApp.cs         # Pengelola tray icon dinamis, file watcher, menu konteks, dan timer
-│   ├── Usage.cs           # Pemindai log lokal inkremental Claude Code & Antigravity
-│   └── Webhook.cs         # Pengirim payload alert ke Discord, Slack, & Telegram
-├── statusline/            # Pembungkus statusline untuk Claude Code CLI (PowerShell & Bash)
+│   ├── AudioAlert.cs         # Pengelola audio chime peringatan ambang batas
+│   ├── AutoUpdater.cs        # Pembaruan otomatis GitHub Releases & verifikasi SHA-256
+│   ├── Common.cs             # Path sistem, formatting token/mata uang, dan minimal JSON parser
+│   ├── CompanionInstaller.cs # Pemasang ekstensi status bar VS Code / Cursor
+│   ├── Config.cs             # Model konfigurasi aplikasi & penyimpanan terenkripsi DPAPI
+│   ├── Diag.cs               # Pembuat ringkasan diagnostik bebas data rahasia
+│   ├── FloatingForm.cs       # Jendela mengambang (Dual-Column Cards, Mini HUD Pill, GDI+ paint)
+│   ├── History.cs            # Penyimpanan riwayat harian mandiri (120 hari), ekspor CSV & Markdown
+│   ├── Hooks.cs              # Global keyboard shortcut / hotkey listener & hook Claude Code
+│   ├── LangPacks.cs          # Pemuat paket bahasa JSON eksternal
+│   ├── Logic.cs              # Mesin evaluasi ambang limit, pacing, runway, status, & eksportir laporan
+│   ├── Probe.cs              # Eksekutor probe CLI untuk pembacaan limit Claude desktop
+│   ├── Program.cs            # Entry point aplikasi Windows Forms & single-instance mutex
+│   ├── ProjectExplorerForm.cs# Dialog eksplorasi biaya proyek & heatmap aktivitas 35 hari
+│   ├── SettingsForm.cs       # Dialog antarmuka pengaturan bertab dengan tombol Apply langsung
+│   ├── SetupWizardForm.cs    # Panduan penyiapan awal 3 langkah
+│   ├── Sources.cs            # Rate limit reader, Official Pricing fetcher, dan Connect-RPC client
+│   ├── Strings.cs            # Sistem lokalisasi dwibahasa (English & Bahasa Indonesia)
+│   ├── Theming.cs            # Palette warna, efek blur Win11 Mica/Acrylic, dan ekstraksi app icon
+│   ├── TrayApp.cs            # Pengelola tray icon dinamis, file watcher, menu konteks, dan timer
+│   ├── Usage.cs              # Pemindai log lokal inkremental Claude Code & Antigravity
+│   └── Webhook.cs            # Pengirim payload alert ke Discord, Slack, & Telegram
+├── companion/                # Ekstensi status bar VS Code & Cursor
+├── statusline/               # Pembungkus statusline untuk Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs       # 33 automated unit tests (.NET 4.8 test runner mandiri)
+│   └── UnitTests.cs          # 54 automated unit tests (.NET 4.8 test runner mandiri)
 ├── assets/                # Aset ikon aplikasi (vektor minimalis 2-warna & icon format .ico)
 ├── docs/img/              # Tangkapan layar fitur untuk dokumentasi
 │   ├── id/                # Tangkapan layar antarmuka Bahasa Indonesia

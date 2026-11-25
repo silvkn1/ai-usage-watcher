@@ -8,7 +8,7 @@ namespace ClaudeUsageWidget
 {
     internal class SetupWizardForm : Form
     {
-        private static readonly string[] Edges = { "top", "top-left", "top-right", "bottom", "bottom-left", "bottom-right" };
+        private static readonly string[] Edges = { "top", "top-left", "top-right", "bottom", "bottom-left", "bottom-right", "left", "right" };
         private static readonly string[] Backdrops = { "acrylic", "mica", "mica-alt", "solid" };
 
         private readonly AppConfig _cfg;
@@ -123,6 +123,8 @@ namespace ClaudeUsageWidget
             BuildPage2();
             BuildPage3();
 
+            AcceptButton = _btnNext;
+            CancelButton = _btnSkip;
             ApplyTheme();
             GoToStep(0);
         }
@@ -208,7 +210,7 @@ namespace ClaudeUsageWidget
             _btnSkip.AutoSize = true;
             _btnSkip.UseMnemonic = false;
             _btnSkip.Dock = DockStyle.Left;
-            _btnSkip.Click += delegate { FinishAndSave(); };
+            _btnSkip.Click += delegate { SkipWizard(); };
 
             FlowLayoutPanel rightButtons = new FlowLayoutPanel();
             rightButtons.FlowDirection = FlowDirection.RightToLeft;
@@ -462,6 +464,8 @@ namespace ClaudeUsageWidget
             _cboEdge.Items.Add(L.T("edge.bottom"));
             _cboEdge.Items.Add(L.T("edge.bottom_left"));
             _cboEdge.Items.Add(L.T("edge.bottom_right"));
+            _cboEdge.Items.Add(L.T("edge.left"));
+            _cboEdge.Items.Add(L.T("edge.right"));
             int ei = Array.IndexOf(Edges, _cfg.DockEdge);
             _cboEdge.SelectedIndex = ei >= 0 ? ei : 0;
             _cboEdge.Margin = new Padding(0, 2, 0, 16);
@@ -715,6 +719,14 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private void SkipWizard()
+        {
+            _cfg.FirstRunCompleted = true;
+            _cfg.Save();
+            DialogResult = DialogResult.Cancel;
+            Close();
+        }
+
         private void FinishAndSave()
         {
             _cfg.FirstRunCompleted = true;
@@ -739,8 +751,12 @@ namespace ClaudeUsageWidget
             if (_chkCurrency.Checked)
             {
                 _cfg.CurrencyCustomEnabled = true;
-                _cfg.CurrencySymbol = "Rp";
-                _cfg.CurrencyRate = 16200;
+                if (string.IsNullOrEmpty(_cfg.CurrencySymbol)) _cfg.CurrencySymbol = "Rp";
+                if (_cfg.CurrencyRate <= 0) _cfg.CurrencyRate = 16200;
+            }
+            else
+            {
+                _cfg.CurrencyCustomEnabled = false;
             }
 
             try

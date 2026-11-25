@@ -15,6 +15,8 @@ $TestExe = Join-Path $RootDir "dist\Tests.exe"
 $SrcFiles = Get-ChildItem (Join-Path $RootDir "src\*.cs") | ForEach-Object { $_.FullName }
 $TestFiles = Get-ChildItem (Join-Path $RootDir "tests\*.cs") | ForEach-Object { $_.FullName }
 $Pricing = Join-Path $RootDir "pricing.json"
+$CompPkg = Join-Path $RootDir "companion\vscode-status-bar\package.json"
+$CompExt = Join-Path $RootDir "companion\vscode-status-bar\extension.js"
 
 if (-not (Test-Path (Join-Path $RootDir "dist"))) {
     New-Item -ItemType Directory -Path (Join-Path $RootDir "dist") | Out-Null
@@ -26,7 +28,7 @@ $Refs = "System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.F
 $RefArgs = $Refs -join ","
 
 Write-Host "Compiling unit tests..." -ForegroundColor Cyan
-& $Csc /nologo /target:exe /main:Tests.TestRunner /out:$TestExe /resource:$Pricing /r:$RefArgs $TestFiles $SrcFiles
+& $Csc /nologo /target:exe /main:Tests.TestRunner /out:$TestExe "/resource:$Pricing,pricing.json" "/resource:$CompPkg,companion-package.json" "/resource:$CompExt,companion-extension.js" /r:$RefArgs $TestFiles $SrcFiles
 
 if ($LASTEXITCODE -ne 0) {
     throw "Kompilasi unit test gagal (exit $LASTEXITCODE)."

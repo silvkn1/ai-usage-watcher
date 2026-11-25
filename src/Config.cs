@@ -73,7 +73,8 @@ namespace ClaudeUsageWidget
 
         // Integrasi Webhook (Discord/Slack/Telegram)
         public bool WebhookEnabled { get; set; }
-        public string WebhookUrl { get; set; }
+        public string WebhookUrl { get; set; } // legacy plaintext (dimigrasi ke DPAPI saat Load/Save)
+        public string WebhookUrlProtected { get; set; }
 
         // Tombol taskbar & progress bar
         public bool ShowInTaskbar { get; set; }
@@ -169,12 +170,15 @@ namespace ClaudeUsageWidget
                         if (string.IsNullOrEmpty(c.CurrencySymbol)) c.CurrencySymbol = "Rp";
                         if (c.CurrencyRate <= 0 || double.IsNaN(c.CurrencyRate)) c.CurrencyRate = 16200;
                         if (c.BurnRateThresholdTokens <= 0) c.BurnRateThresholdTokens = 100000;
-                        if (c.WebhookUrl == null) c.WebhookUrl = "";
+                        if (!string.IsNullOrEmpty(c.WebhookUrl))
+                        {
+                            c.SetWebhookUrl(c.WebhookUrl);
+                            c.WebhookUrl = null;
+                        }
                         if (c.OllamaPort <= 0 || c.OllamaPort > 65535) c.OllamaPort = 11434;
                         if (c.Backdrop != "solid" && c.Backdrop != "acrylic" && c.Backdrop != "mica" && c.Backdrop != "mica-alt")
                             c.Backdrop = DwmBackdrop.IsWindows11 ? "acrylic" : "solid";
                         c.ShowInTaskbar = false;
-                        c.FirstRunCompleted = true;
                         return c;
                     }
                 }
@@ -188,32 +192,46 @@ namespace ClaudeUsageWidget
             try
             {
                 Paths.Ensure();
-                string tmp = Paths.ConfigFile + ".tmp";
-                File.WriteAllText(tmp, J.Ser.Serialize(this), new UTF8Encoding(false));
-                if (File.Exists(Paths.ConfigFile)) File.Delete(Paths.ConfigFile);
-                File.Move(tmp, Paths.ConfigFile);
+                WebhookUrl = null;   // jangan pernah simpan URL webhook plaintext
+                AtomicFile.Write(Paths.ConfigFile, J.Ser.Serialize(this));
             }
             catch (Exception ex) { Log.Write("config.save", ex); }
         }
 
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("ClaudeUsageWidget.v1");
 
-        public void SetAdminKey(string plain)
+        private static string ProtectStr(string plain)
         {
-            if (string.IsNullOrEmpty(plain)) { AdminKeyProtected = null; return; }
+            if (string.IsNullOrEmpty(plain)) return null;
             byte[] enc = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), Entropy, DataProtectionScope.CurrentUser);
-            AdminKeyProtected = Convert.ToBase64String(enc);
+            return Convert.ToBase64String(enc);
         }
 
-        public string GetAdminKey()
+        private static string UnprotectStr(string protectedB64, string logContext)
         {
-            if (string.IsNullOrEmpty(AdminKeyProtected)) return null;
+            if (string.IsNullOrEmpty(protectedB64)) return null;
             try
             {
-                byte[] dec = ProtectedData.Unprotect(Convert.FromBase64String(AdminKeyProtected), Entropy, DataProtectionScope.CurrentUser);
+                byte[] dec = ProtectedData.Unprotect(Convert.FromBase64String(protectedB64), Entropy, DataProtectionScope.CurrentUser);
                 return Encoding.UTF8.GetString(dec);
             }
-            catch (Exception ex) { Log.Write("config.unprotect", ex); return null; }
+            catch (Exception ex) { Log.Write(logContext, ex); return null; }
+        }
+
+        public void SetAdminKey(string plain) { AdminKeyProtected = ProtectStr(plain); }
+        public string GetAdminKey() { return UnprotectStr(AdminKeyProtected, "config.unprotect"); }
+
+        public void SetWebhookUrl(string plain)
+        {
+            WebhookUrl = null;
+            WebhookUrlProtected = ProtectStr(plain);
+        }
+
+        public string GetWebhookUrl()
+        {
+            string dec = UnprotectStr(WebhookUrlProtected, "config.unprotect.webhook");
+            if (!string.IsNullOrEmpty(dec)) return dec;
+            return WebhookUrl ?? "";
         }
     }
 

@@ -172,63 +172,81 @@ namespace ClaudeUsageWidget
             return !string.IsNullOrEmpty(type) && type != "solid" && type != "none";
         }
 
+        private static void SetCompositionAccent(IntPtr hwnd, int accentState, int gradientColor)
+        {
+            AccentPolicy policy = new AccentPolicy
+            {
+                AccentState = accentState,
+                AccentFlags = accentState == 0 ? 0 : 2,
+                GradientColor = gradientColor,
+                AnimationId = 0
+            };
+            int size = Marshal.SizeOf(policy);
+            IntPtr pPolicy = Marshal.AllocHGlobal(size);
+            try
+            {
+                Marshal.StructureToPtr(policy, pPolicy, false);
+                WindowCompositionAttributeData data = new WindowCompositionAttributeData
+                {
+                    Attribute = 19, // WCA_ACCENT_POLICY
+                    Data = pPolicy,
+                    SizeOfData = size
+                };
+                SetWindowCompositionAttribute(hwnd, ref data);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pPolicy);
+            }
+        }
+
         public static void Apply(IntPtr hwnd, string type, bool isDark)
         {
             if (hwnd == IntPtr.Zero) return;
             try
             {
+                bool win11_22h2 = IsWindows11 && Environment.OSVersion.Version.Build >= 22621;
                 if (string.IsNullOrEmpty(type) || type == "solid" || type == "none")
                 {
-                    if (IsWindows11 && Environment.OSVersion.Version.Build >= 22621)
+                    if (win11_22h2)
                     {
                         int none = BACKDROP_NONE;
                         DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref none, 4);
                     }
+                    else if (IsWindows11)
+                    {
+                        int micaOff = 0;
+                        DwmSetWindowAttribute(hwnd, DWMWA_MICA_EFFECT, ref micaOff, 4);
+                    }
+                    SetCompositionAccent(hwnd, 0, 0);
+                    MARGINS zero = new MARGINS { cxLeftWidth = 0, cxRightWidth = 0, cyTopHeight = 0, cyBottomHeight = 0 };
+                    DwmExtendFrameIntoClientArea(hwnd, ref zero);
                     return;
                 }
 
                 MARGINS margins = new MARGINS { cxLeftWidth = -1, cxRightWidth = -1, cyTopHeight = -1, cyBottomHeight = -1 };
                 DwmExtendFrameIntoClientArea(hwnd, ref margins);
 
-                if (IsWindows11 && Environment.OSVersion.Version.Build >= 22621)
+                if (win11_22h2)
                 {
+                    SetCompositionAccent(hwnd, 0, 0);
                     int bType = BACKDROP_ACRYLIC;
                     if (type == "mica") bType = BACKDROP_MICA;
                     else if (type == "mica-alt") bType = BACKDROP_MICA_ALT;
                     DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref bType, 4);
                 }
-                else if (IsWindows11)
+                else
                 {
-                    int micaVal = 1;
-                    DwmSetWindowAttribute(hwnd, DWMWA_MICA_EFFECT, ref micaVal, 4);
-                }
-
-                if (type == "acrylic" || !IsWindows11)
-                {
-                    int gradientColor = isDark ? unchecked((int)0xCC202024) : unchecked((int)0xCCF4F5F7);
-                    AccentPolicy policy = new AccentPolicy
+                    if (IsWindows11 && (type == "mica" || type == "mica-alt"))
                     {
-                        AccentState = 4, // ACCENT_ENABLE_ACRYLICBLURBEHIND
-                        AccentFlags = 2,
-                        GradientColor = gradientColor,
-                        AnimationId = 0
-                    };
-                    int size = Marshal.SizeOf(policy);
-                    IntPtr pPolicy = Marshal.AllocHGlobal(size);
-                    try
-                    {
-                        Marshal.StructureToPtr(policy, pPolicy, false);
-                        WindowCompositionAttributeData data = new WindowCompositionAttributeData
-                        {
-                            Attribute = 19, // WCA_ACCENT_POLICY
-                            Data = pPolicy,
-                            SizeOfData = size
-                        };
-                        SetWindowCompositionAttribute(hwnd, ref data);
+                        SetCompositionAccent(hwnd, 0, 0);
+                        int micaVal = 1;
+                        DwmSetWindowAttribute(hwnd, DWMWA_MICA_EFFECT, ref micaVal, 4);
                     }
-                    finally
+                    else
                     {
-                        Marshal.FreeHGlobal(pPolicy);
+                        int gradientColor = isDark ? unchecked((int)0xCC202024) : unchecked((int)0xCCF4F5F7);
+                        SetCompositionAccent(hwnd, 4, gradientColor); // ACCENT_ENABLE_ACRYLICBLURBEHIND
                     }
                 }
             }

@@ -6,6 +6,7 @@ const os = require('os');
 let statusBarItem = null;
 let pollTimer = null;
 let fileWatcher = null;
+let watchDebounce = null;
 
 function getStatusFilePath() {
     const userProfile = os.homedir();
@@ -14,6 +15,10 @@ function getStatusFilePath() {
         return primaryPath;
     }
     const localAppData = process.env.LOCALAPPDATA || path.join(userProfile, 'AppData', 'Local');
+    const appStatusPath = path.join(localAppData, 'AIUsageWatcher', 'status.json');
+    if (fs.existsSync(appStatusPath)) {
+        return appStatusPath;
+    }
     const fallbackPath = path.join(localAppData, 'ClaudeUsageWidget', 'status.json');
     if (fs.existsSync(fallbackPath)) {
         return fallbackPath;
@@ -40,7 +45,8 @@ function updateStatusBar() {
     }
 
     try {
-        const raw = fs.readFileSync(filePath, 'utf8');
+        const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+        if (!raw.trim()) return;
         const data = JSON.parse(raw);
 
         const parts = [];
@@ -132,8 +138,9 @@ function activate(context) {
         const watchDir = path.dirname(targetPath);
         if (fs.existsSync(watchDir)) {
             fileWatcher = fs.watch(watchDir, (event, filename) => {
-                if (filename && filename.includes('status')) {
-                    updateStatusBar();
+                if (filename && filename.indexOf('status') !== -1 && !filename.endsWith('.tmp')) {
+                    if (watchDebounce) clearTimeout(watchDebounce);
+                    watchDebounce = setTimeout(updateStatusBar, 120);
                 }
             });
         }
@@ -146,6 +153,10 @@ function deactivate() {
     if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
+    }
+    if (watchDebounce) {
+        clearTimeout(watchDebounce);
+        watchDebounce = null;
     }
     if (fileWatcher) {
         try { fileWatcher.close(); } catch (e) {}

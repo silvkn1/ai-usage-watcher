@@ -23,7 +23,7 @@
 
 **AI Usage Watcher** is a lightweight, native Windows desktop widget and system tray monitor for tracking token consumption, estimated API costs, and quota rate limits from **Claude Code** and **Google Antigravity (Gemini)** in real time.
 
-Built with pure C# Windows Forms on the built-in **.NET Framework 4.8** of Windows: ultra-compact footprint (~300 KB), zero additional runtime installations, zero external NuGet or Node dependencies, and **zero taskbar clutter** (`WS_EX_TOOLWINDOW`).
+Built with pure C# Windows Forms on the built-in **.NET Framework 4.8** of Windows: ultra-compact footprint (~385 KB), zero additional runtime installations, zero external NuGet or Node dependencies, and **zero taskbar clutter** (`WS_EX_TOOLWINDOW`).
 
 ---
 
@@ -85,7 +85,7 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 | **Provider Support** | **Claude Code + Antigravity (Gemini)** | Claude Code only | Claude Code only | Typically 1 provider |
 | **Interface (UI)** | **Mini HUD Pill (26px) + Dual Cards** | Terminal text (must invoke) | Terminal status bar | Heavy window / webview |
 | **Dynamic System Tray** | **Yes** (live badge percentage & color) | None | None | Rare / static icon |
-| **Binary Size** | **~300 KB** (Single Standalone .exe) | ~5 - 50 MB (Node.js/npm) | Bash/PowerShell scripts | 150 MB - 300 MB+ |
+| **Binary Size** | **~385 KB** (Single Standalone .exe) | ~5 - 50 MB (Node.js/npm) | Bash/PowerShell scripts | 150 MB - 300 MB+ |
 | **Memory Footprint (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Absorbed in CLI runtime | 0 MB (execution only) | 200 MB - 600 MB+ |
 | **External Dependencies** | **Zero** (Windows 10/11 built-in) | Requires Node.js / Python | Requires CLI wrapper | Requires Node / Chromium |
 | **Runway Quota Forecast**| **Yes** (`Runway: ~45m` + pacing marker) | None | None | None |
@@ -102,7 +102,7 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 2. **Official Connect-RPC Language Server Integration**: Queries official Antigravity quota directly from the background Language Server (`127.0.0.1`) via local `hub_*.json` daemon discovery without web scraping or auth token expirations.
 3. **Mini HUD Pill & Zero Taskbar Clutter**: Floating 26px capsule widget docked unobtrusively to screen edges, click-through capable, and instantly expanding on mouse hover without taking taskbar real estate or polluting `Alt+Tab`.
 4. **Intelligent Analytics & Runway Forecasting**: Beyond static percentages, the app calculates when your quota will exhaust based on your 10-minute burn rate, complete with a visual pacing marker to prevent hitting limits mid-session.
-5. **Compact, Portable, and Standalone**: No complex installers, no Node.js or Python dependencies—a single portable 300 KB `.exe` file that runs out of the box on Windows 10 and 11.
+5. **Compact, Portable, and Standalone**: No complex installers, no Node.js or Python dependencies—a single portable ~385 KB `.exe` file that runs out of the box on Windows 10 and 11.
 
 ---
 
@@ -194,7 +194,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Compile full distribution release package (.zip + SHA256 checksums)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Execute 33 automated unit tests
+# Execute 54 automated unit tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -205,25 +205,32 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 ai-usage-watcher/
 ├── src/
-│   ├── AudioAlert.cs      # Threshold audio chime manager
-│   ├── Common.cs          # System paths, formatting, and lightweight JSON parser
-│   ├── Config.cs          # Configuration model & DPAPI encrypted persistence
-│   ├── FloatingForm.cs    # Floating HUD window (Dual Cards, Mini Pill, GDI+ paint)
-│   ├── History.cs         # Self-contained 120-day historical ledger, CSV & Markdown exports
-│   ├── Hooks.cs           # Global keyboard shortcut / hotkey listener
-│   ├── Logic.cs           # Threshold evaluation, pacing, runway, status, & report exporter
-│   ├── Probe.cs           # CLI probe executor for desktop Claude rate limits
-│   ├── Program.cs         # Windows Forms entry point & single-instance mutex
-│   ├── SettingsForm.cs    # Tabbed settings dialog (Display, Behavior, Alerts, Data)
-│   ├── Sources.cs         # Rate limit reader, Official Pricing fetcher, and Connect-RPC client
-│   ├── Strings.cs         # Bilingual localization engine (English & Bahasa Indonesia)
-│   ├── Theming.cs         # Color palettes, dark/light themes, and app icon extractor
-│   ├── TrayApp.cs         # Dynamic system tray icon, file watcher, context menu, and timers
-│   ├── Usage.cs           # Incremental local log scanner for Claude Code & Antigravity
-│   └── Webhook.cs         # Alert dispatcher for Discord, Slack, & Telegram
-├── statusline/            # Statusline wrapper scripts for Claude Code CLI (PowerShell & Bash)
+│   ├── AudioAlert.cs         # Threshold audio chime manager
+│   ├── AutoUpdater.cs        # GitHub Releases auto-updater & SHA-256 verification
+│   ├── Common.cs             # System paths, formatting, and lightweight JSON parser
+│   ├── CompanionInstaller.cs # Installer for VS Code / Cursor companion extension
+│   ├── Config.cs             # Configuration model & DPAPI encrypted persistence
+│   ├── Diag.cs               # Privacy-redacted diagnostic report builder
+│   ├── FloatingForm.cs       # Floating HUD window (Dual Cards, Mini Pill, GDI+ paint)
+│   ├── History.cs            # Self-contained 120-day historical ledger, CSV & Markdown exports
+│   ├── Hooks.cs              # Global keyboard shortcut & Claude Code hook listener
+│   ├── LangPacks.cs          # External JSON language pack loader
+│   ├── Logic.cs              # Threshold evaluation, pacing, runway, status, & report exporter
+│   ├── Probe.cs              # CLI probe executor for desktop Claude rate limits
+│   ├── Program.cs            # Windows Forms entry point & single-instance mutex
+│   ├── ProjectExplorerForm.cs# Project Cost Explorer & 35-day activity heatmap dialog
+│   ├── SettingsForm.cs       # Tabbed settings dialog with live Apply preview
+│   ├── SetupWizardForm.cs    # 3-step first-run onboarding wizard
+│   ├── Sources.cs            # Rate limit reader, Official Pricing fetcher, and Connect-RPC client
+│   ├── Strings.cs            # Bilingual localization engine (English & Bahasa Indonesia)
+│   ├── Theming.cs            # Color palettes, Win11 DWM Mica/Acrylic, and app icon extractor
+│   ├── TrayApp.cs            # Dynamic system tray icon, file watcher, context menu, and timers
+│   ├── Usage.cs              # Incremental local log scanner for Claude Code & Antigravity
+│   └── Webhook.cs            # Alert dispatcher for Discord, Slack, & Telegram
+├── companion/                # VS Code & Cursor status bar extension
+├── statusline/               # Statusline wrapper scripts for Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs       # 33 automated unit tests (.NET 4.8 test runner)
+│   └── UnitTests.cs          # 54 automated unit tests (.NET 4.8 test runner)
 ├── assets/                # Application logo assets (2-color minimalist vector & .ico)
 ├── docs/img/              # Feature documentation screenshots
 │   ├── id/                # Indonesian UI screenshots

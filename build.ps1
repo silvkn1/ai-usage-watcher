@@ -31,6 +31,8 @@ $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.
     "/win32manifest:$root\app.manifest" `
     "/resource:$root\pricing.json,pricing.json" `
     "/resource:$root\app.ico,app.ico" `
+    "/resource:$root\companion\vscode-status-bar\package.json,companion-package.json" `
+    "/resource:$root\companion\vscode-status-bar\extension.js,companion-extension.js" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     /r:System.Net.Http.dll /r:System.Security.dll /r:System.Web.Extensions.dll `
     /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `

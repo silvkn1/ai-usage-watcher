@@ -194,10 +194,20 @@ namespace ClaudeUsageWidget
         /// <summary>Tulis ke file sementara di folder yang sama lalu tukar (File.Replace) agar pembaca tidak melihat file setengah jadi.</summary>
         public static void Write(string path, string content)
         {
+            Encoding utf8NoBom = new UTF8Encoding(false);
             string tmp = path + ".cuw.tmp";
-            File.WriteAllText(tmp, content, new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(tmp, path, null);
-            else File.Move(tmp, path);
+            try
+            {
+                File.WriteAllText(tmp, content, utf8NoBom);
+                if (File.Exists(path)) File.Replace(tmp, path, null);
+                else File.Move(tmp, path);
+                return;
+            }
+            catch
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            }
+            File.WriteAllText(path, content, utf8NoBom);
         }
     }
 

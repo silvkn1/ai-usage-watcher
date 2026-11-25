@@ -403,8 +403,8 @@ namespace ClaudeUsageWidget
         {
             if (line.IndexOf("\"PLANNER_RESPONSE\"", StringComparison.Ordinal) >= 0)
             {
-                if (ScanGemini) ProcessAntigravityLine(line);
-                return;
+                if (ScanGemini && ProcessAntigravityLine(line)) return;
+                if (!ScanClaude || line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return;
             }
 
             if (!ScanClaude) return;
@@ -413,9 +413,12 @@ namespace ClaudeUsageWidget
             if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0) return;
             if (line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return;
 
-            Dictionary<string, object> o;
+            Dictionary<string, object> o = null;
             try { o = J.Parse(StripContent(line)); }
-            catch { _skipped++; return; }
+            catch
+            {
+                try { o = J.Parse(line); } catch { o = null; }
+            }
             if (o == null) { _skipped++; return; }
             if (J.Str(o, "type") != "assistant") return;
 
@@ -504,30 +507,33 @@ namespace ClaudeUsageWidget
             _recentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
         }
 
-        private void ProcessAntigravityLine(string line)
+        private bool ProcessAntigravityLine(string line)
         {
-            if (line.IndexOf("\"model\"", StringComparison.Ordinal) < 0) return;
+            if (line.IndexOf("\"model\"", StringComparison.Ordinal) < 0) return false;
 
-            Dictionary<string, object> o;
+            Dictionary<string, object> o = null;
             try { o = J.Parse(StripAntigravity(line)); }
-            catch { _skipped++; return; }
-            if (o == null) { _skipped++; return; }
-            if (J.Str(o, "type") != "PLANNER_RESPONSE") return;
+            catch
+            {
+                try { o = J.Parse(line); } catch { o = null; }
+            }
+            if (o == null) { _skipped++; return false; }
+            if (J.Str(o, "type") != "PLANNER_RESPONSE") return false;
 
             string model = J.Str(o, "model");
-            if (string.IsNullOrEmpty(model) || model == "<synthetic>") return;
+            if (string.IsNullOrEmpty(model) || model == "<synthetic>") return true;
 
             DateTime ts;
             string tsRaw = J.Str(o, "created_at");
             if (tsRaw == null || !DateTime.TryParse(tsRaw, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out ts))
-            { _skipped++; return; }
+            { _skipped++; return true; }
             DateTime local = DateTime.SpecifyKind(ts, DateTimeKind.Utc).ToLocalTime();
-            if (local.Date < DateTime.Today.AddDays(-(KeepDays - 1))) return;
+            if (local.Date < DateTime.Today.AddDays(-(KeepDays - 1))) return true;
 
             long stepIndex = J.Long(o, "step_index");
             string key = "ag|" + (tsRaw ?? "") + "|" + stepIndex + "|" + model;
-            if (_seen.ContainsKey(key)) return;
+            if (_seen.ContainsKey(key)) return true;
             _seen[key] = local;
 
             Tally t = new Tally();
@@ -570,6 +576,7 @@ namespace ClaudeUsageWidget
             }
             _recentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
             _antigravityRecentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
+            return true;
         }
 
         private void Prune()
@@ -672,7 +679,7 @@ namespace ClaudeUsageWidget
                     s.Days.Add(new DayStat(d, dt.Total, dt.Cost, dt.Requests));
                 }
 
-                if (TrackProjects && ScanClaude)
+                if (TrackProjects && (ScanClaude || ScanGemini))
                     foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> pd in _proj)
                     {
                         if (pd.Key < weekStart) continue;

@@ -59,7 +59,6 @@ namespace ClaudeUsageWidget
             _miExit.Text = L.T("tray.exit");
             UpdateQuickJumpMenu();
             _probeStatus = null;    // pesan galat lama masih berbahasa sebelumnya; diganti saat refresh berikutnya
-            Refresh();
         }
         private IntPtr _iconHandle = IntPtr.Zero;
         private Icon _icon;
@@ -91,7 +90,7 @@ namespace ClaudeUsageWidget
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
             _scanner.Roots = ProjectRoots;
-            _scanner.SetTrackProjects(_cfg.ShowProjects);
+            _scanner.SetTrackProjects(true);   // statistik proyek disimpan di memori untuk Project Explorer; _cfg.ShowProjects hanya kontrol tampilan widget
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
             _scanner.AntigravityQuota7dTokens = _cfg.AntigravityQuota7dTokens;
             _history = HistoryStore.Load();
@@ -118,7 +117,14 @@ namespace ClaudeUsageWidget
             _tray.ContextMenuStrip = _menu;
             _tray.Text = L.AppName;
             _tray.MouseClick += delegate(object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OnTrayClick(); };
-            _tray.BalloonTipClicked += delegate { if (_pendingUpdate != null) HandleUpdateResult(_pendingUpdate, true); };
+            _tray.BalloonTipClicked += delegate
+            {
+                if (_lastBalloonIsUpdate && _pendingUpdate != null)
+                {
+                    _lastBalloonIsUpdate = false;
+                    HandleUpdateResult(_pendingUpdate, true);
+                }
+            };
             UpdateTrayIcon();
             _tray.Visible = true;
 
@@ -326,6 +332,7 @@ namespace ClaudeUsageWidget
 
         private void ShowBalloon(string text, ToolTipIcon icon)
         {
+            _lastBalloonIsUpdate = false;
             try { _tray.ShowBalloonTip(8000, L.AppName, text, icon); }
             catch (Exception ex) { Log.Write("balloon", ex); }
         }
@@ -353,7 +360,7 @@ namespace ClaudeUsageWidget
                     if (exceeded) AudioAlert.PlayWarning();
                 }
                 if (_cfg.WebhookEnabled)
-                    WebhookSender.Send(_cfg.WebhookUrl, exceeded ? "⚠️ Budget Limit Exceeded!" : "AI Usage Watcher Budget Alert", text);
+                    WebhookSender.Send(_cfg.GetWebhookUrl(), exceeded ? "⚠️ Budget Limit Exceeded!" : "AI Usage Watcher Budget Alert", text);
             }
         }
 
@@ -394,7 +401,7 @@ namespace ClaudeUsageWidget
             }
             if (_cfg.WebhookEnabled && kind == "input")
             {
-                WebhookSender.Send(_cfg.WebhookUrl, "Claude Code Input Required", text);
+                WebhookSender.Send(_cfg.GetWebhookUrl(), "Claude Code Input Required", text);
             }
         }
 
@@ -464,14 +471,13 @@ namespace ClaudeUsageWidget
                     if (a.ResetsAt != DateTime.MinValue && a.ResetsAt > DateTime.Now) text += " · " + L.T("resetin.at", Fmt.Until(a.ResetsAt), Fmt.Clock(a.ResetsAt));
                 }
                 Log.Write("alert " + a.Window + (a.IsReset ? " reset" : " " + a.Threshold));
-                try { _tray.ShowBalloonTip(8000, L.AppName, text, a.IsReset ? ToolTipIcon.Info : ToolTipIcon.Warning); }
-                catch (Exception ex) { Log.Write("alert.show", ex); }
+                ShowBalloon(text, a.IsReset ? ToolTipIcon.Info : ToolTipIcon.Warning);
                 if (_cfg.AudioAlertsEnabled)
                 {
                     if (a.IsReset) AudioAlert.PlayNotify();
                     else AudioAlert.PlayWarning();
                 }
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.WebhookUrl, "AI Usage Watcher Alert", text);
+                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.GetWebhookUrl(), "AI Usage Watcher Alert", text);
             }
         }
 
@@ -487,7 +493,7 @@ namespace ClaudeUsageWidget
                 string text = L.T("alert.burnrate", Fmt.Tokens(_usage.TokensLast10m));
                 ShowBalloon(text, ToolTipIcon.Warning);
                 if (_cfg.AudioAlertsEnabled) AudioAlert.PlayWarning();
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.WebhookUrl, "Token Burn Rate Alert", text);
+                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.GetWebhookUrl(), "Token Burn Rate Alert", text);
                 Log.Write("alert burnrate " + _usage.TokensLast10m);
             }
         }
@@ -502,7 +508,7 @@ namespace ClaudeUsageWidget
                 string text = L.T("alert.context", Fmt.Tokens(_usage.LastContextTokens), pct);
                 ShowBalloon(text, ToolTipIcon.Warning);
                 if (_cfg.AudioAlertsEnabled) AudioAlert.PlayWarning();
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.WebhookUrl, "Session Context Alert", text);
+                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.GetWebhookUrl(), "Session Context Alert", text);
                 Log.Write("alert context " + _usage.LastContextTokens);
             }
         }
@@ -932,6 +938,12 @@ namespace ClaudeUsageWidget
             cb.ExportCsv = ExportCsv;
             cb.Diagnostics = delegate { return Diag.Build(_cfg, _limits, _usage, _probeFailed, _org, _history.Count); };
             cb.CheckUpdates = delegate { CheckForUpdates(true); };
+            cb.PricingUpdated = delegate
+            {
+                _pricing = Pricing.Load();
+                _scanner.ResetWithPricing(_pricing);
+                RequestScan();
+            };
             cb.Apply = delegate
             {
                 ApplyConfigChanges(oldEdge, oldMonitor);
@@ -958,7 +970,6 @@ namespace ClaudeUsageWidget
 
         private void ApplyConfigChanges(string oldEdge, string oldMonitor)
         {
-            _cfg.Save();
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
@@ -967,8 +978,7 @@ namespace ClaudeUsageWidget
             L.Set(_cfg.Language);
             ApplyCurrencyOpts();
             ApplyLanguage();
-            ResetPopup();
-            _scanner.SetTrackProjects(_cfg.ShowProjects);   // aktif/nonaktif memicu pindai ulang
+            _scanner.SetTrackProjects(true);
             _float.Edge = _cfg.DockEdge;
             _float.MonitorName = _cfg.DockMonitor;
             _float.Backdrop = _cfg.Backdrop;
@@ -977,12 +987,18 @@ namespace ClaudeUsageWidget
                 Point c = _float.DockDefaultCenter();   // tepi/monitor baru: mulai dari tengah tepi itu
                 _float.DockCenterX = c.X; _float.DockCenterY = c.Y;
                 _cfg.DockCenterX = c.X; _cfg.DockCenterY = c.Y; _cfg.HasDockX = true; _cfg.HasDockY = true;
-                _cfg.Save();
             }
+            if (_cfg.DockTop && !_float.DockTop && _float.Visible)
+            {
+                _cfg.FloatX = _float.Left; _cfg.FloatY = _float.Top; _cfg.HasPosition = true;
+            }
+            _float.DockTop = _cfg.DockTop;
+            if (!_cfg.DockTop) _float.PlaceAt(_cfg.FloatX, _cfg.FloatY, _cfg.HasPosition);
             _float.ApplyDock();
-            bool wantDock = _cfg.DockTop;
-            _cfg.DockTop = _float.DockTop;
-            SetDockTop(wantDock);
+            _miDock.Checked = _cfg.DockTop;
+            _miClickThrough.Enabled = !_cfg.DockTop;
+            _miCompact.Enabled = !_cfg.DockTop;
+
             Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
             _float.ApplyTheme();
             MenuTheme.Apply(_menu);
@@ -990,11 +1006,20 @@ namespace ClaudeUsageWidget
             ApplyTopMost(true);
             _hiddenByFs = _hiddenByFs && _cfg.HideOnFullscreen;
             ApplyVisibility();
-            SetCompact(_cfg.Compact);
-            SetClickThrough(_cfg.ClickThrough);
-            SetRemaining(_cfg.ShowRemaining);
+
+            _float.Compact = _cfg.Compact;
+            _miCompact.Checked = _cfg.Compact;
+            ApplyOpacity();
+            _float.ClickThrough = _cfg.ClickThrough;
+            _miClickThrough.Checked = _cfg.ClickThrough;
+            Opts.ShowRemaining = _cfg.ShowRemaining;
+            _miRemaining.Checked = _cfg.ShowRemaining;
+            _miShow.Checked = _cfg.ShowFloating;
+
             ApplyHotkey(true);
             try { _miAutostart.Checked = Autostart.IsEnabled; } catch { }
+            _cfg.Save();
+
             if (!_cfg.AdminEnabled) _org = null;
             MaybeFetchOrg(true);
             MaybeFetchGoogleRate(true);
@@ -1258,10 +1283,12 @@ namespace ClaudeUsageWidget
         private async void MaybeFetchGoogleRate(bool force)
         {
             if (!_cfg.CurrencyCustomEnabled || !GoogleRateFetcher.ShouldRefresh(force)) return;
-            double rate = await GoogleRateFetcher.FetchRateAsync();
-            if (rate > 5000)
+            string cur = GoogleRateFetcher.NormalizeCurrencyCode(_cfg.CurrencySymbol);
+            double rate = await GoogleRateFetcher.FetchRateAsync(cur);
+            double minValid = cur == "IDR" ? 5000.0 : 0.01;
+            if (rate > minValid)
             {
-                _cfg.CurrencyRate = Math.Round(rate, 2);
+                _cfg.CurrencyRate = Math.Round(rate, cur == "IDR" ? 2 : 4);
                 Opts.CurrencyRate = _cfg.CurrencyRate;
                 _cfg.Save();
                 Refresh();
@@ -1272,7 +1299,13 @@ namespace ClaudeUsageWidget
         {
             if (force || OfficialPricingFetcher.ShouldAutoRefresh())
             {
-                await OfficialPricingFetcher.FetchAndSaveAsync();
+                int count = await OfficialPricingFetcher.FetchAndSaveAsync();
+                if (count > 0)
+                {
+                    _pricing = Pricing.Load();
+                    _scanner.ResetWithPricing(_pricing);
+                    RequestScan();
+                }
             }
         }
 
@@ -1282,14 +1315,22 @@ namespace ClaudeUsageWidget
             if (!_cfg.OllamaEnabled)
             {
                 if (OllamaProbe.Current != null && OllamaProbe.Current.Online)
+                {
                     OllamaProbe.Current = new OllamaStatus();
+                    Refresh();
+                }
                 return;
             }
             if (!force && (DateTime.Now - _lastOllamaCheck).TotalMinutes < 5) return;
             _lastOllamaCheck = DateTime.Now;
+            OllamaStatus prev = OllamaProbe.Current;
+            bool wasOnline = prev != null && prev.Online;
+            int wasCount = prev != null ? prev.ModelCount : 0;
             try
             {
-                await OllamaProbe.CheckAsync(_cfg.OllamaPort);
+                OllamaStatus cur = await OllamaProbe.CheckAsync(_cfg.OllamaPort);
+                if (cur != null && (force || cur.Online != wasOnline || cur.ModelCount != wasCount))
+                    Refresh();
             }
             catch { }
         }
@@ -1372,12 +1413,18 @@ namespace ClaudeUsageWidget
         // ---------------- auto updater ----------------
         private ReleaseInfo _pendingUpdate;
         private DateTime _lastUpdateCheck = DateTime.MinValue;
+        private bool _updateCheckBusy;
+        private bool _updateApplying;
+        private bool _lastBalloonIsUpdate;
 
         private void CheckForUpdates(bool manual)
         {
+            if (_updateCheckBusy || _updateApplying) return;
+            _updateCheckBusy = true;
             _lastUpdateCheck = DateTime.Now;
             if (manual)
             {
+                _lastBalloonIsUpdate = false;
                 _tray.ShowBalloonTip(3000, L.T("update.title"), L.T("update.checking"), ToolTipIcon.Info);
             }
 
@@ -1387,11 +1434,12 @@ namespace ClaudeUsageWidget
                 {
                     try
                     {
-                        _float.BeginInvoke(new Action(delegate { HandleUpdateResult(rel, manual); }));
+                        _float.BeginInvoke(new Action(delegate { _updateCheckBusy = false; HandleUpdateResult(rel, manual); }));
                         return;
                     }
                     catch { }
                 }
+                _updateCheckBusy = false;
                 HandleUpdateResult(rel, manual);
             });
         }
@@ -1424,6 +1472,7 @@ namespace ClaudeUsageWidget
 
             if (!manual)
             {
+                _lastBalloonIsUpdate = true;
                 _tray.ShowBalloonTip(10000, L.T("update.title"), L.T("update.balloon", rel.TagName), ToolTipIcon.Info);
                 return;
             }
@@ -1443,6 +1492,9 @@ namespace ClaudeUsageWidget
 
         private void PerformUpdate(ReleaseInfo rel)
         {
+            if (_updateApplying) return;
+            _updateApplying = true;
+            _lastBalloonIsUpdate = false;
             _tray.ShowBalloonTip(5000, L.T("update.title"), L.T("update.downloading", rel.AssetName ?? "update"), ToolTipIcon.Info);
             ThreadPool.QueueUserWorkItem(delegate
             {
@@ -1464,9 +1516,11 @@ namespace ClaudeUsageWidget
                         catch { }
                         Environment.Exit(0);
                     }
+                    _updateApplying = false;
                 }
                 catch (Exception ex)
                 {
+                    _updateApplying = false;
                     Log.Write("update.apply", ex);
                     if (_float != null && _float.IsHandleCreated)
                     {

@@ -922,6 +922,9 @@ namespace Tests
             StatusExporter.Export(u, rl, vm);
 
             Assert.True(File.Exists(Paths.AppStatusJson), "Status JSON file must be created");
+            byte[] rawBytes = File.ReadAllBytes(Paths.AppStatusJson);
+            Assert.False(rawBytes.Length >= 3 && rawBytes[0] == 0xEF && rawBytes[1] == 0xBB && rawBytes[2] == 0xBF,
+                "Status JSON must not start with UTF-8 BOM (breaks Node.js JSON.parse)");
             string txt = File.ReadAllText(Paths.AppStatusJson, System.Text.Encoding.UTF8);
             Dictionary<string, object> d = J.Parse(txt);
 
@@ -1055,23 +1058,31 @@ namespace Tests
         public static void Test_Companion_Extension_Manifest()
         {
             string paths, error;
-            string testDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test-extensions", "ai-usage-watcher");
-            if (Directory.Exists(testDir)) Directory.Delete(testDir, true);
+            string testRoot = Path.Combine(Path.GetTempPath(), "cuw_comp_test_" + Guid.NewGuid().ToString("N"));
+            string testDir = Path.Combine(testRoot, "ai-usage-watcher");
+            try
+            {
+                bool ok = CompanionInstaller.InstallTo(testDir, out paths, out error);
+                Assert.True(ok, "Companion installer should succeed: " + error);
+                Assert.True(!string.IsNullOrEmpty(paths), "Installed paths should not be empty");
 
-            bool ok = CompanionInstaller.InstallTo(testDir, out paths, out error);
-            Assert.True(ok, "Companion installer should succeed: " + error);
-            Assert.True(!string.IsNullOrEmpty(paths), "Installed paths should not be empty");
+                string pkgFile = Path.Combine(testDir, "package.json");
+                Assert.True(File.Exists(pkgFile), "package.json must be written");
+                byte[] pkgBytes = File.ReadAllBytes(pkgFile);
+                Assert.False(pkgBytes.Length >= 3 && pkgBytes[0] == 0xEF && pkgBytes[1] == 0xBB && pkgBytes[2] == 0xBF, "package.json must have no UTF-8 BOM");
+                string json = File.ReadAllText(pkgFile);
+                Assert.True(json.Contains("ai-usage-watcher"), "Package json must contain extension name");
+                Assert.True(json.Contains("aiUsageWatcher.openStatus"), "Package json must contain openStatus command");
 
-            string pkgFile = Path.Combine(testDir, "package.json");
-            Assert.True(File.Exists(pkgFile), "package.json must be written");
-            string json = File.ReadAllText(pkgFile);
-            Assert.True(json.Contains("ai-usage-watcher"), "Package json must contain extension name");
-            Assert.True(json.Contains("aiUsageWatcher.openStatus"), "Package json must contain openStatus command");
-
-            string extFile = Path.Combine(testDir, "extension.js");
-            Assert.True(File.Exists(extFile), "extension.js must be written");
-            string js = File.ReadAllText(extFile);
-            Assert.True(js.Contains("createStatusBarItem"), "extension.js must create status bar item");
+                string extFile = Path.Combine(testDir, "extension.js");
+                Assert.True(File.Exists(extFile), "extension.js must be written");
+                string js = File.ReadAllText(extFile);
+                Assert.True(js.Contains("createStatusBarItem"), "extension.js must create status bar item");
+            }
+            finally
+            {
+                try { if (Directory.Exists(testRoot)) Directory.Delete(testRoot, true); } catch { }
+            }
         }
 
         public static void Test_Setup_Wizard_Initialization_And_Config()
@@ -1112,7 +1123,6 @@ namespace Tests
                 // UseMnemonic must be false on buttons to preserve '&' in 'Finish & Start!'
                 Assert.False(wiz.NextButton.UseMnemonic, "NextButton.UseMnemonic must be false");
 
-                string artifactDir = @"C:\Users\william\.gemini\antigravity\brain\0ed433c2-32f0-4b0b-bb3e-491c44a2aea0";
                 for (int step = 0; step < 3; step++)
                 {
                     wiz.GoToStep(step);
@@ -1123,15 +1133,10 @@ namespace Tests
                         Assert.True(wiz.NextButton.Text.Contains("&"), "Step 3 finish button text must contain '&'");
                     }
 
-                using (Bitmap bmp = new Bitmap(wiz.Width, wiz.Height))
-                {
-                    wiz.DrawToBitmap(bmp, new Rectangle(0, 0, wiz.Width, wiz.Height));
-                    if (Directory.Exists(artifactDir))
+                    using (Bitmap bmp = new Bitmap(wiz.Width, wiz.Height))
                     {
-                        string savePath = Path.Combine(artifactDir, string.Format("wizard_step{0}.png", step + 1));
-                        bmp.Save(savePath, System.Drawing.Imaging.ImageFormat.Png);
+                        wiz.DrawToBitmap(bmp, new Rectangle(0, 0, wiz.Width, wiz.Height));
                     }
-                }
                 }
                 wiz.Close();
             }
@@ -1292,6 +1297,82 @@ namespace Tests
             finally
             {
                 try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_WebhookUrl_DPAPI_Encryption()
+        {
+            AppConfig cfg = new AppConfig();
+            string secretUrl = "https://discord.com/api/webhooks/123456/secret-token";
+            cfg.SetWebhookUrl(secretUrl);
+
+            Assert.True(string.IsNullOrEmpty(cfg.WebhookUrl), "Plaintext WebhookUrl property must be cleared");
+            Assert.False(string.IsNullOrEmpty(cfg.WebhookUrlProtected), "WebhookUrlProtected must hold DPAPI ciphertext");
+            Assert.False(cfg.WebhookUrlProtected.Contains("discord.com"), "Ciphertext must not expose raw URL");
+            Assert.Equal(secretUrl, cfg.GetWebhookUrl(), "GetWebhookUrl must decrypt back to original URL");
+
+            // Legacy plaintext migration path
+            AppConfig legacy = new AppConfig();
+            legacy.WebhookUrl = "https://hooks.slack.com/services/A/B/C";
+            Assert.Equal("https://hooks.slack.com/services/A/B/C", legacy.GetWebhookUrl());
+        }
+
+        public static void Test_UsageScanner_Claude_Mentions_PlannerResponse()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.ScanClaude = true;
+            sc.ScanGemini = true;
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_pr_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string jsonl = Path.Combine(tempDir, "claude_quote.jsonl");
+                string todayUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string line = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"req_pr\",\"message\":{{\"id\":\"msg_pr\",\"model\":\"claude-opus-4-6\",\"content\":[{{\"type\":\"text\",\"text\":\"Checking \\\"PLANNER_RESPONSE\\\" parser\"}}],\"usage\":{{\"input_tokens\":2500,\"output_tokens\":300,\"cache_read_input_tokens\":1000,\"cache_creation_input_tokens\":0}}}}}}",
+                    todayUtc
+                );
+                File.WriteAllLines(jsonl, new[] { line });
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(1L, snap.ClaudeToday.Requests, "Claude record quoting PLANNER_RESPONSE must still be counted");
+                Assert.Equal(2500L, snap.ClaudeToday.Input);
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_AutoUpdater_Sha256_Digest_Parsing()
+        {
+            string json = "{" +
+                "\"tag_name\": \"v1.2.0\"," +
+                "\"name\": \"v1.2.0\"," +
+                "\"assets\": [" +
+                    "{\"name\": \"AIUsageWatcher.exe\", \"browser_download_url\": \"https://example.com/AIUsageWatcher.exe\", \"size\": 400000, \"digest\": \"sha256:ABCDEF123456\"}," +
+                    "{\"name\": \"SHA256SUMS.txt\", \"browser_download_url\": \"https://example.com/SHA256SUMS.txt\", \"size\": 180}" +
+                "]" +
+            "}";
+            ReleaseInfo info = AutoUpdater.ParseReleaseJson(json, new Version(1, 0, 0, 0));
+            Assert.NotNull(info);
+            Assert.Equal("abcdef123456", info.ExpectedSha256, "ExpectedSha256 must strip sha256: prefix and normalize lowercase");
+            Assert.Equal("https://example.com/SHA256SUMS.txt", info.ChecksumsUrl);
+
+            string tmp = Path.Combine(Path.GetTempPath(), "sha_test_" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                File.WriteAllText(tmp, "abc");
+                string sha = AutoUpdater.ComputeFileSha256(tmp);
+                Assert.Equal(64, sha.Length, "SHA-256 hex digest must be 64 characters");
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
             }
         }
 

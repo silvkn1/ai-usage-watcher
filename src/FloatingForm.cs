@@ -895,7 +895,9 @@ namespace ClaudeUsageWidget
                     Rectangle modRect = new Rectangle(cx, cy, cw, modH);
                     string mName = ShortModel(sorted[i].Key);
                     string mTok = Fmt.Tokens(sorted[i].Value.Total);
-                    TextRenderer.DrawText(g, mName, _fSmall, modRect, Palette.Dim,
+                    int tokW = TextRenderer.MeasureText(g, mTok, _fSmall, new Size(cw, modH), TextFormatFlags.NoPadding).Width + (int)(6 * s);
+                    Rectangle nameRect = new Rectangle(cx, cy, Math.Max(10, cw - tokW), modH);
+                    TextRenderer.DrawText(g, mName, _fSmall, nameRect, Palette.Dim,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                     TextRenderer.DrawText(g, mTok, _fSmall, modRect, Palette.Dim,
                         TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
@@ -932,11 +934,15 @@ namespace ClaudeUsageWidget
                 string at = Fmt.Clock(w.ResetsAt);
                 rStr = until + " (" + at + ")";
             }
+            int lW = TextRenderer.MeasureText(g, lStr, _fSmall, new Size(cw, lineH), TextFormatFlags.NoPadding).Width + (int)(4 * s);
             TextRenderer.DrawText(g, lStr, _fSmall, tr, Palette.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-            if (!string.IsNullOrEmpty(rStr))
-                TextRenderer.DrawText(g, rStr, _fSmall, tr, Palette.Dim,
+            if (!string.IsNullOrEmpty(rStr) && cw - lW > (int)(20 * s))
+            {
+                Rectangle rr = new Rectangle(cx + lW, cy, Math.Max(10, cw - lW), lineH);
+                TextRenderer.DrawText(g, rStr, _fSmall, rr, Palette.Dim,
                     TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+            }
             cy += lineH;
 
             int bh = Math.Max(3, (int)(4f * s));
@@ -965,12 +971,15 @@ namespace ClaudeUsageWidget
         {
             if (DwmBackdrop.IsBackdropActive(Backdrop))
             {
+                CompositingMode prev = e.Graphics.CompositingMode;
+                e.Graphics.CompositingMode = CompositingMode.SourceCopy;
                 int alpha = (Backdrop == "acrylic") ? 160 : 100;
                 Color bg = Palette.IsLight ? Color.FromArgb(alpha, 245, 245, 248) : Color.FromArgb(alpha, 22, 22, 26);
                 using (SolidBrush b = new SolidBrush(bg))
                 {
                     e.Graphics.FillRectangle(b, ClientRectangle);
                 }
+                e.Graphics.CompositingMode = prev;
             }
             else
             {

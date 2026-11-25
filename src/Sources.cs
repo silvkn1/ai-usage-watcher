@@ -34,6 +34,25 @@ namespace ClaudeUsageWidget
     /// <summary>Membaca snapshot rate_limits yang ditulis skrip statusline (cuw-statusline.sh) atau Antigravity.</summary>
     internal static class RateLimitReader
     {
+        private static string ReadTextRetry(string path)
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                try
+                {
+                    using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
+                        return r.ReadToEnd();
+                }
+                catch (IOException)
+                {
+                    if (attempt < 2) System.Threading.Thread.Sleep(30);
+                    else throw;
+                }
+            }
+            return null;
+        }
+
         public static RateLimitSnapshot Read()
         {
             RateLimitSnapshot s = new RateLimitSnapshot();
@@ -42,10 +61,7 @@ namespace ClaudeUsageWidget
                 string file = Paths.RateLimitsReadFile;
                 if (File.Exists(file))
                 {
-                    string txt;
-                    using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                    using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
-                        txt = r.ReadToEnd();
+                    string txt = ReadTextRetry(file);
                     Dictionary<string, object> o = J.Parse(txt);
                     s.FileFound = true;
                     double cap = J.Num(o, "captured_at");
@@ -56,21 +72,22 @@ namespace ClaudeUsageWidget
                     s.FiveHour = Window(J.Obj(rl, "five_hour"));
                     s.SevenDay = Window(J.Obj(rl, "seven_day"));
                 }
+            }
+            catch (Exception ex) { Log.Write("ratelimits.read", ex); }
 
+            try
+            {
                 string agFile = Paths.AntigravityRateLimitsReadFile;
                 if (File.Exists(agFile))
                 {
-                    string txt;
-                    using (FileStream fs = new FileStream(agFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                    using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
-                        txt = r.ReadToEnd();
+                    string txt = ReadTextRetry(agFile);
                     Dictionary<string, object> o = J.Parse(txt);
                     Dictionary<string, object> rl = J.Obj(o, "rate_limits");
                     s.AntigravityFiveHour = Window(J.Obj(rl, "five_hour"));
                     s.AntigravitySevenDay = Window(J.Obj(rl, "seven_day"));
                 }
             }
-            catch (Exception ex) { Log.Write("ratelimits.read", ex); }
+            catch (Exception ex) { Log.Write("ratelimits.ag.read", ex); }
             return s;
         }
 
@@ -270,20 +287,38 @@ namespace ClaudeUsageWidget
             Http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
         }
 
-        public static async Task<double> FetchRateAsync()
+        public static string NormalizeCurrencyCode(string symbolOrCode)
+        {
+            if (string.IsNullOrWhiteSpace(symbolOrCode)) return "IDR";
+            string s = symbolOrCode.Trim().ToUpperInvariant();
+            if (s == "RP" || s == "IDR") return "IDR";
+            if (s.Length == 3 && char.IsLetter(s[0]) && char.IsLetter(s[1]) && char.IsLetter(s[2])) return s;
+            if (s == "€" || s == "EUR") return "EUR";
+            if (s == "£" || s == "GBP") return "GBP";
+            if (s == "¥" || s == "JPY") return "JPY";
+            if (s == "RM" || s == "MYR") return "MYR";
+            if (s == "S$" || s == "SGD") return "SGD";
+            return "IDR";
+        }
+
+        public static async Task<double> FetchRateAsync(string currencySymbol = "IDR")
         {
             if (_busy) return 0;
             _busy = true;
             try
             {
-                string html = await Http.GetStringAsync("https://www.google.com/finance/quote/USD-IDR?hl=en");
-                System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(html, @"""USD-IDR"",""USD / IDR"",([0-9\.]+)");
+                string cur = NormalizeCurrencyCode(currencySymbol);
+                string html = await Http.GetStringAsync("https://www.google.com/finance/quote/USD-" + cur + "?hl=en");
+                string pat1 = "\"USD-" + cur + "\",\"USD / " + cur + "\",([0-9\\.]+)";
+                string pat2 = "\"USD / " + cur + "\",\\s*\\d+,\\s*null,\\s*\\[([0-9\\.]+)";
+                System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(html, pat1);
                 if (!m.Success)
-                    m = System.Text.RegularExpressions.Regex.Match(html, @"""USD / IDR"",\s*\d+,\s*null,\s*\[([0-9\.]+)");
+                    m = System.Text.RegularExpressions.Regex.Match(html, pat2);
                 if (m.Success)
                 {
                     double rate;
-                    if (double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate) && rate > 5000)
+                    double minValid = cur == "IDR" ? 5000.0 : 0.01;
+                    if (double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out rate) && rate > minValid)
                     {
                         _lastFetch = DateTime.Now;
                         return rate;
@@ -340,7 +375,43 @@ namespace ClaudeUsageWidget
             {
                 Dictionary<string, double[]> models = new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
 
-                // 1. Anthropic Official Documentation Pricing Table
+                // Seed baseline from built-in pricing.json resource so modern models (Claude 4.x/5.x) are never lost
+                try
+                {
+                    using (Stream s = typeof(OfficialPricingFetcher).Assembly.GetManifestResourceStream("pricing.json"))
+                    {
+                        if (s != null)
+                        {
+                            using (StreamReader sr = new StreamReader(s, Encoding.UTF8))
+                            {
+                                Dictionary<string, object> baseRoot = J.Parse(sr.ReadToEnd());
+                                IList baseList = J.Arr(baseRoot, "models");
+                                if (baseList != null)
+                                {
+                                    foreach (object item in baseList)
+                                    {
+                                        Dictionary<string, object> bm = item as Dictionary<string, object>;
+                                        string prefix = J.Str(bm, "prefix");
+                                        if (string.IsNullOrEmpty(prefix)) continue;
+                                        double inp = J.Num(bm, "input"), outp = J.Num(bm, "output");
+                                        double cw5 = J.Num(bm, "cache_write_5m"), cw1 = J.Num(bm, "cache_write_1h"), cr = J.Num(bm, "cache_read");
+                                        models[prefix] = new[]
+                                        {
+                                            double.IsNaN(inp) ? 0 : inp,
+                                            double.IsNaN(outp) ? 0 : outp,
+                                            double.IsNaN(cw5) ? 0 : cw5,
+                                            double.IsNaN(cw1) ? 0 : cw1,
+                                            double.IsNaN(cr) ? 0 : cr
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // 1. Anthropic Official Documentation Pricing Table (update/add live prices)
                 try
                 {
                     string html = await Http.GetStringAsync("https://platform.claude.com/docs/en/about-claude/pricing");
@@ -353,13 +424,10 @@ namespace ClaudeUsageWidget
                         if (double.TryParse(m.Groups[3].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out input) &&
                             double.TryParse(m.Groups[4].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out output))
                         {
-                            if (!models.ContainsKey(prefix))
-                            {
-                                double cw5 = Math.Round(input * 1.25, 4);
-                                double cw1 = Math.Round(input * 2.0, 4);
-                                double cr = Math.Round(input * 0.10, 4);
-                                models[prefix] = new[] { input, output, cw5, cw1, cr };
-                            }
+                            double cw5 = Math.Round(input * 1.25, 4);
+                            double cw1 = Math.Round(input * 2.0, 4);
+                            double cr = Math.Round(input * 0.10, 4);
+                            models[prefix] = new[] { input, output, cw5, cw1, cr };
                         }
                     }
                 }
@@ -412,7 +480,7 @@ namespace ClaudeUsageWidget
                 sb.AppendLine("}");
 
                 Paths.Ensure();
-                File.WriteAllText(Paths.PricingFile, sb.ToString(), Encoding.UTF8);
+                AtomicFile.Write(Paths.PricingFile, sb.ToString());
                 _lastFetch = DateTime.Now;
                 return models.Count;
             }
@@ -719,7 +787,7 @@ namespace ClaudeUsageWidget
             sb.AppendLine("}");
 
             Paths.Ensure();
-            File.WriteAllText(Paths.AntigravityRateLimitsFile, sb.ToString(), Encoding.UTF8);
+            AtomicFile.Write(Paths.AntigravityRateLimitsFile, sb.ToString());
         }
     }
 

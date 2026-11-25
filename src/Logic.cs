@@ -639,8 +639,8 @@ namespace ClaudeUsageWidget
                 }
 
                 string json = PrettyJson.Write(d);
-                try { File.WriteAllText(Paths.StatusExportJson, json, Encoding.UTF8); } catch { }
-                try { File.WriteAllText(Paths.AppStatusJson, json, Encoding.UTF8); } catch { }
+                try { AtomicFile.Write(Paths.StatusExportJson, json); } catch { }
+                try { Paths.Ensure(); AtomicFile.Write(Paths.AppStatusJson, json); } catch { }
             }
             catch (Exception ex)
             {

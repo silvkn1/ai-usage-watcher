@@ -13,6 +13,7 @@ namespace ClaudeUsageWidget
         public Func<string> Diagnostics;
         public Action Apply;
         public Action CheckUpdates;
+        public Action PricingUpdated;
     }
 
     /// <summary>
@@ -121,6 +122,8 @@ namespace ClaudeUsageWidget
         }
 
         // ---------------- tab ----------------
+        private Font _tabFont, _headFont;
+
         private TableLayoutPanel AddPage(string title)
         {
             Panel page = new Panel();
@@ -135,8 +138,9 @@ namespace ClaudeUsageWidget
             _pages.Add(page);
 
             Button b = new Button();
+            if (_tabFont == null) _tabFont = new Font("Segoe UI", 9.5f);
             b.Text = title; b.AutoSize = true; b.Margin = new Padding(0, 0, 2, 0); b.Padding = new Padding(8, 3, 8, 3);
-            b.FlatStyle = FlatStyle.Flat; b.FlatAppearance.BorderSize = 0; b.Font = new Font("Segoe UI", 9.5f);
+            b.FlatStyle = FlatStyle.Flat; b.FlatAppearance.BorderSize = 0; b.Font = _tabFont;
             int index = _tabBtns.Count;
             b.Click += delegate { SelectTab(index); };
             b.Paint += delegate(object s, PaintEventArgs e)
@@ -250,17 +254,25 @@ namespace ClaudeUsageWidget
             fetchGoogle.Click += async delegate
             {
                 fetchGoogle.Enabled = false;
-                double r = await GoogleRateFetcher.FetchRateAsync();
-                if (r > 5000)
+                try
                 {
-                    _currencyRate.Value = (decimal)Math.Round(r, 2);
-                    MessageBox.Show(this, L.T("set.currency.google_ok", "Rp " + r.ToString("N0", L.Culture)), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    string symInput = _currencySymbol.Text.Trim();
+                    string curCode = GoogleRateFetcher.NormalizeCurrencyCode(symInput);
+                    double r = await GoogleRateFetcher.FetchRateAsync(symInput);
+                    double minValid = curCode == "IDR" ? 5000.0 : 0.01;
+                    if (r > minValid)
+                    {
+                        _currencyRate.DecimalPlaces = curCode == "IDR" ? 0 : 2;
+                        _currencyRate.Value = Math.Max(_currencyRate.Minimum, Math.Min(_currencyRate.Maximum, (decimal)Math.Round(r, curCode == "IDR" ? 0 : 2)));
+                        string dispSym = string.IsNullOrEmpty(symInput) ? curCode : symInput;
+                        MessageBox.Show(this, L.T("set.currency.google_ok", dispSym + " " + r.ToString(curCode == "IDR" ? "N0" : "N2", L.Culture)), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show(this, L.T("set.currency.google_fail"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
-                else
-                {
-                    MessageBox.Show(this, L.T("set.currency.google_fail"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-                fetchGoogle.Enabled = true;
+                finally { fetchGoogle.Enabled = true; }
             };
             FlowLayoutPanel crp = new FlowLayoutPanel();
             crp.AutoSize = true; crp.WrapContents = false;
@@ -324,9 +336,9 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.burnrate.th"), _burnRateTokens);
             AddNote(t, L.T("set.alerts.note"), "dim");
 
-            AddNote(t, L.T("set.webhook.enable"), "head");
+            AddNote(t, L.T("set.h.webhook"), "head");
             AddCheck(t, _webhookOn, L.T("set.webhook.enable"), _cfg.WebhookEnabled);
-            _webhookUrl.Width = 260; _webhookUrl.Text = _cfg.WebhookUrl ?? "";
+            _webhookUrl.Width = 260; _webhookUrl.Text = _cfg.GetWebhookUrl() ?? "";
             AddRow(t, L.T("set.webhook.url"), _webhookUrl);
 
             SetupMoney(_budgetDay, _cfg.BudgetDaily);
@@ -426,7 +438,10 @@ namespace ClaudeUsageWidget
                 {
                     int count = await OfficialPricingFetcher.FetchAndSaveAsync();
                     if (count > 0)
+                    {
+                        if (_cb != null && _cb.PricingUpdated != null) _cb.PricingUpdated();
                         MessageBox.Show(this, L.T("set.pricing.fetch_ok", count), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
                     else
                         MessageBox.Show(this, L.T("set.pricing.fetch_fail"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
@@ -517,11 +532,15 @@ namespace ClaudeUsageWidget
         }
 
         /// <summary>Teks penjelas lintas dua kolom. kind: "dim" (abu), "warn" (peringatan), "head" (judul bagian).</summary>
-        private static void AddNote(TableLayoutPanel t, string text, string kind)
+        private void AddNote(TableLayoutPanel t, string text, string kind)
         {
             Label l = new Label(); l.Text = text; l.AutoSize = true; l.MaximumSize = new Size(620, 0); l.Tag = kind;
             l.Margin = kind == "head" ? new Padding(3, 14, 3, 4) : new Padding(3, 6, 3, 6);
-            if (kind == "head") l.Font = new Font("Segoe UI Semibold", 9.5f);
+            if (kind == "head")
+            {
+                if (_headFont == null) _headFont = new Font("Segoe UI Semibold", 9.5f);
+                l.Font = _headFont;
+            }
             t.Controls.Add(l); t.SetColumnSpan(l, 2);
         }
 
@@ -680,7 +699,7 @@ namespace ClaudeUsageWidget
             _cfg.BurnRateAlertEnabled = _burnRateOn.Checked;
             _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
             _cfg.WebhookEnabled = _webhookOn.Checked;
-            _cfg.WebhookUrl = _webhookUrl.Text.Trim();
+            _cfg.SetWebhookUrl(_webhookUrl.Text.Trim());
             _cfg.OllamaEnabled = _ollamaOn.Checked;
             _cfg.OllamaPort = (int)_ollamaPort.Value;
 
@@ -709,6 +728,16 @@ namespace ClaudeUsageWidget
             if (_cb != null && _cb.Apply != null) _cb.Apply();
             DialogResult = DialogResult.OK;
             Close();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_tabFont != null) { _tabFont.Dispose(); _tabFont = null; }
+                if (_headFont != null) { _headFont.Dispose(); _headFont = null; }
+            }
+            base.Dispose(disposing);
         }
     }
 }

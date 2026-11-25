@@ -78,7 +78,8 @@ namespace ClaudeUsageWidget
 
         private int HitTest(Point p)
         {
-            float s = CreateGraphics().DpiX / 96f;
+            float s;
+            using (Graphics g = CreateGraphics()) { s = g.DpiX / 96f; }
             int boxSize = (int)Math.Round(18 * s);
             int gap = (int)Math.Round(4 * s);
             int startX = (int)Math.Round(12 * s);
@@ -185,6 +186,12 @@ namespace ClaudeUsageWidget
                 g.DrawString(L.T("proj.legend.more"), legFont, legBrush, legX + 5 * (legendBox + 3) + 2, legY - 1);
             }
         }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _tip.Dispose();
+            base.Dispose(disposing);
+        }
     }
 
     /// <summary>
@@ -195,6 +202,7 @@ namespace ClaudeUsageWidget
         private readonly ActivityHeatmapControl _heatmap = new ActivityHeatmapControl();
         private readonly ListView _list = new ListView();
         private readonly List<ProjectRow> _rows = new List<ProjectRow>();
+        private ContextMenuStrip _ctxMenu;
 
         public ProjectExplorerForm(UsageSnapshot usage, HistoryStore history)
         {
@@ -209,7 +217,8 @@ namespace ClaudeUsageWidget
                 if (e.KeyCode == Keys.Escape) Close();
             };
 
-            float s = CreateGraphics().DpiX / 96f;
+            float s;
+            using (Graphics g = CreateGraphics()) { s = g.DpiX / 96f; }
             Width = (int)Math.Round(760 * s);
             Height = (int)Math.Round(500 * s);
             MinimumSize = new Size((int)Math.Round(600 * s), (int)Math.Round(380 * s));
@@ -291,18 +300,18 @@ namespace ClaudeUsageWidget
             _list.Columns.Add(L.T("proj.col.path"), (int)Math.Round(220 * s), HorizontalAlignment.Left);
 
             // Menu Klik Kanan (Context Menu)
-            ContextMenuStrip menu = new ContextMenuStrip();
+            _ctxMenu = new ContextMenuStrip();
             ToolStripMenuItem miFolder = new ToolStripMenuItem(L.T("proj.btn.folder"), null, delegate { OpenFolderSelected(); });
             ToolStripMenuItem miTerminal = new ToolStripMenuItem(L.T("proj.btn.terminal"), null, delegate { OpenTerminalSelected(); });
             ToolStripMenuItem miCopy = new ToolStripMenuItem(L.T("proj.btn.copy"), null, delegate { CopyMarkdownTable(); });
-            menu.Items.Add(miFolder);
-            menu.Items.Add(miTerminal);
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(miCopy);
-            MenuTheme.Apply(menu);
-            _list.ContextMenuStrip = menu;
+            _ctxMenu.Items.Add(miFolder);
+            _ctxMenu.Items.Add(miTerminal);
+            _ctxMenu.Items.Add(new ToolStripSeparator());
+            _ctxMenu.Items.Add(miCopy);
+            MenuTheme.Apply(_ctxMenu);
+            _list.ContextMenuStrip = _ctxMenu;
 
-            menu.Opening += delegate
+            _ctxMenu.Opening += delegate
             {
                 bool hasSel = _list.SelectedItems.Count > 0;
                 string path = null;
@@ -326,6 +335,13 @@ namespace ClaudeUsageWidget
         private void PopulateList()
         {
             _list.Items.Clear();
+            if (_rows.Count == 0)
+            {
+                ListViewItem empty = new ListViewItem(L.T("proj.empty"));
+                empty.ForeColor = Palette.Dim;
+                _list.Items.Add(empty);
+                return;
+            }
             foreach (ProjectRow r in _rows)
             {
                 string todayStr = Fmt.UsdShort(r.TodayCost);
@@ -398,6 +414,12 @@ namespace ClaudeUsageWidget
             {
                 Log.Write("proj.copymd", ex);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _ctxMenu != null) { _ctxMenu.Dispose(); _ctxMenu = null; }
+            base.Dispose(disposing);
         }
     }
 }

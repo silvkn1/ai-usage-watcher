@@ -7,6 +7,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -23,12 +24,24 @@ namespace ClaudeUsageWidget
         public string AssetDownloadUrl { get; set; }
         public string AssetName { get; set; }
         public long AssetSize { get; set; }
+        public string ExpectedSha256 { get; set; }
+        public string ChecksumsUrl { get; set; }
         public bool IsNewer { get; set; }
     }
 
     public static class AutoUpdater
     {
         public const string DefaultRepo = "silvkn1/ai-usage-watcher";
+        private static readonly HttpClient Http = CreateHttpClient();
+
+        private static HttpClient CreateHttpClient()
+        {
+            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+            HttpClient c = new HttpClient();
+            c.Timeout = TimeSpan.FromMinutes(3);
+            c.DefaultRequestHeaders.Add("User-Agent", "AIUsageWatcher-AutoUpdater");
+            return c;
+        }
 
         public static Version CurrentVersion
         {
@@ -98,12 +111,17 @@ namespace ClaudeUsageWidget
                         {
                             Dictionary<string, object> a = (Dictionary<string, object>)item;
                             string name = a.ContainsKey("name") && a["name"] != null ? a["name"].ToString() : "";
+                            if (string.Equals(name, "SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase) &&
+                                a.ContainsKey("browser_download_url") && a["browser_download_url"] != null)
+                            {
+                                info.ChecksumsUrl = a["browser_download_url"].ToString();
+                                continue;
+                            }
                             if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                             {
                                 chosenAsset = a;
-                                break;
                             }
-                            if (chosenAsset == null && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                            else if (chosenAsset == null && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                             {
                                 chosenAsset = a;
                             }
@@ -118,6 +136,12 @@ namespace ClaudeUsageWidget
                         if (chosenAsset.ContainsKey("size"))
                         {
                             try { info.AssetSize = Convert.ToInt64(chosenAsset["size"]); } catch { }
+                        }
+                        if (chosenAsset.ContainsKey("digest") && chosenAsset["digest"] != null)
+                        {
+                            string dig = chosenAsset["digest"].ToString().Trim();
+                            if (dig.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                                info.ExpectedSha256 = dig.Substring(7).Trim().ToLowerInvariant();
                         }
                     }
                 }
@@ -143,19 +167,17 @@ namespace ClaudeUsageWidget
         {
             try
             {
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 string url = "https://api.github.com/repos/" + (repo ?? DefaultRepo) + "/releases/latest";
-                using (HttpClient client = new HttpClient())
+                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, url))
                 {
-                    client.Timeout = TimeSpan.FromSeconds(15);
-                    client.DefaultRequestHeaders.Add("User-Agent", "AIUsageWatcher-AutoUpdater");
-                    client.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
-
-                    HttpResponseMessage resp = client.GetAsync(url).Result;
-                    if (!resp.IsSuccessStatusCode) return null;
-
-                    string json = resp.Content.ReadAsStringAsync().Result;
-                    return ParseReleaseJson(json);
+                    req.Headers.Add("Accept", "application/vnd.github.v3+json");
+                    using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                    using (HttpResponseMessage resp = Http.SendAsync(req, cts.Token).Result)
+                    {
+                        if (!resp.IsSuccessStatusCode) return null;
+                        string json = resp.Content.ReadAsStringAsync().Result;
+                        return ParseReleaseJson(json);
+                    }
                 }
             }
             catch (Exception ex)
@@ -205,37 +227,43 @@ namespace ClaudeUsageWidget
 
             try
             {
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 if (onProgress != null) onProgress(10, L.T("update.downloading", release.AssetName ?? "update"));
 
-                using (HttpClient client = new HttpClient())
+                using (HttpResponseMessage resp = Http.GetAsync(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead).Result)
                 {
-                    client.Timeout = TimeSpan.FromMinutes(3);
-                    client.DefaultRequestHeaders.Add("User-Agent", "AIUsageWatcher-AutoUpdater");
+                    resp.EnsureSuccessStatusCode();
+                    long totalBytes = resp.Content.Headers.ContentLength ?? -1;
 
-                    using (HttpResponseMessage resp = client.GetAsync(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead).Result)
+                    using (Stream input = resp.Content.ReadAsStreamAsync().Result)
+                    using (FileStream output = new FileStream(downloadFile, FileMode.Create, FileAccess.Write, FileShare.None))
                     {
-                        resp.EnsureSuccessStatusCode();
-                        long totalBytes = resp.Content.Headers.ContentLength ?? -1;
-
-                        using (Stream input = resp.Content.ReadAsStreamAsync().Result)
-                        using (FileStream output = new FileStream(downloadFile, FileMode.Create, FileAccess.Write, FileShare.None))
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        long totalRead = 0;
+                        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
                         {
-                            byte[] buffer = new byte[8192];
-                            int read;
-                            long totalRead = 0;
-                            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                            output.Write(buffer, 0, read);
+                            totalRead += read;
+                            if (totalBytes > 0 && onProgress != null)
                             {
-                                output.Write(buffer, 0, read);
-                                totalRead += read;
-                                if (totalBytes > 0 && onProgress != null)
-                                {
-                                    int pct = 10 + (int)(totalRead * 70 / totalBytes);
-                                    onProgress(pct, L.T("update.downloading", string.Format("{0}%", pct)));
-                                }
+                                int pct = 10 + (int)(totalRead * 70 / totalBytes);
+                                onProgress(pct, L.T("update.downloading", string.Format("{0}%", pct)));
                             }
                         }
                     }
+                }
+
+                // Verify SHA-256 checksum if digest is present in release metadata or SHA256SUMS.txt
+                string expectedSha = release.ExpectedSha256;
+                if (string.IsNullOrEmpty(expectedSha) && !string.IsNullOrEmpty(release.ChecksumsUrl) && !string.IsNullOrEmpty(release.AssetName))
+                {
+                    expectedSha = FetchExpectedSha256(release.ChecksumsUrl, release.AssetName);
+                }
+                if (!string.IsNullOrEmpty(expectedSha))
+                {
+                    string actualSha = ComputeFileSha256(downloadFile);
+                    if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Downloaded update checksum mismatch (expected " + expectedSha + ", got " + actualSha + ").");
                 }
 
                 exeToInstall = downloadFile;
@@ -243,21 +271,35 @@ namespace ClaudeUsageWidget
                 {
                     if (onProgress != null) onProgress(85, "Extracting update...");
                     string extractedExe = Path.Combine(targetDir, "update-extracted-" + Guid.NewGuid().ToString("N") + ".exe");
+                    string fullTargetDir = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    string targetExeName = Path.GetFileName(target);
                     using (ZipArchive zip = ZipFile.OpenRead(downloadFile))
                     {
-                        ZipArchiveEntry entry = null;
+                        ZipArchiveEntry exeEntry = null;
                         foreach (ZipArchiveEntry e in zip.Entries)
                         {
+                            if (string.IsNullOrEmpty(e.Name)) continue; // directory entry
                             if (e.Name.Equals("AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase) ||
-                                e.Name.Equals(Path.GetFileName(target), StringComparison.OrdinalIgnoreCase))
+                                e.Name.Equals(targetExeName, StringComparison.OrdinalIgnoreCase))
                             {
-                                entry = e;
-                                break;
+                                exeEntry = e;
+                                continue;
+                            }
+                            string relDest = e.FullName.Replace('/', Path.DirectorySeparatorChar);
+                            string destPath = Path.GetFullPath(Path.Combine(fullTargetDir, relDest));
+                            if (destPath.StartsWith(fullTargetDir, StringComparison.OrdinalIgnoreCase))
+                            {
+                                try
+                                {
+                                    Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                                    e.ExtractToFile(destPath, true);
+                                }
+                                catch { }
                             }
                         }
-                        if (entry == null)
+                        if (exeEntry == null)
                             throw new Exception("ZIP archive does not contain target executable.");
-                        entry.ExtractToFile(extractedExe, true);
+                        exeEntry.ExtractToFile(extractedExe, true);
                     }
                     try { File.Delete(downloadFile); } catch { }
                     exeToInstall = extractedExe;
@@ -318,6 +360,37 @@ namespace ClaudeUsageWidget
                 }
                 throw;
             }
+        }
+
+        public static string ComputeFileSha256(string path)
+        {
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(fs);
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        private static string FetchExpectedSha256(string checksumsUrl, string assetName)
+        {
+            try
+            {
+                using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+                using (HttpResponseMessage resp = Http.GetAsync(checksumsUrl, cts.Token).Result)
+                {
+                    if (!resp.IsSuccessStatusCode) return null;
+                    string txt = resp.Content.ReadAsStringAsync().Result;
+                    foreach (string rawLine in txt.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string[] parts = rawLine.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 2 && string.Equals(parts[parts.Length - 1].TrimStart('*'), assetName, StringComparison.OrdinalIgnoreCase))
+                            return parts[0].ToLowerInvariant();
+                    }
+                }
+            }
+            catch (Exception ex) { Log.Write("updater.checksum", ex); }
+            return null;
         }
 
         public static bool IsValidExecutable(string path)

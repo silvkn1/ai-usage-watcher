@@ -28,6 +28,8 @@ Start-Sleep -Milliseconds 500
 
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 foreach ($f in $files) { Copy-Item (Join-Path $src $f) (Join-Path $InstallDir $f) -Force }
+$compSrc = Join-Path $src 'companion'
+if (Test-Path $compSrc) { Copy-Item -Path $compSrc -Destination $InstallDir -Recurse -Force }
 $exe = Join-Path $InstallDir 'AIUsageWatcher.exe'
 Write-Host "Terpasang di: $InstallDir"
 

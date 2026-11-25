@@ -74,7 +74,6 @@ namespace ClaudeUsageWidget
         {
             // ---- widget ----
             { "loading",        new[] { "Loading data...", "Memuat data..." } },
-            { "compact",        new[] { "5h {0}  ·  7d {1}  ·  today ≈{2}", "5j {0}  ·  7h {1}  ·  hari ini ≈{2}" } },
             { "lastchat",       new[] { "last chat {0}", "chat terakhir {0}" } },
             { "limit5",         new[] { "Claude 5-hour limit", "Limit 5 jam Claude" } },
             { "limit7",         new[] { "Claude weekly limit", "Limit mingguan Claude" } },
@@ -87,7 +86,6 @@ namespace ClaudeUsageWidget
             { "src.statusline", new[] { "CLI statusline", "statusline CLI" } },
             { "scanning",       new[] { "Scanning Claude Code logs...", "Memindai log Claude Code..." } },
             { "today",          new[] { "Today  {0} tokens", "Hari ini  {0} token" } },
-            { "week",           new[] { "7 days  {0} tokens", "7 hari  {0} token" } },
             { "admin.wait",     new[] { "Admin API: waiting...", "Admin API: menunggu..." } },
             { "admin.fail",     new[] { "Admin API failed: {0}", "Admin API gagal: {0}" } },
             { "org.month",      new[] { "Org this month", "Org bulan ini" } },
@@ -258,7 +256,6 @@ namespace ClaudeUsageWidget
 
             // ---- grafik riwayat, cache, anggaran, proyek ----
             { "hist.hover",       new[] { "{0}  ≈{1} · {2} tokens · {3} req", "{0}  ≈{1} · {2} token · {3} req" } },
-            { "cache.row",        new[] { "Cache hit {0}% · saved ≈{1} today · ≈{2} in 7 days", "Cache hit {0}% · hemat ≈{1} hari ini · ≈{2} dalam 7 hari" } },
             { "cache.saved",      new[] { "Saved ≈{0} (Cache {1}%)", "Hemat ≈{0} (Cache {1}%)" } },
             { "budget.day",       new[] { "Daily budget  ≈{0} / ≈{1}  ({2}%)", "Anggaran harian  ≈{0} / ≈{1}  ({2}%)" } },
             { "budget.month",     new[] { "Monthly budget  ≈{0} / ≈{1}  ({2}%)", "Anggaran bulanan  ≈{0} / ≈{1}  ({2}%)" } },
@@ -274,12 +271,10 @@ namespace ClaudeUsageWidget
             { "proj.btn.folder",   new[] { "Open Folder", "Buka Folder" } },
             { "proj.btn.terminal", new[] { "Open Terminal", "Buka Terminal" } },
             { "proj.btn.copy",     new[] { "Copy Markdown", "Salin Markdown" } },
-            { "proj.btn.close",    new[] { "Close", "Tutup" } },
             { "proj.copied",       new[] { "Project summary copied as Markdown table.", "Ringkasan proyek disalin sebagai tabel Markdown." } },
             { "proj.empty",        new[] { "No project data recorded yet.", "Belum ada data proyek tercatat." } },
             { "proj.legend.less",  new[] { "Less", "Sedikit" } },
             { "proj.legend.more",  new[] { "More", "Banyak" } },
-            { "ollama.status",     new[] { "Ollama: {0} ({1} models)", "Ollama: {0} ({1} model)" } },
             { "alert.budget.day", new[] { "Today's estimated cost ≈{0} reached {1}% of the ≈{2} daily budget", "Estimasi biaya hari ini ≈{0} mencapai {1}% dari anggaran harian ≈{2}" } },
             { "alert.budget.month", new[] { "This month's estimated cost ≈{0} reached {1}% of the ≈{2} monthly budget", "Estimasi biaya bulan ini ≈{0} mencapai {1}% dari anggaran bulanan ≈{2}" } },
             { "alert.budget.exceeded", new[] { "BUDGET LIMIT EXCEEDED: {0} ({1}%) has reached the {2} limit!", "ANGGARAN TERLAMPAUI: {0} ({1}%) telah mencapai batas {2}!" } },
@@ -352,9 +347,6 @@ namespace ClaudeUsageWidget
             { "set.portable.note",new[] { "Portable mode: settings are stored next to the app, and autostart is unavailable. The statusline wrapper still writes its snapshot to %LOCALAPPDATA%.", "Mode portabel: pengaturan disimpan di samping aplikasi dan autostart tidak tersedia. Pembungkus statusline tetap menulis snapshot-nya ke %LOCALAPPDATA%." } },
 
             // ---- fitur baru: mata uang, konteks, burn rate, audio, webhook, taskbar ----
-            { "context.title",     new[] { "Last prompt context  {0}", "Konteks prompt terakhir  {0}" } },
-            { "context.compact_hint", new[] { "Prompt context >75% · Consider running /compact", "Konteks prompt >75% · Pertimbangkan /compact" } },
-            { "burnrate.row",      new[] { "Burn rate: {0} tokens in last 10m", "Laju pemakaian: {0} token dalam 10 mnt" } },
             { "alert.burnrate",    new[] { "High token burn rate: {0} tokens in 10 minutes", "Lonjakan pemakaian: {0} token dalam 10 menit" } },
             { "alert.context",     new[] { "Prompt context is large: {0} ({1}%) · Consider /compact", "Konteks prompt besar: {0} ({1}%) · Pertimbangkan /compact" } },
             { "set.h.currency",      new[] { "Local Currency", "Mata Uang Lokal" } },
@@ -365,11 +357,11 @@ namespace ClaudeUsageWidget
             { "set.currency.google", new[] { "Fetch from Google", "Ambil dari Google" } },
             { "set.currency.google_ok", new[] { "Rate updated from Google Finance: {0}", "Kurs berhasil diperbarui dari Google Finance: {0}" } },
             { "set.currency.google_fail", new[] { "Failed to fetch rate from Google Finance.", "Gagal mengambil kurs dari Google Finance." } },
-            { "set.taskbar.show",    new[] { "Show button and limit progress in taskbar", "Tampilkan tombol dan progres limit di taskbar" } },
             { "set.audio.enable",    new[] { "Play sound effects for notifications and alerts", "Bunyikan efek suara untuk notifikasi dan alert" } },
             { "set.context.enable",  new[] { "Notify when session context is large (>75%)", "Beri notifikasi saat konteks sesi besar (>75%)" } },
             { "set.burnrate.enable", new[] { "Notify on sudden token consumption spikes", "Beri notifikasi saat lonjakan pemakaian token" } },
             { "set.burnrate.th",     new[] { "Spike threshold (tokens in 10 minutes)", "Ambang lonjakan (token dalam 10 menit)" } },
+            { "set.h.webhook",       new[] { "Webhook Notifications", "Notifikasi Webhook" } },
             { "set.webhook.enable",  new[] { "Send alerts to Webhook (Discord / Slack / Telegram)", "Kirim alert ke Webhook (Discord / Slack / Telegram)" } },
             { "set.webhook.url",     new[] { "Webhook URL", "URL Webhook" } },
             { "set.h.monitoring",    new[] { "Active Monitoring Providers", "Penyedia Monitoring Aktif" } },
@@ -384,10 +376,6 @@ namespace ClaudeUsageWidget
             { "set.pricing.fetching",new[] { "Updating...", "Mengambil..." } },
             { "set.pricing.fetch_ok",new[] { "Pricing updated from official sources ({0} models).", "Tabel harga berhasil diperbarui dari sumber resmi ({0} model)." } },
             { "set.pricing.fetch_fail", new[] { "Failed to fetch pricing from official sources. Existing pricing kept.", "Gagal mengambil harga dari sumber resmi. Tabel harga saat ini tetap digunakan." } },
-            { "usage.claude",        new[] { "Claude  {0} tokens", "Claude  {0} token" } },
-            { "usage.antigravity",   new[] { "Antigravity  {0} tokens", "Antigravity  {0} token" } },
-            { "usage.claude.week",   new[] { "Claude 7d  {0} tokens", "Claude 7h  {0} token" } },
-            { "usage.antigravity.week", new[] { "Antigravity 7d  {0} tokens", "Antigravity 7h  {0} token" } },
 
             // ---- wizard ----
             { "wizard.title",          new[] { "AI Usage Watcher - Setup Wizard", "AI Usage Watcher - Panduan Penyiapan" } },
