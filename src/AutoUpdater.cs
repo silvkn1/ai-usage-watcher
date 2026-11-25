@@ -341,6 +341,15 @@ namespace ClaudeUsageWidget
                     throw;
                 }
 
+                // Keep legacy alias executable in sync if present in the same install directory
+                try
+                {
+                    string legacyAlias = Path.Combine(targetDir, "ClaudeUsageWidget.exe");
+                    if (!string.Equals(target, legacyAlias, StringComparison.OrdinalIgnoreCase) && File.Exists(legacyAlias))
+                        File.Copy(target, legacyAlias, true);
+                }
+                catch { }
+
                 if (onProgress != null) onProgress(100, "Restarting...");
 
                 ProcessStartInfo psi = new ProcessStartInfo();

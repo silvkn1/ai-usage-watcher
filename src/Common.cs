@@ -10,7 +10,7 @@ using System.Web.Script.Serialization;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("AI Usage Watcher")]
 [assembly: System.Reflection.AssemblyProduct("AI Usage Watcher")]
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
 
 namespace ClaudeUsageWidget
 {
@@ -86,6 +86,16 @@ namespace ClaudeUsageWidget
         }
         public static string AntigravityBrainDir { get { return Path.Combine(AntigravityDir, "brain"); } }
         public static string AntigravityDaemonDir { get { return Path.Combine(AntigravityDir, "daemon"); } }
+        public static string CodexDir
+        {
+            get
+            {
+                string env = Environment.GetEnvironmentVariable("CODEX_HOME");
+                if (!string.IsNullOrEmpty(env)) return env;
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            }
+        }
+        public static string CodexSessionsDir { get { return Path.Combine(CodexDir, "sessions"); } }
         public static string RateLimitsFile { get { return Path.Combine(AppDir, "ratelimits.json"); } }
         public static string AntigravityRateLimitsFile { get { return Path.Combine(AppDir, "antigravity_ratelimits.json"); } }
         public static string AntigravityRateLimitsReadFile
@@ -274,6 +284,82 @@ namespace ClaudeUsageWidget
         public static DateTime FromUnix(double secs)
         {
             return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(secs).ToLocalTime();
+        }
+    }
+
+    internal static class ProcessHelper
+    {
+        public static string FindExecutableOnPath(params string[] names)
+        {
+            string localApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps");
+            string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string localProg = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs");
+            string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+
+            foreach (string name in names)
+            {
+                string[] extraDirs = new[]
+                {
+                    localApps,
+                    Path.Combine(progFiles, @"Microsoft VS Code\bin"),
+                    Path.Combine(localProg, @"Microsoft VS Code\bin"),
+                    Path.Combine(localProg, @"cursor\resources\app\bin")
+                };
+                foreach (string d in extraDirs)
+                {
+                    try { string p = Path.Combine(d, name); if (File.Exists(p)) return p; } catch { }
+                }
+                foreach (string dir in pathEnv.Split(';'))
+                {
+                    try
+                    {
+                        string t = dir.Trim();
+                        if (t.Length == 0) continue;
+                        string p = Path.Combine(t, name);
+                        if (File.Exists(p)) return p;
+                    }
+                    catch { }
+                }
+            }
+            return null;
+        }
+
+        public static void OpenFolder(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
+        }
+
+        public static void OpenTerminal(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            string wt = FindExecutableOnPath("wt.exe");
+            System.Diagnostics.ProcessStartInfo psi;
+            if (!string.IsNullOrEmpty(wt))
+                psi = new System.Diagnostics.ProcessStartInfo(wt, "-d \"" + dir + "\"");
+            else
+                psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/K cd /d \"" + dir + "\"");
+            psi.WorkingDirectory = dir;
+            psi.UseShellExecute = true;
+            System.Diagnostics.Process.Start(psi);
+        }
+
+        public static bool HasVSCode()
+        {
+            return FindExecutableOnPath("code.cmd", "code.exe", "cursor.cmd") != null;
+        }
+
+        public static bool OpenVSCode(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
+            string exe = FindExecutableOnPath("code.cmd", "code.exe", "cursor.cmd");
+            if (string.IsNullOrEmpty(exe)) return false;
+            System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo(exe, "\"" + dir + "\"");
+            psi.WorkingDirectory = dir;
+            psi.UseShellExecute = !exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase);
+            psi.CreateNoWindow = true;
+            System.Diagnostics.Process.Start(psi);
+            return true;
         }
     }
 }

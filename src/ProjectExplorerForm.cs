@@ -200,9 +200,14 @@ namespace ClaudeUsageWidget
     internal class ProjectExplorerForm : Form
     {
         private readonly ActivityHeatmapControl _heatmap = new ActivityHeatmapControl();
+        private readonly Panel _searchPanel = new Panel();
+        private readonly Label _searchLabel = new Label();
+        private readonly TextBox _searchBox = new TextBox();
         private readonly ListView _list = new ListView();
         private readonly List<ProjectRow> _rows = new List<ProjectRow>();
         private ContextMenuStrip _ctxMenu;
+        private int _sortCol = 2;      // default: 7-Day Cost
+        private bool _sortAsc = false; // default: descending
 
         public ProjectExplorerForm(UsageSnapshot usage, HistoryStore history)
         {
@@ -283,6 +288,29 @@ namespace ClaudeUsageWidget
                 _heatmap.SetDays(history.Series(35));
             }
 
+            // Search / Filter strip
+            _searchPanel.Dock = DockStyle.Top;
+            _searchPanel.Height = (int)Math.Round(32 * s);
+            _searchPanel.Padding = new Padding((int)Math.Round(10 * s), (int)Math.Round(4 * s), (int)Math.Round(10 * s), (int)Math.Round(4 * s));
+            _searchPanel.BackColor = Palette.Bg;
+
+            _searchLabel.Text = L.T("proj.search");
+            _searchLabel.AutoSize = true;
+            _searchLabel.ForeColor = Palette.Dim;
+            _searchLabel.Dock = DockStyle.Left;
+            _searchLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _searchLabel.Padding = new Padding(0, 0, (int)Math.Round(8 * s), 0);
+
+            _searchBox.Width = (int)Math.Round(240 * s);
+            _searchBox.Dock = DockStyle.Left;
+            _searchBox.BackColor = Palette.Surface;
+            _searchBox.ForeColor = Palette.Text;
+            _searchBox.BorderStyle = BorderStyle.FixedSingle;
+            _searchBox.TextChanged += delegate { PopulateList(); };
+
+            _searchPanel.Controls.Add(_searchBox);
+            _searchPanel.Controls.Add(_searchLabel);
+
             // List View
             _list.Dock = DockStyle.Fill;
             _list.View = View.Details;
@@ -298,14 +326,23 @@ namespace ClaudeUsageWidget
             _list.Columns.Add(L.T("proj.col.tokens"), (int)Math.Round(90 * s), HorizontalAlignment.Right);
             _list.Columns.Add(L.T("proj.col.reqs"), (int)Math.Round(75 * s), HorizontalAlignment.Right);
             _list.Columns.Add(L.T("proj.col.path"), (int)Math.Round(220 * s), HorizontalAlignment.Left);
+            _list.ColumnClick += delegate(object sender, ColumnClickEventArgs e)
+            {
+                if (_sortCol == e.Column) _sortAsc = !_sortAsc;
+                else { _sortCol = e.Column; _sortAsc = (e.Column == 0 || e.Column == 5); }
+                SortRows();
+                PopulateList();
+            };
 
             // Menu Klik Kanan (Context Menu)
             _ctxMenu = new ContextMenuStrip();
             ToolStripMenuItem miFolder = new ToolStripMenuItem(L.T("proj.btn.folder"), null, delegate { OpenFolderSelected(); });
             ToolStripMenuItem miTerminal = new ToolStripMenuItem(L.T("proj.btn.terminal"), null, delegate { OpenTerminalSelected(); });
+            ToolStripMenuItem miCode = new ToolStripMenuItem(L.T("proj.btn.vscode"), null, delegate { OpenVSCodeSelected(); });
             ToolStripMenuItem miCopy = new ToolStripMenuItem(L.T("proj.btn.copy"), null, delegate { CopyMarkdownTable(); });
             _ctxMenu.Items.Add(miFolder);
             _ctxMenu.Items.Add(miTerminal);
+            _ctxMenu.Items.Add(miCode);
             _ctxMenu.Items.Add(new ToolStripSeparator());
             _ctxMenu.Items.Add(miCopy);
             MenuTheme.Apply(_ctxMenu);
@@ -323,27 +360,47 @@ namespace ClaudeUsageWidget
                 bool pathOk = !string.IsNullOrEmpty(path) && Directory.Exists(path);
                 miFolder.Enabled = pathOk;
                 miTerminal.Enabled = pathOk;
+                miCode.Enabled = pathOk && ProcessHelper.HasVSCode();
             };
 
             PopulateList();
             _list.DoubleClick += delegate { OpenTerminalSelected(); };
 
             Controls.Add(_list);
+            Controls.Add(_searchPanel);
             Controls.Add(_heatmap);
+        }
+
+        private void SortRows()
+        {
+            _rows.Sort(delegate(ProjectRow a, ProjectRow b)
+            {
+                int cmp;
+                switch (_sortCol)
+                {
+                    case 0: cmp = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase); break;
+                    case 1: cmp = a.TodayCost.CompareTo(b.TodayCost); break;
+                    case 3: cmp = a.WeekTokens.CompareTo(b.WeekTokens); break;
+                    case 4: cmp = a.WeekRequests.CompareTo(b.WeekRequests); break;
+                    case 5: cmp = string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase); break;
+                    default: cmp = a.WeekCost.CompareTo(b.WeekCost); break;
+                }
+                return _sortAsc ? cmp : -cmp;
+            });
         }
 
         private void PopulateList()
         {
             _list.Items.Clear();
-            if (_rows.Count == 0)
-            {
-                ListViewItem empty = new ListViewItem(L.T("proj.empty"));
-                empty.ForeColor = Palette.Dim;
-                _list.Items.Add(empty);
-                return;
-            }
+            string q = (_searchBox.Text ?? "").Trim();
+            int shown = 0;
             foreach (ProjectRow r in _rows)
             {
+                if (q.Length > 0 &&
+                    (r.Name == null || r.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) &&
+                    (r.Path == null || r.Path.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0))
+                    continue;
+
                 string todayStr = Fmt.UsdShort(r.TodayCost);
                 string weekStr = Fmt.UsdShort(r.WeekCost);
 
@@ -355,30 +412,46 @@ namespace ClaudeUsageWidget
                 item.SubItems.Add(string.IsNullOrEmpty(r.Path) ? "-" : r.Path);
                 item.Tag = r;
                 _list.Items.Add(item);
+                shown++;
             }
+            if (shown == 0)
+            {
+                ListViewItem empty = new ListViewItem(L.T("proj.empty"));
+                empty.ForeColor = Palette.Dim;
+                _list.Items.Add(empty);
+            }
+        }
+
+        private ProjectRow SelectedRowWithPath()
+        {
+            if (_list.SelectedItems.Count == 0) return null;
+            ProjectRow r = _list.SelectedItems[0].Tag as ProjectRow;
+            if (r == null || string.IsNullOrEmpty(r.Path) || !Directory.Exists(r.Path)) return null;
+            return r;
         }
 
         private void OpenFolderSelected()
         {
-            if (_list.SelectedItems.Count == 0) return;
-            ProjectRow r = _list.SelectedItems[0].Tag as ProjectRow;
-            if (r == null || string.IsNullOrEmpty(r.Path) || !Directory.Exists(r.Path)) return;
-            try { Process.Start("explorer.exe", "\"" + r.Path + "\""); }
+            ProjectRow r = SelectedRowWithPath();
+            if (r == null) return;
+            try { ProcessHelper.OpenFolder(r.Path); }
             catch (Exception ex) { Log.Write("proj.openfolder", ex); }
         }
 
         private void OpenTerminalSelected()
         {
-            if (_list.SelectedItems.Count == 0) return;
-            ProjectRow r = _list.SelectedItems[0].Tag as ProjectRow;
-            if (r == null || string.IsNullOrEmpty(r.Path) || !Directory.Exists(r.Path)) return;
-            try
-            {
-                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/K cd /d \"" + r.Path + "\"");
-                psi.WorkingDirectory = r.Path;
-                Process.Start(psi);
-            }
+            ProjectRow r = SelectedRowWithPath();
+            if (r == null) return;
+            try { ProcessHelper.OpenTerminal(r.Path); }
             catch (Exception ex) { Log.Write("proj.openterminal", ex); }
+        }
+
+        private void OpenVSCodeSelected()
+        {
+            ProjectRow r = SelectedRowWithPath();
+            if (r == null) return;
+            try { ProcessHelper.OpenVSCode(r.Path); }
+            catch (Exception ex) { Log.Write("proj.openvscode", ex); }
         }
 
         public static string BuildMarkdownTable(List<ProjectRow> rows)

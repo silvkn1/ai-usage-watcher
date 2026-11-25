@@ -54,9 +54,14 @@ namespace ClaudeUsageWidget
         private readonly CheckBox _chkGemini = new CheckBox();
         private readonly Label _lblGeminiStatus = new Label();
         private readonly Label _lblGeminiDesc = new Label();
+        private readonly CheckBox _chkCodex = new CheckBox();
+        private readonly Label _lblCodexStatus = new Label();
+        private readonly Label _lblCodexDesc = new Label();
         private readonly CheckBox _chkOllama = new CheckBox();
         private readonly Label _lblOllamaStatus = new Label();
         private readonly Label _lblOllamaDesc = new Label();
+        private readonly Label _lblOllamaPort = new Label();
+        private readonly NumericUpDown _numOllamaPort = new NumericUpDown();
         private readonly Label _lblLang = new Label();
 
         // Step 2 controls (Theme, Backdrop & Placement)
@@ -96,8 +101,8 @@ namespace ClaudeUsageWidget
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
             Font = new Font("Segoe UI", 9f);
-            ClientSize = new Size(620, 560);
-            MinimumSize = new Size(580, 520);
+            ClientSize = new Size(620, 590);
+            MinimumSize = new Size(580, 540);
             DoubleBuffered = true;
 
             _rootTable.Dock = DockStyle.Fill;
@@ -315,6 +320,7 @@ namespace ClaudeUsageWidget
             // Detection logic
             bool claudeFound = Directory.Exists(Paths.ProjectsDir);
             bool geminiFound = Directory.Exists(Paths.AntigravityBrainDir);
+            bool codexFound = Directory.Exists(Paths.CodexSessionsDir);
 
             // Provider 1: Claude Code
             t.Controls.Add(BuildProviderCard(
@@ -330,12 +336,45 @@ namespace ClaudeUsageWidget
                 _lblGeminiDesc, L.T("wizard.gemini.desc")
             ));
 
-            // Provider 3: Ollama
+            // Provider 3: OpenAI Codex CLI
             t.Controls.Add(BuildProviderCard(
+                _chkCodex, L.T("wizard.codex.title"), _cfg.ScanCodex || codexFound,
+                _lblCodexStatus, codexFound ? L.T("wizard.detected") : L.T("wizard.notdetected"), codexFound,
+                _lblCodexDesc, L.T("wizard.codex.desc")
+            ));
+
+            // Provider 4: Ollama
+            Panel ollamaCard = BuildProviderCard(
                 _chkOllama, L.T("wizard.ollama.title"), _cfg.OllamaEnabled,
                 _lblOllamaStatus, "Port " + _cfg.OllamaPort, false,
                 _lblOllamaDesc, L.T("wizard.ollama.desc")
-            ));
+            );
+            FlowLayoutPanel portRow = new FlowLayoutPanel();
+            portRow.FlowDirection = FlowDirection.LeftToRight;
+            portRow.AutoSize = true;
+            portRow.WrapContents = false;
+            portRow.Margin = new Padding(22, 6, 0, 0);
+            _lblOllamaPort.Text = "Port:";
+            _lblOllamaPort.Font = new Font("Segoe UI", 8.5f);
+            _lblOllamaPort.ForeColor = Palette.Dim;
+            _lblOllamaPort.AutoSize = true;
+            _lblOllamaPort.UseMnemonic = false;
+            _lblOllamaPort.Margin = new Padding(0, 4, 8, 0);
+            _numOllamaPort.Minimum = 1;
+            _numOllamaPort.Maximum = 65535;
+            _numOllamaPort.Value = Math.Max(1, Math.Min(65535, _cfg.OllamaPort));
+            _numOllamaPort.Width = 76;
+            _numOllamaPort.BackColor = Palette.Bg;
+            _numOllamaPort.ForeColor = Palette.Text;
+            _numOllamaPort.BorderStyle = BorderStyle.FixedSingle;
+            _numOllamaPort.Enabled = _chkOllama.Checked;
+            _chkOllama.CheckedChanged += delegate { _numOllamaPort.Enabled = _chkOllama.Checked; };
+            _numOllamaPort.ValueChanged += delegate { _lblOllamaStatus.Text = "Port " + (int)_numOllamaPort.Value; };
+            portRow.Controls.Add(_lblOllamaPort);
+            portRow.Controls.Add(_numOllamaPort);
+            Control cardContainer = _lblOllamaDesc.Parent ?? ollamaCard;
+            cardContainer.Controls.Add(portRow);
+            t.Controls.Add(ollamaCard);
 
             _page1.Controls.Add(t);
         }
@@ -633,12 +672,19 @@ namespace ClaudeUsageWidget
             _lblLang.Text = L.T("set.language");
 
             _chkClaude.Text = L.T("wizard.claude.title");
+            _lblClaudeStatus.Text = Directory.Exists(Paths.ProjectsDir) ? L.T("wizard.detected") : L.T("wizard.notdetected");
             _lblClaudeDesc.Text = L.T("wizard.claude.desc");
 
             _chkGemini.Text = L.T("wizard.gemini.title");
+            _lblGeminiStatus.Text = Directory.Exists(Paths.AntigravityBrainDir) ? L.T("wizard.detected") : L.T("wizard.notdetected");
             _lblGeminiDesc.Text = L.T("wizard.gemini.desc");
 
+            _chkCodex.Text = L.T("wizard.codex.title");
+            _lblCodexStatus.Text = Directory.Exists(Paths.CodexSessionsDir) ? L.T("wizard.detected") : L.T("wizard.notdetected");
+            _lblCodexDesc.Text = L.T("wizard.codex.desc");
+
             _chkOllama.Text = L.T("wizard.ollama.title");
+            _lblOllamaStatus.Text = "Port " + (int)_numOllamaPort.Value;
             _lblOllamaDesc.Text = L.T("wizard.ollama.desc");
 
             _lblTheme.Text = L.T("wizard.theme");
@@ -736,7 +782,9 @@ namespace ClaudeUsageWidget
 
             _cfg.ScanClaude = _chkClaude.Checked;
             _cfg.ScanGemini = _chkGemini.Checked;
+            _cfg.ScanCodex = _chkCodex.Checked;
             _cfg.OllamaEnabled = _chkOllama.Checked;
+            _cfg.OllamaPort = (int)_numOllamaPort.Value;
 
             _cfg.Theme = _cboTheme.SelectedIndex == 1 ? "light" : (_cboTheme.SelectedIndex == 2 ? "system" : "dark");
             if (_cboBackdrop.SelectedIndex >= 0 && _cboBackdrop.SelectedIndex < Backdrops.Length)

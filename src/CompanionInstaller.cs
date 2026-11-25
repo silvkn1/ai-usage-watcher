@@ -69,6 +69,39 @@ namespace ClaudeUsageWidget
             }
         }
 
+        public static void SyncIfInstalled()
+        {
+            try
+            {
+                string pkgJson = ReadAsset("companion-package.json", Path.Combine("companion", "vscode-status-bar", "package.json"));
+                string extJs = ReadAsset("companion-extension.js", Path.Combine("companion", "vscode-status-bar", "extension.js"));
+                if (string.IsNullOrEmpty(pkgJson) || string.IsNullOrEmpty(extJs)) return;
+
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string[] dirs = new[]
+                {
+                    Path.Combine(userProfile, ".vscode", "extensions", "ai-usage-watcher"),
+                    Path.Combine(userProfile, ".cursor", "extensions", "ai-usage-watcher")
+                };
+                Encoding utf8NoBom = new UTF8Encoding(false);
+                foreach (string dir in dirs)
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    string pkgPath = Path.Combine(dir, "package.json");
+                    string extPath = Path.Combine(dir, "extension.js");
+                    try
+                    {
+                        if (!File.Exists(pkgPath) || File.ReadAllText(pkgPath, Encoding.UTF8) != pkgJson)
+                            File.WriteAllText(pkgPath, pkgJson, utf8NoBom);
+                        if (!File.Exists(extPath) || File.ReadAllText(extPath, Encoding.UTF8) != extJs)
+                            File.WriteAllText(extPath, extJs, utf8NoBom);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
         private static string ReadAsset(string resourceName, string relativeDiskPath)
         {
             try

@@ -16,6 +16,8 @@ namespace ClaudeUsageWidget
         public bool AdminEnabled;
         public bool ScanClaude = true;
         public bool ScanGemini = true;
+        public bool ScanCodex = true;
+        public OllamaStatus Ollama;
         public string ProbeStatus;
         public DayStat[] History;
         public double BudgetDaily, BudgetMonthly, MonthCost;
@@ -500,7 +502,12 @@ namespace ClaudeUsageWidget
             string todayRight = "≈" + Fmt.Usd(u.TodayTotal.Cost);
             rows.Add(new Row(Kind.Text, todayLeft, todayRight));
 
-            // 5. Secondary Metrics (Context, Burn, Cache)
+            if (vm.ScanCodex && u.CodexWeek.Total > 0)
+            {
+                rows.Add(new Row(Kind.Small, L.T("codex.row", Fmt.Tokens(u.CodexToday.Total)), "≈" + Fmt.Usd(u.CodexToday.Cost)));
+            }
+
+            // 5. Secondary Metrics (Context, Burn, Cache, Ollama)
             List<string> meta = new List<string>();
             if (u.LastContextTokens > 0)
             {
@@ -524,6 +531,20 @@ namespace ClaudeUsageWidget
 
             if (meta.Count > 0)
                 rows.Add(new Row(Kind.Small, string.Join("  ·  ", meta.ToArray()), null));
+
+            if (vm.Ollama != null && vm.Ollama.Online)
+            {
+                string olRight = "";
+                if (vm.Ollama.ModelNames != null && vm.Ollama.ModelNames.Count > 0)
+                {
+                    int showN = Math.Min(2, vm.Ollama.ModelNames.Count);
+                    olRight = string.Join(", ", vm.Ollama.ModelNames.GetRange(0, showN).ToArray());
+                    if (olRight.Length > 28) olRight = olRight.Substring(0, 27) + "…";
+                }
+                Row olRow = new Row(Kind.Small, L.T("ollama.online", vm.Ollama.ModelCount), olRight);
+                olRow.Color = Palette.Green;
+                rows.Add(olRow);
+            }
 
             if (vm.BudgetDaily > 0) AddBudget(rows, "budget.day", u.TodayTotal.Cost, vm.BudgetDaily);
             if (vm.BudgetMonthly > 0) AddBudget(rows, "budget.month", vm.MonthCost, vm.BudgetMonthly);

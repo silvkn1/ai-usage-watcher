@@ -106,14 +106,18 @@ namespace ClaudeUsageWidget
         public Dictionary<string, Tally> Week = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> TodayClaude = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> TodayAntigravity = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> TodayCodex = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekClaude = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekAntigravity = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> WeekCodex = new Dictionary<string, Tally>();
         public Tally TodayTotal = new Tally();
         public Tally WeekTotal = new Tally();
         public Tally ClaudeToday = new Tally();
         public Tally AntigravityToday = new Tally();
+        public Tally CodexToday = new Tally();
         public Tally ClaudeWeek = new Tally();
         public Tally AntigravityWeek = new Tally();
+        public Tally CodexWeek = new Tally();
         public Dictionary<string, Tally> TodayProjects = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekProjects = new Dictionary<string, Tally>();
         public Dictionary<string, string> ProjectPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -150,8 +154,13 @@ namespace ClaudeUsageWidget
         private readonly Dictionary<string, DateTime> _seen = new Dictionary<string, DateTime>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _days = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysAg = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysCodex = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _proj = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projAg = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projCodex = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<string, string> _projPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _codexFileModels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _codexFileCwds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Lacak total per proyek (nama folder terakhir dari 'cwd'). Default mati.</summary>
         public bool TrackProjects;
 
@@ -172,7 +181,10 @@ namespace ClaudeUsageWidget
             {
                 if (TrackProjects == on) return;
                 TrackProjects = on;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _projPaths.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _daysCodex.Clear();
+                _proj.Clear(); _projAg.Clear(); _projCodex.Clear(); _projPaths.Clear();
+                _codexFileModels.Clear(); _codexFileCwds.Clear();
+                _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -189,6 +201,7 @@ namespace ClaudeUsageWidget
         private string _lastActiveProject;
         public bool ScanClaude = true;
         public bool ScanGemini = true;
+        public bool ScanCodex = true;
         public long AntigravityQuota5hTokens = 1000000;
         public long AntigravityQuota7dTokens = 10000000;
         private readonly List<KeyValuePair<DateTime, long>> _recentTokens = new List<KeyValuePair<DateTime, long>>();
@@ -202,6 +215,7 @@ namespace ClaudeUsageWidget
                 List<string> r = new List<string>();
                 if (ScanClaude && Directory.Exists(Paths.ProjectsDir)) r.Add(Paths.ProjectsDir);
                 if (ScanGemini && Directory.Exists(Paths.AntigravityBrainDir)) r.Add(Paths.AntigravityBrainDir);
+                if (ScanCodex && Directory.Exists(Paths.CodexSessionsDir)) r.Add(Paths.CodexSessionsDir);
                 return r;
             };
         }
@@ -212,7 +226,10 @@ namespace ClaudeUsageWidget
             lock (_gate)
             {
                 _pricing = pricing;
-                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _proj.Clear(); _projPaths.Clear(); _recentTokens.Clear(); _antigravityRecentTokens.Clear();
+                _offsets.Clear(); _seen.Clear(); _days.Clear(); _daysAg.Clear(); _daysCodex.Clear();
+                _proj.Clear(); _projAg.Clear(); _projCodex.Clear(); _projPaths.Clear();
+                _codexFileModels.Clear(); _codexFileCwds.Clear();
+                _recentTokens.Clear(); _antigravityRecentTokens.Clear();
                 _lastContextTokens = 0; _lastContextModel = null; _lastContextTime = DateTime.MinValue;
                 _lastActiveCwd = null; _lastActiveProject = null; _skipped = 0; _ready = false;
             }
@@ -389,7 +406,7 @@ namespace ClaudeUsageWidget
                             line = Encoding.UTF8.GetString(buf, start, i - start);
                             consumed += (i - start) + 1;
                         }
-                        ProcessLine(line);
+                        ProcessLine(line, path);
                         start = i + 1;
                     }
                     if (start < n) carry.Write(buf, start, n - start);
@@ -399,12 +416,19 @@ namespace ClaudeUsageWidget
             }
         }
 
-        private void ProcessLine(string line)
+        private void ProcessLine(string line, string filePath)
         {
             if (line.IndexOf("\"PLANNER_RESPONSE\"", StringComparison.Ordinal) >= 0)
             {
                 if (ScanGemini && ProcessAntigravityLine(line)) return;
                 if (!ScanClaude || line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return;
+            }
+
+            if (ScanCodex && (line.IndexOf("\"session_meta\"", StringComparison.Ordinal) >= 0 ||
+                              line.IndexOf("\"turn_context\"", StringComparison.Ordinal) >= 0 ||
+                              line.IndexOf("\"token_count\"", StringComparison.Ordinal) >= 0))
+            {
+                if (ProcessCodexLine(line, filePath)) return;
             }
 
             if (!ScanClaude) return;
@@ -560,7 +584,7 @@ namespace ClaudeUsageWidget
             {
                 string proj = "Antigravity";
                 Dictionary<string, Tally> pd;
-                if (!_proj.TryGetValue(local.Date, out pd)) { pd = new Dictionary<string, Tally>(); _proj[local.Date] = pd; }
+                if (!_projAg.TryGetValue(local.Date, out pd)) { pd = new Dictionary<string, Tally>(); _projAg[local.Date] = pd; }
                 Tally pa;
                 if (!pd.TryGetValue(proj, out pa)) { pa = new Tally(); pd[proj] = pa; }
                 pa.Add(t);
@@ -579,18 +603,122 @@ namespace ClaudeUsageWidget
             return true;
         }
 
+        private bool ProcessCodexLine(string line, string filePath)
+        {
+            Dictionary<string, object> o;
+            try { o = J.Parse(line); }
+            catch { return false; }
+            if (o == null) return false;
+
+            string type = J.Str(o, "type");
+            if (type == "session_meta" || type == "turn_context")
+            {
+                Dictionary<string, object> p = J.Obj(o, "payload");
+                string m = J.Str(p, "model") ?? J.Str(o, "model");
+                string c = J.Str(p, "cwd") ?? J.Str(o, "cwd");
+                if (!string.IsNullOrEmpty(filePath))
+                {
+                    if (!string.IsNullOrEmpty(m)) _codexFileModels[filePath] = m;
+                    if (!string.IsNullOrEmpty(c)) _codexFileCwds[filePath] = c;
+                }
+                return true;
+            }
+
+            if (type != "event_msg") return false;
+            Dictionary<string, object> payload = J.Obj(o, "payload");
+            if (J.Str(payload, "type") != "token_count") return false;
+
+            DateTime ts;
+            string tsRaw = J.Str(o, "timestamp");
+            if (tsRaw == null || !DateTime.TryParse(tsRaw, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out ts))
+            { _skipped++; return true; }
+            DateTime local = DateTime.SpecifyKind(ts, DateTimeKind.Utc).ToLocalTime();
+            if (local.Date < DateTime.Today.AddDays(-(KeepDays - 1))) return true;
+
+            Dictionary<string, object> info = J.Obj(payload, "info");
+            Dictionary<string, object> last = J.Obj(info, "last_token_usage");
+            if (last == null) return true;
+
+            long rawInput = J.Long(last, "input_tokens");
+            long cachedInput = J.Long(last, "cached_input_tokens");
+            long outputTok = J.Long(last, "output_tokens");
+            if (rawInput <= 0 && outputTok <= 0 && cachedInput <= 0) return true;
+
+            string fKey = string.IsNullOrEmpty(filePath) ? "" : Path.GetFileName(filePath);
+            string dedupKey = "codex|" + fKey + "|" + tsRaw + "|" + rawInput + "|" + outputTok + "|" + cachedInput;
+            if (_seen.ContainsKey(dedupKey)) return true;
+            _seen[dedupKey] = local;
+
+            string model = null;
+            if (!string.IsNullOrEmpty(filePath)) _codexFileModels.TryGetValue(filePath, out model);
+            if (string.IsNullOrEmpty(model)) model = "gpt-5-codex";
+
+            Tally t = new Tally();
+            t.Requests = 1;
+            t.Input = Math.Max(0, rawInput - cachedInput);
+            t.CacheRead = cachedInput;
+            t.Output = outputTok;
+
+            Price pr = _pricing.Find(model);
+            if (pr == null) t.UnpricedRequests = 1;
+            else
+            {
+                t.Cost = (t.Input * pr.Input + t.Output * pr.Output + t.CacheRead * pr.CacheRead) / 1e6;
+                t.Saved = (t.CacheRead * (pr.Input - pr.CacheRead)) / 1e6;
+            }
+
+            Dictionary<string, Tally> day;
+            if (!_daysCodex.TryGetValue(local.Date, out day)) { day = new Dictionary<string, Tally>(); _daysCodex[local.Date] = day; }
+            Tally acc;
+            if (!day.TryGetValue(model, out acc)) { acc = new Tally(); day[model] = acc; }
+            acc.Add(t);
+
+            string rawCwd = null;
+            if (!string.IsNullOrEmpty(filePath)) _codexFileCwds.TryGetValue(filePath, out rawCwd);
+            if (TrackProjects)
+            {
+                string proj = string.IsNullOrEmpty(rawCwd) ? "Codex CLI" : ProjectName(rawCwd);
+                if (!string.IsNullOrEmpty(rawCwd) && !_projPaths.ContainsKey(proj)) _projPaths[proj] = rawCwd;
+                Dictionary<string, Tally> pd;
+                if (!_projCodex.TryGetValue(local.Date, out pd)) { pd = new Dictionary<string, Tally>(); _projCodex[local.Date] = pd; }
+                Tally pa;
+                if (!pd.TryGetValue(proj, out pa)) { pa = new Tally(); pd[proj] = pa; }
+                pa.Add(t);
+            }
+            if (local > _lastRecord) _lastRecord = local;
+
+            if (local >= _lastContextTime)
+            {
+                _lastContextTokens = rawInput;
+                _lastContextModel = model;
+                _lastContextTime = local;
+                if (!string.IsNullOrEmpty(rawCwd))
+                {
+                    _lastActiveCwd = rawCwd;
+                    _lastActiveProject = ProjectName(rawCwd);
+                }
+            }
+            _recentTokens.Add(new KeyValuePair<DateTime, long>(local, t.Total));
+            return true;
+        }
+
+        private static void PruneDaysMap(Dictionary<DateTime, Dictionary<string, Tally>> map, DateTime min)
+        {
+            List<DateTime> old = new List<DateTime>();
+            foreach (DateTime d in map.Keys) if (d < min) old.Add(d);
+            foreach (DateTime d in old) map.Remove(d);
+        }
+
         private void Prune()
         {
             DateTime min = DateTime.Today.AddDays(-(KeepDays - 1));
-            List<DateTime> oldDays = new List<DateTime>();
-            foreach (DateTime d in _days.Keys) if (d < min) oldDays.Add(d);
-            foreach (DateTime d in oldDays) _days.Remove(d);
-            List<DateTime> oldDaysAg = new List<DateTime>();
-            foreach (DateTime d in _daysAg.Keys) if (d < min) oldDaysAg.Add(d);
-            foreach (DateTime d in oldDaysAg) _daysAg.Remove(d);
-            List<DateTime> oldProj = new List<DateTime>();
-            foreach (DateTime d in _proj.Keys) if (d < min) oldProj.Add(d);
-            foreach (DateTime d in oldProj) _proj.Remove(d);
+            PruneDaysMap(_days, min);
+            PruneDaysMap(_daysAg, min);
+            PruneDaysMap(_daysCodex, min);
+            PruneDaysMap(_proj, min);
+            PruneDaysMap(_projAg, min);
+            PruneDaysMap(_projCodex, min);
             if (_seen.Count > 50000)
             {
                 List<string> old = new List<string>();
@@ -664,9 +792,31 @@ namespace ClaudeUsageWidget
                     }
                 }
 
+                if (ScanCodex)
+                {
+                    foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> day in _daysCodex)
+                    {
+                        if (day.Key >= weekStart)
+                        {
+                            foreach (KeyValuePair<string, Tally> m in day.Value)
+                            {
+                                AddTo(s.Week, m.Key, m.Value); s.WeekTotal.Add(m.Value);
+                                AddTo(s.WeekCodex, m.Key, m.Value); s.CodexWeek.Add(m.Value);
+
+                                if (day.Key == today)
+                                {
+                                    AddTo(s.Today, m.Key, m.Value); s.TodayTotal.Add(m.Value);
+                                    AddTo(s.TodayCodex, m.Key, m.Value); s.CodexToday.Add(m.Value);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 HashSet<DateTime> allDates = new HashSet<DateTime>();
                 if (ScanClaude) foreach (DateTime d in _days.Keys) allDates.Add(d);
                 if (ScanGemini) foreach (DateTime d in _daysAg.Keys) allDates.Add(d);
+                if (ScanCodex) foreach (DateTime d in _daysCodex.Keys) allDates.Add(d);
                 foreach (DateTime d in allDates)
                 {
                     Tally dt = new Tally();
@@ -676,19 +826,18 @@ namespace ClaudeUsageWidget
                     Dictionary<string, Tally> ad;
                     if (ScanGemini && _daysAg.TryGetValue(d, out ad))
                         foreach (Tally t in ad.Values) dt.Add(t);
+                    Dictionary<string, Tally> cxd;
+                    if (ScanCodex && _daysCodex.TryGetValue(d, out cxd))
+                        foreach (Tally t in cxd.Values) dt.Add(t);
                     s.Days.Add(new DayStat(d, dt.Total, dt.Cost, dt.Requests));
                 }
 
-                if (TrackProjects && (ScanClaude || ScanGemini))
-                    foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> pd in _proj)
-                    {
-                        if (pd.Key < weekStart) continue;
-                        foreach (KeyValuePair<string, Tally> m in pd.Value)
-                        {
-                            AddTo(s.WeekProjects, m.Key, m.Value);
-                            if (pd.Key == today) AddTo(s.TodayProjects, m.Key, m.Value);
-                        }
-                    }
+                if (TrackProjects)
+                {
+                    if (ScanClaude) CollectProjects(_proj, weekStart, today, s);
+                    if (ScanGemini) CollectProjects(_projAg, weekStart, today, s);
+                    if (ScanCodex) CollectProjects(_projCodex, weekStart, today, s);
+                }
                 s.ProjectPaths = new Dictionary<string, string>(_projPaths, StringComparer.OrdinalIgnoreCase);
                 s.SkippedLines = _skipped;
                 s.LastRecord = _lastRecord;
@@ -743,6 +892,19 @@ namespace ClaudeUsageWidget
                 }
 
                 return s;
+            }
+        }
+
+        private static void CollectProjects(Dictionary<DateTime, Dictionary<string, Tally>> src, DateTime weekStart, DateTime today, UsageSnapshot s)
+        {
+            foreach (KeyValuePair<DateTime, Dictionary<string, Tally>> pd in src)
+            {
+                if (pd.Key < weekStart) continue;
+                foreach (KeyValuePair<string, Tally> m in pd.Value)
+                {
+                    AddTo(s.WeekProjects, m.Key, m.Value);
+                    if (pd.Key == today) AddTo(s.TodayProjects, m.Key, m.Value);
+                }
             }
         }
 

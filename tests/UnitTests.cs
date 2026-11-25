@@ -1406,6 +1406,130 @@ namespace Tests
                 Assert.True(menu.Items.Count <= 15, "Top-level menu must be compact and grouped (<= 15 items)");
             }
         }
+
+        public static void Test_Webhook_MultiFormat_Payload()
+        {
+            string discord = WebhookSender.BuildPayload("https://discord.com/api/webhooks/123/tok", "Alert", "Body");
+            Assert.True(discord.Contains("\"content\""), "Discord payload must contain content field");
+            Assert.True(discord.Contains("\"username\""), "Discord payload must contain username field");
+
+            string slack = WebhookSender.BuildPayload("https://hooks.slack.com/services/T/B/X", "Alert", "Body");
+            Assert.True(slack.Contains("\"text\""), "Slack payload must contain text field");
+            Assert.False(slack.Contains("\"content\""), "Slack payload must not emit Discord content field");
+
+            string telegram = WebhookSender.BuildPayload("https://api.telegram.org/bot123/sendMessage?chat_id=1", "Alert", "Body");
+            Assert.True(telegram.Contains("\"text\""), "Telegram payload must contain text field");
+
+            string generic = WebhookSender.BuildPayload("https://example.com/webhook", "Alert", "Body");
+            Assert.True(generic.Contains("\"text\"") && generic.Contains("\"content\""), "Generic webhook payload must include text and content");
+        }
+
+        public static void Test_UsageScanner_Codex_Log_Parsing()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.TrackProjects = true;
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_codex_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string nowUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string metaLine = string.Format(
+                    "{{\"timestamp\":\"{0}\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"codex_1\",\"cwd\":\"C:\\\\CodexProj\"}}}}",
+                    nowUtc
+                );
+                string ctxLine = string.Format(
+                    "{{\"timestamp\":\"{0}\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"gpt-5.3-codex\",\"cwd\":\"C:\\\\CodexProj\"}}}}",
+                    nowUtc
+                );
+                string tokLine = string.Format(
+                    "{{\"timestamp\":\"{0}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"info\":{{\"total_token_usage\":{{\"input_tokens\":5000,\"cached_input_tokens\":1000,\"output_tokens\":500}},\"last_token_usage\":{{\"input_tokens\":1000,\"cached_input_tokens\":200,\"output_tokens\":300}}}}}}}}",
+                    nowUtc
+                );
+                string claudeLine = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"cwd\":\"C:\\\\ClaudeProj\",\"message\":{{\"id\":\"msg_cdx_1\",\"model\":\"claude-3-5-haiku\",\"usage\":{{\"input_tokens\":100,\"output_tokens\":50,\"cache_read_input_tokens\":0}}}}}}",
+                    nowUtc
+                );
+
+                File.WriteAllLines(Path.Combine(tempDir, "rollout-2026-test.jsonl"), new[] { metaLine, ctxLine, tokLine });
+                File.WriteAllLines(Path.Combine(tempDir, "claude.jsonl"), new[] { claudeLine });
+
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(800L, snap.CodexToday.Input, "Codex uncached input must equal input_tokens - cached_input_tokens");
+                Assert.Equal(200L, snap.CodexToday.CacheRead, "Codex cache_read must record cached_input_tokens");
+                Assert.Equal(300L, snap.CodexToday.Output, "Codex output must record last_token_usage output_tokens");
+                Assert.Equal(1300L, snap.CodexToday.Total, "Codex must sum last_token_usage, not total_token_usage");
+                Assert.True(snap.CodexToday.Cost > 0, "Codex gpt-5.3-codex cost must be positive");
+                Assert.True(snap.WeekProjects.ContainsKey("CodexProj"), "CodexProj must appear in WeekProjects");
+                Assert.True(snap.WeekProjects.ContainsKey("ClaudeProj"), "ClaudeProj must appear in WeekProjects when ScanClaude=true");
+
+                sc.ScanClaude = false;
+                UsageSnapshot snapNoClaude = sc.Snapshot();
+                Assert.False(snapNoClaude.WeekProjects.ContainsKey("ClaudeProj"), "Disabling ScanClaude must immediately exclude Claude projects from Snapshot");
+                Assert.True(snapNoClaude.WeekProjects.ContainsKey("CodexProj"), "CodexProj must remain when ScanClaude is disabled");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_ProcessHelper_Terminal_And_VSCode_Discovery()
+        {
+            string cmdPath = ProcessHelper.FindExecutableOnPath("cmd.exe");
+            Assert.NotNull(cmdPath, "cmd.exe must be resolved on PATH");
+            Assert.True(File.Exists(cmdPath), "Resolved cmd.exe path must exist on disk");
+            Assert.True(ProcessHelper.FindExecutableOnPath("definitely_missing_bin_xyz_9876.exe") == null, "Missing executable must return null");
+            bool hasEditor = ProcessHelper.HasVSCode();
+            Assert.True(hasEditor || !hasEditor, "HasVSCode must execute safely without throwing");
+        }
+
+        public static void Test_SettingsForm_Live_I18n_Refresh_And_Wizard_Codex()
+        {
+            string origLang = L.Lang;
+            try
+            {
+                L.Set("en");
+                AppConfig cfg = new AppConfig();
+                cfg.Language = "en";
+                using (SettingsForm sf = new SettingsForm(cfg, null))
+                {
+                    IntPtr h = sf.Handle;
+                    string enTitle = sf.Text;
+                    Assert.Equal(L.T("set.title"), enTitle, "Initial Settings title must be English");
+
+                    L.Set("id");
+                    sf.RefreshI18n();
+                    Assert.Equal(L.T("set.title"), sf.Text, "Settings title must update live to Indonesian");
+                    Assert.True(sf.Text != enTitle, "Indonesian Settings title must differ from English");
+
+                    FieldInfo fiTheme = typeof(SettingsForm).GetField("_theme", BindingFlags.NonPublic | BindingFlags.Instance);
+                    ComboBox cboTheme = fiTheme.GetValue(sf) as ComboBox;
+                    Assert.NotNull(cboTheme, "_theme ComboBox must exist");
+                    Assert.Equal(L.T("set.theme.dark"), cboTheme.Items[0].ToString(), "Theme dropdown items must re-translate live");
+                    Assert.True(cboTheme.SelectedIndex >= 0, "ComboBox SelectedIndex must be preserved on i18n refresh");
+                }
+
+                using (SetupWizardForm wiz = new SetupWizardForm(new AppConfig()))
+                {
+                    IntPtr wh = wiz.Handle;
+                    FieldInfo fiCodex = typeof(SetupWizardForm).GetField("_chkCodex", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiPort = typeof(SetupWizardForm).GetField("_numOllamaPort", BindingFlags.NonPublic | BindingFlags.Instance);
+                    Assert.NotNull(fiCodex != null ? fiCodex.GetValue(wiz) : null, "SetupWizard must expose Codex checkbox");
+                    NumericUpDown numPort = fiPort != null ? fiPort.GetValue(wiz) as NumericUpDown : null;
+                    Assert.NotNull(numPort, "SetupWizard must expose Ollama port control");
+                    Assert.Equal(65535m, numPort.Maximum, "Ollama port NumericUpDown max must be 65535");
+                }
+            }
+            finally
+            {
+                L.Set(origLang);
+            }
+        }
     }
 
     public static class TestRunner

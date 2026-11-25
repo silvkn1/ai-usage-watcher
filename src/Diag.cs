@@ -87,6 +87,7 @@ namespace ClaudeUsageWidget
                     YesNo(u.Ready), u.TodayTotal.Total, u.TodayTotal.Cost, u.WeekTotal.Total, u.WeekTotal.Cost, u.SkippedLines, Fmt.Clock(u.LastRecord)));
             if (!string.IsNullOrEmpty(probeFailed)) b.AppendLine("last probe error: " + probeFailed);
             if (org != null && !org.Ok) b.AppendLine("last admin api error: " + org.Error);
+            if (WebhookSender.FailCount > 0) b.AppendLine("webhook failures: " + WebhookSender.FailCount + (string.IsNullOrEmpty(WebhookSender.LastError) ? "" : " (" + WebhookSender.LastError + ")"));
             b.AppendLine("--- log tail ---");
             try
             {

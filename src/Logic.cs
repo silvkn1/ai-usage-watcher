@@ -478,6 +478,11 @@ namespace ClaudeUsageWidget
     {
         public static string Format(RateLimitSnapshot limits, UsageSnapshot usage, bool scanClaude, bool scanGemini)
         {
+            return Format(limits, usage, scanClaude, scanGemini, false, null);
+        }
+
+        public static string Format(RateLimitSnapshot limits, UsageSnapshot usage, bool scanClaude, bool scanGemini, bool scanCodex, OllamaStatus ollama)
+        {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("🤖 AI Quota Status (AI Usage Watcher)");
             if (scanClaude)
@@ -503,6 +508,15 @@ namespace ClaudeUsageWidget
                     ? string.Format("{0}%{1}", (int)Math.Round(w7.UsedPercent), w7.ResetsAt != DateTime.MinValue ? " (reset " + Fmt.Until(w7.ResetsAt) + " / " + Fmt.Clock(w7.ResetsAt) + ")" : "")
                     : "0%";
                 sb.AppendLine("• Antigravity: 5h " + s5 + " · 7d " + s7);
+            }
+            if (scanCodex && usage != null && usage.CodexWeek.Total > 0)
+            {
+                sb.AppendLine(string.Format("• Codex CLI: Today {0} (≈{1}) · 7d {2}",
+                    Fmt.Tokens(usage.CodexToday.Total), Fmt.Usd(usage.CodexToday.Cost), Fmt.Tokens(usage.CodexWeek.Total)));
+            }
+            if (ollama != null && ollama.Online)
+            {
+                sb.AppendLine(string.Format("• Ollama: Online ({0} models)", ollama.ModelCount));
             }
             if (usage != null)
             {
@@ -627,6 +641,11 @@ namespace ClaudeUsageWidget
                 d["burn_rate_10m"] = u.TokensLast10m;
                 d["last_context_tokens"] = u.LastContextTokens;
                 d["last_active_project"] = u.LastActiveProject ?? "";
+                if (u.CodexWeek.Total > 0)
+                {
+                    d["codex_today_tokens"] = u.CodexToday.Total;
+                    d["codex_today_cost_usd"] = Math.Round(u.CodexToday.Cost, 4);
+                }
 
                 double runway = RunwayEstimator.EstimateMinutes(rl, u);
                 if (runway > 0) d["runway_minutes"] = Math.Round(runway, 1);

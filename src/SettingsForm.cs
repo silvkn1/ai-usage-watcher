@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ClaudeUsageWidget
@@ -52,7 +53,7 @@ namespace ClaudeUsageWidget
         private readonly CheckBox _currencyOn = new CheckBox(), _currencyBoth = new CheckBox();
         private readonly TextBox _currencySymbol = new TextBox();
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
-        private readonly CheckBox _scanClaude = new CheckBox(), _scanGemini = new CheckBox(), _adminData = new CheckBox();
+        private readonly CheckBox _scanClaude = new CheckBox(), _scanGemini = new CheckBox(), _scanCodex = new CheckBox(), _adminData = new CheckBox();
         private readonly CheckBox _ollamaOn = new CheckBox();
         private readonly NumericUpDown _ollamaPort = new NumericUpDown();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
@@ -60,6 +61,7 @@ namespace ClaudeUsageWidget
         private readonly NumericUpDown _burnRateTokens = new NumericUpDown();
         private readonly CheckBox _webhookOn = new CheckBox();
         private readonly TextBox _webhookUrl = new TextBox();
+        private readonly Button _webhookTestBtn = new Button();
 
         private readonly FlowLayoutPanel _tabStrip = new FlowLayoutPanel();
         private readonly Panel _content = new Panel();
@@ -67,6 +69,8 @@ namespace ClaudeUsageWidget
         private readonly List<Panel> _pages = new List<Panel>();
         private int _tab;
         private Button _saveBtn, _cancelBtn, _applyBtn;
+        private readonly List<Action> _i18n = new List<Action>();
+        private bool _i18nCaptured;
 
         public SettingsForm(AppConfig cfg) : this(cfg, null) { }
 
@@ -338,8 +342,21 @@ namespace ClaudeUsageWidget
 
             AddNote(t, L.T("set.h.webhook"), "head");
             AddCheck(t, _webhookOn, L.T("set.webhook.enable"), _cfg.WebhookEnabled);
-            _webhookUrl.Width = 260; _webhookUrl.Text = _cfg.GetWebhookUrl() ?? "";
-            AddRow(t, L.T("set.webhook.url"), _webhookUrl);
+            _webhookUrl.Width = 200; _webhookUrl.Text = _cfg.GetWebhookUrl() ?? "";
+            _webhookUrl.Margin = new Padding(0, 2, 0, 0);
+            _webhookTestBtn.Text = L.T("set.webhook.test");
+            _webhookTestBtn.AutoSize = true;
+            _webhookTestBtn.Margin = new Padding(6, 0, 0, 0);
+            _webhookTestBtn.Padding = new Padding(8, 2, 8, 2);
+            _webhookTestBtn.Click += OnWebhookTestClick;
+            FlowLayoutPanel webhookRow = new FlowLayoutPanel();
+            webhookRow.FlowDirection = FlowDirection.LeftToRight;
+            webhookRow.AutoSize = true;
+            webhookRow.WrapContents = false;
+            webhookRow.Margin = new Padding(0);
+            webhookRow.Controls.Add(_webhookUrl);
+            webhookRow.Controls.Add(_webhookTestBtn);
+            AddRow(t, L.T("set.webhook.url"), webhookRow);
 
             SetupMoney(_budgetDay, _cfg.BudgetDaily);
             AddRow(t, L.T("set.budget.day"), _budgetDay);
@@ -399,6 +416,7 @@ namespace ClaudeUsageWidget
             AddNote(t, L.T("set.h.monitoring"), "head");
             AddCheck(t, _scanClaude, L.T("set.claude"), _cfg.ScanClaude);
             AddCheck(t, _scanGemini, L.T("set.gemini"), _cfg.ScanGemini);
+            AddCheck(t, _scanCodex, L.T("set.codex"), _cfg.ScanCodex);
             AddCheck(t, _adminData, L.T("set.claude_api"), _cfg.AdminEnabled);
             _adminData.CheckedChanged += delegate { if (_admin.Checked != _adminData.Checked) _admin.Checked = _adminData.Checked; };
             _admin.CheckedChanged += delegate { if (_adminData.Checked != _admin.Checked) _adminData.Checked = _admin.Checked; };
@@ -605,6 +623,131 @@ namespace ClaudeUsageWidget
         {
             base.OnHandleCreated(e);
             DarkUi.TitleBar(Handle, !Palette.IsLight);
+            CaptureI18nBindings();
+        }
+
+        private async void OnWebhookTestClick(object sender, EventArgs e)
+        {
+            string url = _webhookUrl.Text.Trim();
+            if (string.IsNullOrEmpty(url))
+            {
+                MessageBox.Show(this, string.Format(L.T("msg.webhook.fail"), "URL empty"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            _webhookTestBtn.Enabled = false;
+            try
+            {
+                string err = await WebhookSender.SendAsync(url, L.AppFullName, "Webhook test from " + L.AppFullName);
+                if (IsDisposed) return;
+                if (err == null)
+                    MessageBox.Show(this, L.T("msg.webhook.ok"), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else
+                    MessageBox.Show(this, string.Format(L.T("msg.webhook.fail"), err), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed)
+                    MessageBox.Show(this, string.Format(L.T("msg.webhook.fail"), ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                if (!IsDisposed) _webhookTestBtn.Enabled = true;
+            }
+        }
+
+        private void CaptureI18nBindings()
+        {
+            if (_i18nCaptured) return;
+            _i18nCaptured = true;
+
+            Dictionary<string, string> rev = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, string[]> kv in L.All)
+            {
+                string t = L.T(kv.Key);
+                if (!string.IsNullOrEmpty(t) && !rev.ContainsKey(t)) rev[t] = kv.Key;
+            }
+            foreach (KeyValuePair<string, string[]> kv in L.All)
+            {
+                if (kv.Key.StartsWith("set.") || kv.Key.StartsWith("backdrop.") || kv.Key.StartsWith("btn."))
+                {
+                    string t = L.T(kv.Key);
+                    if (!string.IsNullOrEmpty(t)) rev[t] = kv.Key;
+                }
+            }
+
+            _i18n.Add(delegate { Text = L.T("set.title"); });
+            CaptureControlI18n(this, rev);
+        }
+
+        private void CaptureControlI18n(Control root, Dictionary<string, string> rev)
+        {
+            foreach (Control c in root.Controls)
+            {
+                if (c is TextBox || c is NumericUpDown || c is TrackBar) continue;
+                ComboBox cb = c as ComboBox;
+                if (cb != null)
+                {
+                    if (cb != _lang && cb != _monitor && cb.Items.Count > 0)
+                    {
+                        List<KeyValuePair<int, string>> itemKeys = new List<KeyValuePair<int, string>>();
+                        for (int i = 0; i < cb.Items.Count; i++)
+                        {
+                            string s = cb.Items[i] as string;
+                            string k;
+                            if (s != null && rev.TryGetValue(s, out k))
+                                itemKeys.Add(new KeyValuePair<int, string>(i, k));
+                        }
+                        if (itemKeys.Count > 0)
+                        {
+                            ComboBox targetCb = cb;
+                            _i18n.Add(delegate
+                            {
+                                int sel = targetCb.SelectedIndex;
+                                targetCb.BeginUpdate();
+                                try
+                                {
+                                    foreach (KeyValuePair<int, string> ik in itemKeys)
+                                        targetCb.Items[ik.Key] = L.T(ik.Value);
+                                }
+                                finally
+                                {
+                                    if (sel >= 0 && sel < targetCb.Items.Count) targetCb.SelectedIndex = sel;
+                                    targetCb.EndUpdate();
+                                }
+                            });
+                        }
+                    }
+                    continue;
+                }
+
+                if ((c is Label || c is CheckBox || c is Button) && !string.IsNullOrEmpty(c.Text))
+                {
+                    string key;
+                    if (rev.TryGetValue(c.Text, out key))
+                    {
+                        Control target = c;
+                        string capturedKey = key;
+                        _i18n.Add(delegate { target.Text = L.T(capturedKey); });
+                    }
+                }
+                if (c.HasChildren) CaptureControlI18n(c, rev);
+            }
+        }
+
+        internal void RefreshI18n()
+        {
+            CaptureI18nBindings();
+            SuspendLayout();
+            try
+            {
+                foreach (Action a in _i18n) a();
+            }
+            finally
+            {
+                ResumeLayout(true);
+            }
+            PerformLayout();
+            Invalidate(true);
         }
 
         // ---------------- simpan & terapkan ----------------
@@ -664,6 +807,7 @@ namespace ClaudeUsageWidget
             _cfg.HookNotifyInput = _inputOn.Checked;
             _cfg.ScanClaude = _scanClaude.Checked;
             _cfg.ScanGemini = _scanGemini.Checked;
+            _cfg.ScanCodex = _scanCodex.Checked;
             _cfg.ScanWsl = _wsl.Checked;
             _cfg.ShowProjects = _projects.Checked;
             _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
@@ -714,7 +858,14 @@ namespace ClaudeUsageWidget
 
         private void OnApply(object sender, EventArgs e)
         {
+            CaptureI18nBindings();
+            string prevLang = L.Lang;
             if (!SaveToConfig()) return;
+            if (!string.Equals(prevLang, _cfg.Language, StringComparison.OrdinalIgnoreCase))
+            {
+                L.Set(_cfg.Language);
+                RefreshI18n();
+            }
             Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
             ApplyTheme();
             if (_cb != null && _cb.Apply != null) _cb.Apply();

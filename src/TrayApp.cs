@@ -26,7 +26,7 @@ namespace ClaudeUsageWidget
         private readonly FloatingForm _float;
         private readonly ContextMenuStrip _menu;
         private readonly System.Windows.Forms.Timer _tick, _debounce, _fsTimer;
-        private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher;
+        private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher, _codexWatcher;
         private readonly SynchronizationContext _ui;
 
         private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miData, _miExit, _miCsv, _miReport, _miProjects;
@@ -82,6 +82,7 @@ namespace ClaudeUsageWidget
         {
             Paths.Ensure();
             AutoUpdater.CleanupOldVersion();
+            CompanionInstaller.SyncIfInstalled();
             _cfg = AppConfig.Load();
             L.Set(_cfg.Language);   // sebelum menu dan layout pertama
             ApplyCurrencyOpts();
@@ -89,6 +90,7 @@ namespace ClaudeUsageWidget
             _scanner = new UsageScanner(_pricing);
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
+            _scanner.ScanCodex = _cfg.ScanCodex;
             _scanner.Roots = ProjectRoots;
             _scanner.SetTrackProjects(true);   // statistik proyek disimpan di memori untuk Project Explorer; _cfg.ShowProjects hanya kontrol tampilan widget
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
@@ -304,6 +306,8 @@ namespace ClaudeUsageWidget
             }
             if (_cfg.ScanGemini && Directory.Exists(Paths.AntigravityBrainDir))
                 if (!r.Contains(Paths.AntigravityBrainDir, StringComparer.OrdinalIgnoreCase)) r.Add(Paths.AntigravityBrainDir);
+            if (_cfg.ScanCodex && Directory.Exists(Paths.CodexSessionsDir))
+                if (!r.Contains(Paths.CodexSessionsDir, StringComparer.OrdinalIgnoreCase)) r.Add(Paths.CodexSessionsDir);
             return r;
         }
 
@@ -542,7 +546,7 @@ namespace ClaudeUsageWidget
             try
             {
                 if (_usage != null && !string.IsNullOrEmpty(_usage.LastActiveCwd) && Directory.Exists(_usage.LastActiveCwd))
-                    Process.Start("explorer.exe", "\"" + _usage.LastActiveCwd + "\"");
+                    ProcessHelper.OpenFolder(_usage.LastActiveCwd);
             }
             catch (Exception ex) { Log.Write("open.folder", ex); }
         }
@@ -552,24 +556,14 @@ namespace ClaudeUsageWidget
             try
             {
                 if (_usage != null && !string.IsNullOrEmpty(_usage.LastActiveCwd) && Directory.Exists(_usage.LastActiveCwd))
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/K cd /d \"" + _usage.LastActiveCwd + "\"");
-                    psi.WorkingDirectory = _usage.LastActiveCwd;
-                    psi.UseShellExecute = true;
-                    Process.Start(psi);
-                }
+                    ProcessHelper.OpenTerminal(_usage.LastActiveCwd);
             }
             catch (Exception ex) { Log.Write("open.terminal", ex); }
         }
 
         private void OpenAntigravityFolder()
         {
-            try
-            {
-                string dir = Paths.AntigravityDir;
-                if (Directory.Exists(dir))
-                    Process.Start("explorer.exe", "\"" + dir + "\"");
-            }
+            try { ProcessHelper.OpenFolder(Paths.AntigravityDir); }
             catch (Exception ex) { Log.Write("open.antigravity", ex); }
         }
 
@@ -577,7 +571,7 @@ namespace ClaudeUsageWidget
         {
             try
             {
-                string text = StatusFormatter.Format(_limits, _usage, _cfg.ScanClaude, _cfg.ScanGemini);
+                string text = StatusFormatter.Format(_limits, _usage, _cfg.ScanClaude, _cfg.ScanGemini, _cfg.ScanCodex, OllamaProbe.Current);
                 Clipboard.SetText(text);
                 ShowBalloon(L.T("msg.copied"), ToolTipIcon.Info);
             }
@@ -972,6 +966,7 @@ namespace ClaudeUsageWidget
         {
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
+            _scanner.ScanCodex = _cfg.ScanCodex;
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
             _scanner.AntigravityQuota7dTokens = _cfg.AntigravityQuota7dTokens;
             StartWatchers();
@@ -1045,6 +1040,7 @@ namespace ClaudeUsageWidget
             if (_logWatcher != null) { try { _logWatcher.Dispose(); } catch { } _logWatcher = null; }
             if (_appWatcher != null) { try { _appWatcher.Dispose(); } catch { } _appWatcher = null; }
             if (_geminiWatcher != null) { try { _geminiWatcher.Dispose(); } catch { } _geminiWatcher = null; }
+            if (_codexWatcher != null) { try { _codexWatcher.Dispose(); } catch { } _codexWatcher = null; }
 
             if (_cfg.ScanClaude)
             {
@@ -1103,6 +1099,27 @@ namespace ClaudeUsageWidget
                     }
                 }
                 catch (Exception ex) { Log.Write("watch.gemini", ex); }
+            }
+            if (_cfg.ScanCodex)
+            {
+                try
+                {
+                    if (Directory.Exists(Paths.CodexSessionsDir))
+                    {
+                        _codexWatcher = new FileSystemWatcher(Paths.CodexSessionsDir, "*.jsonl");
+                        _codexWatcher.IncludeSubdirectories = true;
+                        _codexWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
+                        _codexWatcher.InternalBufferSize = 64 * 1024;
+                        FileSystemEventHandler hC = delegate(object s, FileSystemEventArgs e)
+                        {
+                            lock (_dirty) _dirty.Add(e.FullPath);
+                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                        };
+                        _codexWatcher.Changed += hC; _codexWatcher.Created += hC;
+                        _codexWatcher.EnableRaisingEvents = true;
+                    }
+                }
+                catch (Exception ex) { Log.Write("watch.codex", ex); }
             }
         }
 
@@ -1344,6 +1361,8 @@ namespace ClaudeUsageWidget
             vm.AdminEnabled = _cfg.AdminEnabled;
             vm.ScanClaude = _cfg.ScanClaude;
             vm.ScanGemini = _cfg.ScanGemini;
+            vm.ScanCodex = _cfg.ScanCodex;
+            vm.Ollama = OllamaProbe.Current;
             vm.ProbeStatus = _probeStatus;
             vm.History = _history.Series(_cfg.HistoryDays);
             vm.BudgetDaily = _cfg.BudgetDaily; vm.BudgetMonthly = _cfg.BudgetMonthly;
@@ -1563,6 +1582,7 @@ namespace ClaudeUsageWidget
                 if (_logWatcher != null) _logWatcher.Dispose();
                 if (_appWatcher != null) _appWatcher.Dispose();
                 if (_geminiWatcher != null) _geminiWatcher.Dispose();
+                if (_codexWatcher != null) _codexWatcher.Dispose();
                 _tray.Visible = false;
                 _tray.Dispose();
                 if (_icon != null) _icon.Dispose();

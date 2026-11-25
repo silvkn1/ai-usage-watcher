@@ -194,7 +194,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Kompilasi paket distribusi rilis lengkap (.zip + SHA256)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Menjalankan 54 automated unit test suite
+# Menjalankan 58 automated unit test suite
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -225,12 +225,12 @@ ai-usage-watcher/
 │   ├── Strings.cs            # Sistem lokalisasi dwibahasa (English & Bahasa Indonesia)
 │   ├── Theming.cs            # Palette warna, efek blur Win11 Mica/Acrylic, dan ekstraksi app icon
 │   ├── TrayApp.cs            # Pengelola tray icon dinamis, file watcher, menu konteks, dan timer
-│   ├── Usage.cs              # Pemindai log lokal inkremental Claude Code & Antigravity
-│   └── Webhook.cs            # Pengirim payload alert ke Discord, Slack, & Telegram
+│   ├── Usage.cs              # Pemindai log lokal inkremental Claude Code, Antigravity, & Codex CLI
+│   └── Webhook.cs            # Pengirim payload alert ke Discord, Slack, Telegram, & Generic webhook
 ├── companion/                # Ekstensi status bar VS Code & Cursor
 ├── statusline/               # Pembungkus statusline untuk Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs          # 54 automated unit tests (.NET 4.8 test runner mandiri)
+│   └── UnitTests.cs          # 58 automated unit tests (.NET 4.8 test runner mandiri)
 ├── assets/                # Aset ikon aplikasi (vektor minimalis 2-warna & icon format .ico)
 ├── docs/img/              # Tangkapan layar fitur untuk dokumentasi
 │   ├── id/                # Tangkapan layar antarmuka Bahasa Indonesia

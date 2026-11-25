@@ -194,7 +194,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Compile full distribution release package (.zip + SHA256 checksums)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Execute 54 automated unit tests
+# Execute 58 automated unit tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -225,12 +225,12 @@ ai-usage-watcher/
 │   ├── Strings.cs            # Bilingual localization engine (English & Bahasa Indonesia)
 │   ├── Theming.cs            # Color palettes, Win11 DWM Mica/Acrylic, and app icon extractor
 │   ├── TrayApp.cs            # Dynamic system tray icon, file watcher, context menu, and timers
-│   ├── Usage.cs              # Incremental local log scanner for Claude Code & Antigravity
-│   └── Webhook.cs            # Alert dispatcher for Discord, Slack, & Telegram
+│   ├── Usage.cs              # Incremental local log scanner for Claude Code, Antigravity, & Codex CLI
+│   └── Webhook.cs            # Alert dispatcher for Discord, Slack, Telegram, & Generic webhooks
 ├── companion/                # VS Code & Cursor status bar extension
 ├── statusline/               # Statusline wrapper scripts for Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs          # 54 automated unit tests (.NET 4.8 test runner)
+│   └── UnitTests.cs          # 58 automated unit tests (.NET 4.8 test runner)
 ├── assets/                # Application logo assets (2-color minimalist vector & .ico)
 ├── docs/img/              # Feature documentation screenshots
 │   ├── id/                # Indonesian UI screenshots

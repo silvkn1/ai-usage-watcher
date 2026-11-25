@@ -453,6 +453,12 @@ namespace ClaudeUsageWidget
                 AddIfMissing(models, "gemini-3.8-flash", 0.10, 0.40, 0.10, 0.10, 0.025);
                 AddIfMissing(models, "gemini-3.8-pro", 1.25, 5.0, 1.25, 1.25, 0.3125);
                 AddIfMissing(models, "gemini-", 0.10, 0.40, 0.10, 0.10, 0.025);
+                AddIfMissing(models, "gpt-5.3-codex", 1.75, 14.0, 1.75, 1.75, 0.175);
+                AddIfMissing(models, "gpt-5.2-codex", 1.75, 14.0, 1.75, 1.75, 0.175);
+                AddIfMissing(models, "gpt-5-codex", 1.25, 10.0, 1.25, 1.25, 0.125);
+                AddIfMissing(models, "gpt-", 1.25, 10.0, 1.25, 1.25, 0.125);
+                AddIfMissing(models, "o4-mini", 1.10, 4.40, 1.10, 1.10, 0.275);
+                AddIfMissing(models, "o3", 2.00, 8.00, 2.00, 2.00, 0.50);
 
                 if (models.Count == 0) return 0;
 
