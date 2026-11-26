@@ -26,6 +26,31 @@ function getStatusFilePath() {
     return primaryPath;
 }
 
+function getAppCommandPath() {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    const newDir = path.join(localAppData, 'AIUsageWatcher');
+    const oldDir = path.join(localAppData, 'ClaudeUsageWidget');
+    if (fs.existsSync(newDir)) return path.join(newDir, 'command.json');
+    if (fs.existsSync(oldDir)) return path.join(oldDir, 'command.json');
+    return path.join(newDir, 'command.json');
+}
+
+function sendWidgetCommand(cmd) {
+    try {
+        const cmdPath = getAppCommandPath();
+        const dir = path.dirname(cmdPath);
+        if (!fs.existsSync(dir)) {
+            vscode.window.showWarningMessage('AI Usage Watcher data folder not found: ' + dir);
+            return false;
+        }
+        fs.writeFileSync(cmdPath, JSON.stringify({ cmd: cmd, ts: Date.now() }), 'utf8');
+        return true;
+    } catch (e) {
+        vscode.window.showErrorMessage('Failed to send command to AI Usage Watcher: ' + e.message);
+        return false;
+    }
+}
+
 function formatTokens(count) {
     if (!count || count <= 0) return '0';
     if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M';
@@ -68,11 +93,40 @@ function updateStatusBar() {
         if (typeof data.antigravity_7d_percent === 'number') {
             md.appendMarkdown(`- **Antigravity 7d Quota**: ${data.antigravity_7d_percent}%\n`);
         }
+        if (typeof data.codex_5h_percent === 'number') {
+            parts.push(`CX: ${Math.round(data.codex_5h_percent)}%`);
+            md.appendMarkdown(`- **Codex CLI 5h Quota**: ${data.codex_5h_percent}%\n`);
+        }
+        if (typeof data.codex_7d_percent === 'number') {
+            md.appendMarkdown(`- **Codex CLI 7d Quota**: ${data.codex_7d_percent}%\n`);
+        }
+
+        if (data.codex_today_tokens > 0 || data.codex_today_cost_usd > 0) {
+            if (typeof data.codex_5h_percent !== 'number' && typeof data.claude_5h_percent !== 'number' && typeof data.antigravity_5h_percent !== 'number') {
+                parts.push(`CX: ${formatTokens(data.codex_today_tokens || 0)}`);
+            }
+            const cxCost = Number(data.codex_today_cost_usd || 0).toFixed(2);
+            md.appendMarkdown(`- **Codex CLI Today**: $${cxCost} (${formatTokens(data.codex_today_tokens || 0)} tokens)\n`);
+        }
+
+        if (data.gemini_cli_today_tokens > 0 || data.gemini_cli_today_cost_usd > 0) {
+            md.appendMarkdown(`- **Gemini CLI Today**: $${Number(data.gemini_cli_today_cost_usd || 0).toFixed(2)} (${formatTokens(data.gemini_cli_today_tokens || 0)} tokens)\n`);
+        }
+        if (data.opencode_today_tokens > 0 || data.opencode_today_cost_usd > 0) {
+            md.appendMarkdown(`- **OpenCode Today**: $${Number(data.opencode_today_cost_usd || 0).toFixed(2)} (${formatTokens(data.opencode_today_tokens || 0)} tokens)\n`);
+        }
 
         if (data.today_cost_formatted) {
             parts.push(data.today_cost_formatted);
         } else if (data.today_tokens) {
             parts.push(formatTokens(data.today_tokens) + ' tok');
+        }
+
+        if (data.gemini_cli_today_tokens > 0 || data.gemini_cli_today_cost_usd > 0) {
+            md.appendMarkdown(`- **Gemini CLI Today**: $${Number(data.gemini_cli_today_cost_usd || 0).toFixed(2)} (${formatTokens(data.gemini_cli_today_tokens || 0)} tokens)\n`);
+        }
+        if (data.opencode_today_tokens > 0 || data.opencode_today_cost_usd > 0) {
+            md.appendMarkdown(`- **OpenCode Today**: $${Number(data.opencode_today_cost_usd || 0).toFixed(2)} (${formatTokens(data.opencode_today_tokens || 0)} tokens)\n`);
         }
 
         if (data.today_cost_formatted) {
@@ -87,13 +141,26 @@ function updateStatusBar() {
         if (data.last_active_project) {
             md.appendMarkdown(`- **📁 Active Project**: \`${data.last_active_project}\`\n`);
         }
+        const runSess = data.running_sessions || 0;
+        const confSess = data.confirm_sessions || 0;
+        const doneSess = data.done_sessions || 0;
+        if (confSess > 0) parts.push(`?${confSess}`);
+        else if (runSess > 0) parts.push(`●${runSess}`);
+        if (runSess > 0 || confSess > 0 || doneSess > 0) {
+            md.appendMarkdown(`- **⚡ Sessions**: ${runSess} running · ${confSess} needs confirm · ${doneSess} done\n`);
+        }
         if (data.ollama_online) {
             const count = data.ollama_model_count || 0;
-            const models = Array.isArray(data.ollama_models) ? data.ollama_models.join(', ') : '';
-            md.appendMarkdown(`- **🦙 Ollama Local**: Online (${count} models${models ? ': ' + models : ''})\n`);
+            const loaded = data.ollama_loaded_count || 0;
+            const vramGb = data.ollama_vram_bytes > 0 ? (data.ollama_vram_bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB VRAM' : '';
+            const loadedModels = Array.isArray(data.ollama_loaded_models) && data.ollama_loaded_models.length > 0
+                ? data.ollama_loaded_models.join(', ')
+                : (Array.isArray(data.ollama_models) ? data.ollama_models.join(', ') : '');
+            const extra = [loaded > 0 ? `${loaded} loaded` : '', vramGb, loadedModels].filter(Boolean).join(' · ');
+            md.appendMarkdown(`- **🦙 Ollama Local**: Online (${count} models${extra ? ' · ' + extra : ''})\n`);
         }
 
-        md.appendMarkdown('\n---\n*Click to open status file*');
+        md.appendMarkdown('\n---\n*Click for Quick Actions menu*');
 
         statusBarItem.text = `$(dashboard) ${parts.join(' | ') || 'AI Active'}`;
         statusBarItem.tooltip = md;
@@ -105,9 +172,23 @@ function updateStatusBar() {
     }
 }
 
+function buildStatusClipboardSummary() {
+    const filePath = getStatusFilePath();
+    if (!fs.existsSync(filePath)) return 'AI Usage Watcher: status file not found.';
+    const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    const d = JSON.parse(raw);
+    const lines = ['AI Usage Watcher Summary'];
+    if (typeof d.claude_5h_percent === 'number') lines.push(`- Claude: 5h ${d.claude_5h_percent}% | 7d ${d.claude_7d_percent ?? 'n/a'}%`);
+    if (typeof d.antigravity_5h_percent === 'number') lines.push(`- Antigravity: 5h ${d.antigravity_5h_percent}% | 7d ${d.antigravity_7d_percent ?? 'n/a'}%`);
+    if (typeof d.codex_5h_percent === 'number') lines.push(`- Codex: 5h ${d.codex_5h_percent}% | 7d ${d.codex_7d_percent ?? 'n/a'}%`);
+    if (d.today_cost_formatted) lines.push(`- Today: ${d.today_cost_formatted} (${formatTokens(d.today_tokens || 0)} tokens)`);
+    if (d.last_active_project) lines.push(`- Project: ${d.last_active_project}`);
+    return lines.join('\n');
+}
+
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBarItem.command = 'aiUsageWatcher.openStatus';
+    statusBarItem.command = 'aiUsageWatcher.menu';
     context.subscriptions.push(statusBarItem);
 
     const openCmd = vscode.commands.registerCommand('aiUsageWatcher.openStatus', async () => {
@@ -122,9 +203,40 @@ function activate(context) {
     context.subscriptions.push(openCmd);
 
     const refreshCmd = vscode.commands.registerCommand('aiUsageWatcher.refresh', () => {
+        sendWidgetCommand('refresh');
         updateStatusBar();
     });
     context.subscriptions.push(refreshCmd);
+
+    const menuCmd = vscode.commands.registerCommand('aiUsageWatcher.menu', async () => {
+        const pick = await vscode.window.showQuickPick([
+            { label: '$(refresh) Force Refresh Widget', description: 'Rescan logs & reload limits', action: 'refresh' },
+            { label: '$(graph) Open Project Cost Explorer', description: 'Open desktop explorer window', action: 'open_explorer' },
+            { label: '$(terminal) Open Terminal in Active Project', description: 'Launch terminal in latest active directory', action: 'open_terminal' },
+            { label: '$(layout) Toggle Compact / Full Mode', description: 'Switch floating pill & card view', action: 'toggle_compact' },
+            { label: '$(clippy) Copy Status Summary', description: 'Copy quota & today cost to clipboard', action: 'copy_local' },
+            { label: '$(terminal) Copy /compact Command', description: 'Copy /compact for long AI sessions', action: 'copy_compact' },
+            { label: '$(json) Open Raw Status JSON', description: 'Inspect status.json in editor', action: 'open_json' }
+        ], { placeHolder: 'AI Usage Watcher Actions' });
+        if (!pick) return;
+        if (pick.action === 'open_json') {
+            await vscode.commands.executeCommand('aiUsageWatcher.openStatus');
+        } else if (pick.action === 'copy_local') {
+            try {
+                await vscode.env.clipboard.writeText(buildStatusClipboardSummary());
+                vscode.window.showInformationMessage('AI Usage summary copied to clipboard.');
+            } catch (e) {
+                sendWidgetCommand('copy_status');
+            }
+        } else if (pick.action === 'copy_compact') {
+            await vscode.env.clipboard.writeText('/compact');
+            vscode.window.showInformationMessage('Copied /compact to clipboard.');
+        } else {
+            sendWidgetCommand(pick.action);
+            if (pick.action === 'refresh') setTimeout(updateStatusBar, 400);
+        }
+    });
+    context.subscriptions.push(menuCmd);
 
     // Initial render
     updateStatusBar();

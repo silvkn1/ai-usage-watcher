@@ -13,11 +13,178 @@ namespace ClaudeUsageWidget
     internal class ProjectRow
     {
         public string Name;
+        public string Provider;
         public double TodayCost;
         public double WeekCost;
         public long WeekTokens;
         public long WeekRequests;
         public string Path;
+    }
+
+    internal class ProviderTrendsControl : Control
+    {
+        private DayStat[] _days = new DayStat[0];
+        private readonly ToolTip _tip = new ToolTip();
+        private int _hoverIdx = -1;
+        private static readonly string[] Providers = { "Claude", "Antigravity", "Codex", "Gemini CLI", "OpenCode" };
+
+        public ProviderTrendsControl()
+        {
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.ResizeRedraw | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
+        }
+
+        public void SetDays(DayStat[] days)
+        {
+            _days = days ?? new DayStat[0];
+            Invalidate();
+        }
+
+        private static Color ColorForProvider(string prov)
+        {
+            if (prov == "Antigravity") return Palette.AntigravityColor;
+            if (prov == "Codex") return Palette.CodexColor;
+            if (prov == "Gemini CLI") return Palette.GeminiCliColor;
+            if (prov == "OpenCode") return Palette.OpenCodeColor;
+            return Palette.ClaudeColor;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_days.Length == 0) return;
+            float s; using (Graphics g = CreateGraphics()) { s = g.DpiX / 96f; }
+            int padL = (int)(16 * s), padR = (int)(16 * s);
+            int avail = Width - padL - padR;
+            int idx = -1;
+            if (avail > 0 && e.X >= padL && e.X < padL + avail)
+            {
+                idx = (int)((e.X - padL) / (avail / (float)_days.Length));
+                if (idx < 0 || idx >= _days.Length) idx = -1;
+            }
+            if (idx != _hoverIdx)
+            {
+                _hoverIdx = idx;
+                if (idx >= 0)
+                {
+                    DayStat d = _days[idx];
+                    List<string> parts = new List<string>();
+                    foreach (string p in Providers)
+                    {
+                        double pv = d.CostFor(p);
+                        if (pv > 0.001) parts.Add(p + " " + Fmt.UsdShort(pv));
+                    }
+                    string detail = parts.Count > 0 ? string.Join(" · ", parts.ToArray()) : Fmt.UsdShort(d.Cost);
+                    _tip.SetToolTip(this, string.Format("{0:yyyy-MM-dd}: {1}", d.Date, detail));
+                }
+                else _tip.SetToolTip(this, null);
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            _hoverIdx = -1;
+            _tip.SetToolTip(this, null);
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Graphics g = e.Graphics;
+            g.Clear(Palette.Bg);
+            float s = g.DpiX / 96f;
+            int pad = (int)(16 * s);
+            int legH = (int)(26 * s);
+            int chartTop = pad + (int)(22 * s);
+            int chartBot = Height - legH - (int)(24 * s);
+            if (chartBot <= chartTop + 20) return;
+
+            double[] provTotals = new double[Providers.Length];
+            double peak = 0;
+            bool anyProvData = false;
+            for (int i = 0; i < _days.Length; i++)
+            {
+                double sum = 0;
+                for (int pi = 0; pi < Providers.Length; pi++)
+                {
+                    double v = _days[i].CostFor(Providers[pi]);
+                    if (v > 0) { anyProvData = true; provTotals[pi] += v; sum += v; }
+                }
+                if (sum == 0 && _days[i].Cost > 0) sum = _days[i].Cost;
+                if (sum > peak) peak = sum;
+            }
+
+            using (Font fHead = new Font("Segoe UI Semibold", 9.5f))
+            using (Font fSmall = new Font("Segoe UI", 8.25f))
+            {
+                List<string> sumParts = new List<string>();
+                for (int pi = 0; pi < Providers.Length; pi++)
+                    if (provTotals[pi] > 0) sumParts.Add(Providers[pi] + ": " + Fmt.UsdShort(provTotals[pi]));
+                string headText = anyProvData
+                    ? L.T("proj.trends.summary", string.Join("  ·  ", sumParts.ToArray()))
+                    : L.T("proj.trends.empty");
+                TextRenderer.DrawText(g, headText, fHead, new Rectangle(pad, pad, Width - pad * 2, (int)(20 * s)), Palette.Text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+
+                int n = Math.Max(1, _days.Length);
+                int availW = Math.Max(40, Width - pad * 2);
+                float slot = availW / (float)n;
+                float bw = Math.Max(3f, slot - 3f * s);
+
+                using (Pen axis = new Pen(Palette.Border, 1f))
+                    g.DrawLine(axis, pad, chartBot, Width - pad, chartBot);
+
+                if (peak > 0)
+                {
+                    for (int i = 0; i < _days.Length; i++)
+                    {
+                        float bx = pad + i * slot + (slot - bw) / 2f;
+                        float curY = chartBot;
+                        bool drewSegment = false;
+                        for (int pi = 0; pi < Providers.Length; pi++)
+                        {
+                            double pv = _days[i].CostFor(Providers[pi]);
+                            if (pv <= 0) continue;
+                            drewSegment = true;
+                            float sh = (float)(pv / peak * (chartBot - chartTop));
+                            if (sh < 1.5f) sh = 1.5f;
+                            using (SolidBrush br = new SolidBrush(ColorForProvider(Providers[pi])))
+                                g.FillRectangle(br, bx, curY - sh, bw, sh);
+                            curY -= sh;
+                        }
+                        if (!drewSegment && _days[i].Cost > 0)
+                        {
+                            float sh = (float)(_days[i].Cost / peak * (chartBot - chartTop));
+                            if (sh < 2f) sh = 2f;
+                            using (SolidBrush br = new SolidBrush(Palette.Accent))
+                                g.FillRectangle(br, bx, curY - sh, bw, sh);
+                        }
+                        if (i == _hoverIdx)
+                        {
+                            using (Pen hp = new Pen(Palette.Text, 1f))
+                                g.DrawRectangle(hp, bx, chartTop, bw, chartBot - chartTop);
+                        }
+                    }
+                }
+
+                // Legend row
+                int lx = pad;
+                int ly = Height - legH;
+                for (int pi = 0; pi < Providers.Length; pi++)
+                {
+                    using (SolidBrush lb = new SolidBrush(ColorForProvider(Providers[pi])))
+                        g.FillRectangle(lb, lx, ly + (int)(5 * s), (int)(10 * s), (int)(10 * s));
+                    lx += (int)(14 * s);
+                    int tw = TextRenderer.MeasureText(g, Providers[pi], fSmall, new Size(200, 24), TextFormatFlags.NoPadding).Width + (int)(12 * s);
+                    TextRenderer.DrawText(g, Providers[pi], fSmall, new Rectangle(lx, ly, tw, (int)(20 * s)), Palette.Dim,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    lx += tw;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -200,17 +367,36 @@ namespace ClaudeUsageWidget
     internal class ProjectExplorerForm : Form
     {
         private readonly ActivityHeatmapControl _heatmap = new ActivityHeatmapControl();
+        private readonly ProviderTrendsControl _trends = new ProviderTrendsControl();
+        private readonly FlowLayoutPanel _tabStrip = new FlowLayoutPanel();
+        private readonly Panel _pageHost = new Panel();
+        private readonly Panel _projectsPage = new Panel();
+        private readonly Panel _trendsPage = new Panel();
+        private readonly Panel _sessionsPage = new Panel();
+        private readonly List<Button> _tabBtns = new List<Button>();
+        private int _tabIndex;
         private readonly Panel _searchPanel = new Panel();
         private readonly Label _searchLabel = new Label();
         private readonly TextBox _searchBox = new TextBox();
+        private readonly Panel _summaryPanel = new Panel();
+        private readonly Label _summaryLabel = new Label();
         private readonly ListView _list = new ListView();
+        private readonly ListView _sessionList = new ListView();
         private readonly List<ProjectRow> _rows = new List<ProjectRow>();
-        private ContextMenuStrip _ctxMenu;
-        private int _sortCol = 2;      // default: 7-Day Cost
+        private readonly List<ProjectRow> _filteredRows = new List<ProjectRow>();
+        private ContextMenuStrip _ctxMenu, _sessMenu;
+        private readonly List<Button> _trendRangeBtns = new List<Button>();
+        private Font _boldFont, _tabFont;
+        private UsageSnapshot _usageRef;
+        private HistoryStore _historyRef;
+        private string[] _colTitles;
+        private int _sortCol = 3;      // default: 7-Day Cost
         private bool _sortAsc = false; // default: descending
 
         public ProjectExplorerForm(UsageSnapshot usage, HistoryStore history)
         {
+            _usageRef = usage;
+            _historyRef = history;
             Text = L.T("proj.window.title");
             Font = new Font("Segoe UI", 9f);
             StartPosition = FormStartPosition.CenterScreen;
@@ -224,20 +410,21 @@ namespace ClaudeUsageWidget
 
             float s;
             using (Graphics g = CreateGraphics()) { s = g.DpiX / 96f; }
-            Width = (int)Math.Round(760 * s);
-            Height = (int)Math.Round(500 * s);
-            MinimumSize = new Size((int)Math.Round(600 * s), (int)Math.Round(380 * s));
+            Width = (int)Math.Round(840 * s);
+            Height = (int)Math.Round(540 * s);
+            MinimumSize = new Size((int)Math.Round(640 * s), (int)Math.Round(420 * s));
 
             BackColor = Palette.Bg;
             ForeColor = Palette.Text;
 
             BuildRows(usage);
-            InitLayout(s, history);
+            InitLayout(s, usage, history);
 
             Load += delegate
             {
                 DarkUi.TitleBar(Handle, !Palette.IsLight);
                 DarkUi.ControlTheme(_list.Handle, !Palette.IsLight);
+                DarkUi.ControlTheme(_sessionList.Handle, !Palette.IsLight);
             };
         }
 
@@ -271,6 +458,12 @@ namespace ClaudeUsageWidget
                 else
                     r.Path = "";
 
+                string prov;
+                if (usage.ProjectProviders != null && usage.ProjectProviders.TryGetValue(name, out prov))
+                    r.Provider = prov;
+                else
+                    r.Provider = "-";
+
                 _rows.Add(r);
             }
 
@@ -278,14 +471,82 @@ namespace ClaudeUsageWidget
             _rows.Sort(delegate(ProjectRow a, ProjectRow b) { return b.WeekCost.CompareTo(a.WeekCost); });
         }
 
-        private void InitLayout(float s, HistoryStore history)
+        internal static string SessionAnomalyLabel(SessionCostRecord sr, double avgCost, int totalSessions)
         {
+            if (sr == null) return "";
+            if (sr.InputSide >= 10000 && sr.CacheHit < 0.25)
+                return L.T("proj.sess.lowcache", (int)Math.Round(sr.CacheHit * 100));
+            if (sr.Cost >= 5.0 || (totalSessions >= 3 && avgCost > 0 && sr.Cost >= avgCost * 2.5))
+                return L.T("proj.sess.highcost");
+            return "";
+        }
+
+        private void AddTabButton(string title, int index)
+        {
+            if (_tabFont == null) _tabFont = new Font("Segoe UI Semibold", 9.2f);
+            Button b = new Button();
+            b.Text = title;
+            b.AutoSize = true;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            b.BackColor = Palette.Bg;
+            b.ForeColor = Palette.Dim;
+            b.Font = _tabFont;
+            b.Padding = new Padding(10, 5, 10, 5);
+            b.Margin = new Padding(0, 0, 4, 0);
+            b.Click += delegate { SelectTab(index); };
+            b.Paint += delegate(object sender, PaintEventArgs pe)
+            {
+                if (index != _tabIndex) return;
+                using (SolidBrush br = new SolidBrush(Palette.Accent))
+                    pe.Graphics.FillRectangle(br, 6, ((Button)sender).Height - 3, ((Button)sender).Width - 12, 3);
+            };
+            _tabBtns.Add(b);
+            _tabStrip.Controls.Add(b);
+        }
+
+        private void SelectTab(int i)
+        {
+            _tabIndex = i;
+            _projectsPage.Visible = (i == 0);
+            _trendsPage.Visible = (i == 1);
+            _sessionsPage.Visible = (i == 2);
+            for (int k = 0; k < _tabBtns.Count; k++)
+            {
+                _tabBtns[k].ForeColor = (k == i) ? Palette.Text : Palette.Dim;
+                _tabBtns[k].Invalidate();
+            }
+        }
+
+        private void InitLayout(float s, UsageSnapshot usage, HistoryStore history)
+        {
+            _tabStrip.Dock = DockStyle.Top;
+            _tabStrip.Height = (int)Math.Round(34 * s);
+            _tabStrip.WrapContents = false;
+            _tabStrip.BackColor = Palette.Bg;
+            _tabStrip.Padding = new Padding((int)Math.Round(8 * s), (int)Math.Round(2 * s), (int)Math.Round(8 * s), 0);
+            _tabStrip.Paint += delegate(object sender, PaintEventArgs pe)
+            {
+                using (Pen p = new Pen(Palette.Border))
+                    pe.Graphics.DrawLine(p, 0, _tabStrip.Height - 1, _tabStrip.Width, _tabStrip.Height - 1);
+            };
+            AddTabButton(L.T("proj.tab.projects"), 0);
+            AddTabButton(L.T("proj.tab.trends"), 1);
+            AddTabButton(L.T("proj.tab.sessions"), 2);
+
+            _pageHost.Dock = DockStyle.Fill;
+            _pageHost.BackColor = Palette.Bg;
+            _projectsPage.Dock = DockStyle.Fill; _projectsPage.BackColor = Palette.Bg;
+            _trendsPage.Dock = DockStyle.Fill; _trendsPage.BackColor = Palette.Bg;
+            _sessionsPage.Dock = DockStyle.Fill; _sessionsPage.BackColor = Palette.Bg;
+
             // Panel Atas: Heatmap
             _heatmap.Dock = DockStyle.Top;
             _heatmap.Height = (int)Math.Round(150 * s);
             if (history != null)
             {
                 _heatmap.SetDays(history.Series(35));
+                _trends.SetDays(history.Series(30));
             }
 
             // Search / Filter strip
@@ -320,19 +581,48 @@ namespace ClaudeUsageWidget
             _list.ForeColor = Palette.Text;
             _list.BorderStyle = BorderStyle.FixedSingle;
 
-            _list.Columns.Add(L.T("proj.col.project"), (int)Math.Round(160 * s), HorizontalAlignment.Left);
-            _list.Columns.Add(L.T("proj.col.today"), (int)Math.Round(95 * s), HorizontalAlignment.Right);
-            _list.Columns.Add(L.T("proj.col.week"), (int)Math.Round(95 * s), HorizontalAlignment.Right);
-            _list.Columns.Add(L.T("proj.col.tokens"), (int)Math.Round(90 * s), HorizontalAlignment.Right);
-            _list.Columns.Add(L.T("proj.col.reqs"), (int)Math.Round(75 * s), HorizontalAlignment.Right);
-            _list.Columns.Add(L.T("proj.col.path"), (int)Math.Round(220 * s), HorizontalAlignment.Left);
+            _colTitles = new[]
+            {
+                L.T("proj.col.project"),
+                L.T("proj.col.provider"),
+                L.T("proj.col.today"),
+                L.T("proj.col.week"),
+                L.T("proj.col.tokens"),
+                L.T("proj.col.reqs"),
+                L.T("proj.col.path")
+            };
+            _list.Columns.Add(_colTitles[0], (int)Math.Round(150 * s), HorizontalAlignment.Left);
+            _list.Columns.Add(_colTitles[1], (int)Math.Round(90 * s), HorizontalAlignment.Left);
+            _list.Columns.Add(_colTitles[2], (int)Math.Round(90 * s), HorizontalAlignment.Right);
+            _list.Columns.Add(_colTitles[3], (int)Math.Round(90 * s), HorizontalAlignment.Right);
+            _list.Columns.Add(_colTitles[4], (int)Math.Round(90 * s), HorizontalAlignment.Right);
+            _list.Columns.Add(_colTitles[5], (int)Math.Round(75 * s), HorizontalAlignment.Right);
+            _list.Columns.Add(_colTitles[6], (int)Math.Round(225 * s), HorizontalAlignment.Left);
             _list.ColumnClick += delegate(object sender, ColumnClickEventArgs e)
             {
                 if (_sortCol == e.Column) _sortAsc = !_sortAsc;
-                else { _sortCol = e.Column; _sortAsc = (e.Column == 0 || e.Column == 5); }
+                else { _sortCol = e.Column; _sortAsc = (e.Column == 0 || e.Column == 1 || e.Column == 6); }
                 SortRows();
+                UpdateColumnHeaders();
                 PopulateList();
             };
+
+            // Summary footer strip
+            _summaryPanel.Dock = DockStyle.Bottom;
+            _summaryPanel.Height = (int)Math.Round(28 * s);
+            _summaryPanel.Padding = new Padding((int)Math.Round(10 * s), 0, (int)Math.Round(10 * s), 0);
+            _summaryPanel.BackColor = Palette.Surface;
+            _summaryPanel.Paint += delegate(object sender, PaintEventArgs pe)
+            {
+                using (Pen p = new Pen(Palette.Border, 1f))
+                    pe.Graphics.DrawLine(p, 0, 0, _summaryPanel.Width, 0);
+            };
+            _boldFont = new Font(_list.Font, FontStyle.Bold);
+            _summaryLabel.Dock = DockStyle.Fill;
+            _summaryLabel.Font = _boldFont;
+            _summaryLabel.ForeColor = Palette.Text;
+            _summaryLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _summaryPanel.Controls.Add(_summaryLabel);
 
             // Menu Klik Kanan (Context Menu)
             _ctxMenu = new ContextMenuStrip();
@@ -363,12 +653,175 @@ namespace ClaudeUsageWidget
                 miCode.Enabled = pathOk && ProcessHelper.HasVSCode();
             };
 
+            UpdateColumnHeaders();
             PopulateList();
             _list.DoubleClick += delegate { OpenTerminalSelected(); };
 
-            Controls.Add(_list);
-            Controls.Add(_searchPanel);
-            Controls.Add(_heatmap);
+            _projectsPage.Controls.Add(_list);
+            _projectsPage.Controls.Add(_summaryPanel);
+            _projectsPage.Controls.Add(_searchPanel);
+            _projectsPage.Controls.Add(_heatmap);
+
+            // Trends page (with 7d / 30d / 90d range selector)
+            FlowLayoutPanel trendBar = new FlowLayoutPanel();
+            trendBar.Dock = DockStyle.Top;
+            trendBar.Height = (int)Math.Round(30 * s);
+            trendBar.BackColor = Palette.Bg;
+            trendBar.Padding = new Padding((int)Math.Round(12 * s), (int)Math.Round(4 * s), 0, 0);
+            Label lblRange = new Label();
+            lblRange.Text = L.T("proj.trends.range");
+            lblRange.AutoSize = true;
+            lblRange.ForeColor = Palette.Dim;
+            lblRange.Margin = new Padding(0, (int)Math.Round(4 * s), (int)Math.Round(6 * s), 0);
+            trendBar.Controls.Add(lblRange);
+            int[] ranges = { 7, 30, 90 };
+            foreach (int rDays in ranges)
+            {
+                int daysVal = rDays;
+                Button rb = new Button();
+                rb.Text = daysVal + "d";
+                rb.AutoSize = true;
+                rb.FlatStyle = FlatStyle.Flat;
+                rb.FlatAppearance.BorderColor = Palette.Border;
+                rb.BackColor = daysVal == 30 ? Palette.Accent : Palette.Surface;
+                rb.ForeColor = daysVal == 30 ? Color.White : Palette.Text;
+                rb.Margin = new Padding(0, 0, (int)Math.Round(6 * s), 0);
+                rb.Click += delegate
+                {
+                    if (_historyRef != null) _trends.SetDays(_historyRef.Series(daysVal));
+                    foreach (Button b2 in _trendRangeBtns)
+                    {
+                        bool active = (b2 == rb);
+                        b2.BackColor = active ? Palette.Accent : Palette.Surface;
+                        b2.ForeColor = active ? Color.White : Palette.Text;
+                    }
+                };
+                _trendRangeBtns.Add(rb);
+                trendBar.Controls.Add(rb);
+            }
+            _trends.Dock = DockStyle.Fill;
+            _trendsPage.Controls.Add(_trends);
+            _trendsPage.Controls.Add(trendBar);
+
+            // Expensive Sessions page
+            _sessionList.Dock = DockStyle.Fill;
+            _sessionList.View = View.Details;
+            _sessionList.FullRowSelect = true;
+            _sessionList.GridLines = true;
+            _sessionList.BackColor = Palette.Surface;
+            _sessionList.ForeColor = Palette.Text;
+            _sessionList.BorderStyle = BorderStyle.FixedSingle;
+            _sessionList.Columns.Add(L.T("proj.sess.session"), (int)Math.Round(180 * s), HorizontalAlignment.Left);
+            _sessionList.Columns.Add(L.T("proj.col.provider"), (int)Math.Round(90 * s), HorizontalAlignment.Left);
+            _sessionList.Columns.Add(L.T("proj.sess.model"), (int)Math.Round(135 * s), HorizontalAlignment.Left);
+            _sessionList.Columns.Add(L.T("proj.col.tokens"), (int)Math.Round(85 * s), HorizontalAlignment.Right);
+            _sessionList.Columns.Add(L.T("proj.col.reqs"), (int)Math.Round(65 * s), HorizontalAlignment.Right);
+            _sessionList.Columns.Add(L.T("proj.sess.cache"), (int)Math.Round(70 * s), HorizontalAlignment.Right);
+            _sessionList.Columns.Add(L.T("proj.sess.cost"), (int)Math.Round(80 * s), HorizontalAlignment.Right);
+            _sessionList.Columns.Add(L.T("proj.sess.anomaly"), (int)Math.Round(110 * s), HorizontalAlignment.Left);
+            PopulateSessionsList(usage);
+            _sessMenu = new ContextMenuStrip();
+            ToolStripMenuItem smFolder = new ToolStripMenuItem(L.T("proj.btn.folder"), null, delegate { string p = SelectedSessionPath(); if (p != null) ProcessHelper.OpenFolder(p); });
+            ToolStripMenuItem smTerm = new ToolStripMenuItem(L.T("proj.btn.terminal"), null, delegate { string p = SelectedSessionPath(); if (p != null) ProcessHelper.OpenTerminal(p); });
+            ToolStripMenuItem smCode = new ToolStripMenuItem(L.T("proj.btn.vscode"), null, delegate { string p = SelectedSessionPath(); if (p != null) ProcessHelper.OpenVSCode(p); });
+            ToolStripMenuItem smCopy = new ToolStripMenuItem(L.T("proj.sess.copydetail"), null, delegate { CopySelectedSession(); });
+            _sessMenu.Items.Add(smFolder);
+            _sessMenu.Items.Add(smTerm);
+            _sessMenu.Items.Add(smCode);
+            _sessMenu.Items.Add(new ToolStripSeparator());
+            _sessMenu.Items.Add(smCopy);
+            MenuTheme.Apply(_sessMenu);
+            _sessionList.ContextMenuStrip = _sessMenu;
+            _sessMenu.Opening += delegate
+            {
+                string p = SelectedSessionPath();
+                bool pathOk = !string.IsNullOrEmpty(p) && Directory.Exists(p);
+                smFolder.Enabled = pathOk;
+                smTerm.Enabled = pathOk;
+                smCode.Enabled = pathOk && ProcessHelper.HasVSCode();
+                smCopy.Enabled = _sessionList.SelectedItems.Count > 0 && (_sessionList.SelectedItems[0].Tag is SessionCostRecord);
+            };
+            _sessionList.DoubleClick += delegate { string p = SelectedSessionPath(); if (p != null) try { ProcessHelper.OpenTerminal(p); } catch { } };
+            _sessionsPage.Controls.Add(_sessionList);
+
+            _pageHost.Controls.Add(_projectsPage);
+            _pageHost.Controls.Add(_trendsPage);
+            _pageHost.Controls.Add(_sessionsPage);
+
+            Controls.Add(_pageHost);
+            Controls.Add(_tabStrip);
+            SelectTab(0);
+        }
+
+        private string SelectedSessionPath()
+        {
+            if (_sessionList.SelectedItems.Count == 0) return null;
+            SessionCostRecord sr = _sessionList.SelectedItems[0].Tag as SessionCostRecord;
+            if (sr == null || string.IsNullOrEmpty(sr.Project) || _usageRef == null || _usageRef.ProjectPaths == null) return null;
+            string p;
+            if (_usageRef.ProjectPaths.TryGetValue(sr.Project, out p) && Directory.Exists(p)) return p;
+            return null;
+        }
+
+        private void CopySelectedSession()
+        {
+            if (_sessionList.SelectedItems.Count == 0) return;
+            SessionCostRecord sr = _sessionList.SelectedItems[0].Tag as SessionCostRecord;
+            if (sr == null) return;
+            try
+            {
+                string txt = string.Format(CultureInfo.InvariantCulture,
+                    "{0} ({1}) · Model: {2} · Tokens: {3} · Req: {4} · Cache: {5}% · Cost: {6}",
+                    sr.Project ?? sr.SessionId, sr.Provider ?? "-", sr.TopModel ?? "-",
+                    Fmt.Tokens(sr.TotalTokens), sr.Requests, (int)Math.Round(sr.CacheHit * 100), Fmt.UsdShort(sr.Cost));
+                Clipboard.SetText(txt);
+                MessageBox.Show(this, L.T("proj.sess.copied"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { Log.Write("proj.copysess", ex); }
+        }
+
+        private void PopulateSessionsList(UsageSnapshot usage)
+        {
+            _sessionList.Items.Clear();
+            List<SessionCostRecord> list = usage != null ? usage.ExpensiveSessions : null;
+            if (list == null || list.Count == 0)
+            {
+                ListViewItem empty = new ListViewItem(L.T("proj.sess.empty"));
+                empty.ForeColor = Palette.Dim;
+                _sessionList.Items.Add(empty);
+                return;
+            }
+            double total = 0;
+            for (int i = 0; i < list.Count; i++) total += list[i].Cost;
+            double avg = total / list.Count;
+            foreach (SessionCostRecord sr in list)
+            {
+                string sidShort = string.IsNullOrEmpty(sr.SessionId) ? "" : (sr.SessionId.Length > 10 ? sr.SessionId.Substring(0, 10) : sr.SessionId);
+                string label = string.IsNullOrEmpty(sr.Project) ? sidShort : (sr.Project + " · " + sidShort);
+                ListViewItem it = new ListViewItem(label);
+                it.SubItems.Add(sr.Provider ?? "-");
+                it.SubItems.Add(sr.TopModel ?? "-");
+                it.SubItems.Add(Fmt.Tokens(sr.TotalTokens));
+                it.SubItems.Add(sr.Requests.ToString(CultureInfo.InvariantCulture));
+                it.SubItems.Add(string.Format(CultureInfo.InvariantCulture, "{0}%", (int)Math.Round(sr.CacheHit * 100)));
+                it.SubItems.Add(Fmt.UsdShort(sr.Cost));
+                string anom = SessionAnomalyLabel(sr, avg, list.Count);
+                it.SubItems.Add(anom);
+                it.Tag = sr;
+                if (!string.IsNullOrEmpty(anom)) it.ForeColor = Palette.Amber;
+                _sessionList.Items.Add(it);
+            }
+        }
+
+        private void UpdateColumnHeaders()
+        {
+            if (_colTitles == null) return;
+            for (int i = 0; i < _list.Columns.Count && i < _colTitles.Length; i++)
+            {
+                _list.Columns[i].Text = i == _sortCol
+                    ? _colTitles[i] + (_sortAsc ? " ▲" : " ▼")
+                    : _colTitles[i];
+            }
         }
 
         private void SortRows()
@@ -379,10 +832,11 @@ namespace ClaudeUsageWidget
                 switch (_sortCol)
                 {
                     case 0: cmp = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase); break;
-                    case 1: cmp = a.TodayCost.CompareTo(b.TodayCost); break;
-                    case 3: cmp = a.WeekTokens.CompareTo(b.WeekTokens); break;
-                    case 4: cmp = a.WeekRequests.CompareTo(b.WeekRequests); break;
-                    case 5: cmp = string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase); break;
+                    case 1: cmp = string.Compare(a.Provider, b.Provider, StringComparison.OrdinalIgnoreCase); break;
+                    case 2: cmp = a.TodayCost.CompareTo(b.TodayCost); break;
+                    case 4: cmp = a.WeekTokens.CompareTo(b.WeekTokens); break;
+                    case 5: cmp = a.WeekRequests.CompareTo(b.WeekRequests); break;
+                    case 6: cmp = string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase); break;
                     default: cmp = a.WeekCost.CompareTo(b.WeekCost); break;
                 }
                 return _sortAsc ? cmp : -cmp;
@@ -392,19 +846,30 @@ namespace ClaudeUsageWidget
         private void PopulateList()
         {
             _list.Items.Clear();
+            _filteredRows.Clear();
             string q = (_searchBox.Text ?? "").Trim();
             int shown = 0;
+            double sumToday = 0, sumWeek = 0;
+            long sumTokens = 0, sumReqs = 0;
             foreach (ProjectRow r in _rows)
             {
                 if (q.Length > 0 &&
                     (r.Name == null || r.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) &&
+                    (r.Provider == null || r.Provider.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) &&
                     (r.Path == null || r.Path.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0))
                     continue;
+
+                _filteredRows.Add(r);
+                sumToday += r.TodayCost;
+                sumWeek += r.WeekCost;
+                sumTokens += r.WeekTokens;
+                sumReqs += r.WeekRequests;
 
                 string todayStr = Fmt.UsdShort(r.TodayCost);
                 string weekStr = Fmt.UsdShort(r.WeekCost);
 
                 ListViewItem item = new ListViewItem(r.Name);
+                item.SubItems.Add(string.IsNullOrEmpty(r.Provider) ? "-" : r.Provider);
                 item.SubItems.Add(todayStr);
                 item.SubItems.Add(weekStr);
                 item.SubItems.Add(Fmt.Tokens(r.WeekTokens));
@@ -420,6 +885,21 @@ namespace ClaudeUsageWidget
                 empty.ForeColor = Palette.Dim;
                 _list.Items.Add(empty);
             }
+            else
+            {
+                ListViewItem totalRow = new ListViewItem(L.T("proj.grandtotal"));
+                totalRow.SubItems.Add(string.Format(CultureInfo.InvariantCulture, "({0})", shown));
+                totalRow.SubItems.Add(Fmt.UsdShort(sumToday));
+                totalRow.SubItems.Add(Fmt.UsdShort(sumWeek));
+                totalRow.SubItems.Add(Fmt.Tokens(sumTokens));
+                totalRow.SubItems.Add(sumReqs.ToString(CultureInfo.InvariantCulture));
+                totalRow.SubItems.Add("-");
+                totalRow.Font = _boldFont ?? _list.Font;
+                totalRow.ForeColor = Palette.Text;
+                totalRow.BackColor = ThemeUtil.Blend(Palette.Track, Palette.Surface, 0.35);
+                _list.Items.Add(totalRow);
+            }
+            _summaryLabel.Text = L.T("proj.summary", shown, Fmt.Usd(sumToday), Fmt.Usd(sumWeek), Fmt.Tokens(sumTokens), sumReqs.ToString("N0", CultureInfo.InvariantCulture));
         }
 
         private ProjectRow SelectedRowWithPath()
@@ -465,13 +945,22 @@ namespace ClaudeUsageWidget
                 return sb.ToString();
             }
 
+            double sumToday = 0, sumWeek = 0;
+            long sumTokens = 0, sumReqs = 0;
             foreach (ProjectRow r in rows)
             {
+                sumToday += r.TodayCost;
+                sumWeek += r.WeekCost;
+                sumTokens += r.WeekTokens;
+                sumReqs += r.WeekRequests;
                 string p = string.IsNullOrEmpty(r.Path) ? "-" : r.Path;
                 sb.AppendFormat(CultureInfo.InvariantCulture,
                     "| {0} | ${1:F2} | ${2:F2} | {3} | {4} | {5} |\r\n",
                     r.Name, r.TodayCost, r.WeekCost, Fmt.Tokens(r.WeekTokens), r.WeekRequests, p);
             }
+            sb.AppendFormat(CultureInfo.InvariantCulture,
+                "| **Grand Total** | ${0:F2} | ${1:F2} | {2} | {3} | - |\r\n",
+                sumToday, sumWeek, Fmt.Tokens(sumTokens), sumReqs);
             return sb.ToString();
         }
 
@@ -479,7 +968,7 @@ namespace ClaudeUsageWidget
         {
             try
             {
-                string md = BuildMarkdownTable(_rows);
+                string md = BuildMarkdownTable(_filteredRows.Count > 0 || !string.IsNullOrWhiteSpace(_searchBox.Text) ? _filteredRows : _rows);
                 Clipboard.SetText(md);
                 MessageBox.Show(this, L.T("proj.copied"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -491,7 +980,13 @@ namespace ClaudeUsageWidget
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && _ctxMenu != null) { _ctxMenu.Dispose(); _ctxMenu = null; }
+            if (disposing)
+            {
+                if (_ctxMenu != null) { _ctxMenu.Dispose(); _ctxMenu = null; }
+                if (_sessMenu != null) { _sessMenu.Dispose(); _sessMenu = null; }
+                if (_boldFont != null) { _boldFont.Dispose(); _boldFont = null; }
+                if (_tabFont != null) { _tabFont.Dispose(); _tabFont = null; }
+            }
             base.Dispose(disposing);
         }
     }

@@ -72,6 +72,19 @@ namespace ClaudeUsageWidget
             b.AppendLine("data: projects=" + YesNo(cfg.ShowProjects) + " wsl=" + YesNo(cfg.ScanWsl)
                 + " extraFolders=" + (string.IsNullOrWhiteSpace(cfg.ExtraClaudeDirs) ? 0 : cfg.ExtraClaudeDirs.Split(';').Length)
                 + " hotkey=" + YesNo(cfg.HotkeyEnabled) + " historyStored=" + historyDaysStored + " days");
+            string ollamaState = !cfg.OllamaEnabled ? "off" :
+                ("on:" + cfg.OllamaPort + (OllamaProbe.Current != null && OllamaProbe.Current.Online
+                    ? string.Format(CultureInfo.InvariantCulture, "(online loaded={0} vramMB={1})",
+                        OllamaProbe.Current.LoadedCount, OllamaProbe.Current.TotalVramBytes / (1024 * 1024))
+                    : "(offline)"));
+            b.AppendLine("providers: claude=" + YesNo(cfg.ScanClaude) + " gemini=" + YesNo(cfg.ScanGemini) + " codex=" + YesNo(cfg.ScanCodex)
+                + " geminiCli=" + YesNo(cfg.ScanGeminiCli) + " opencode=" + YesNo(cfg.ScanOpenCode)
+                + " sqliteMissingCli=" + YesNo(u != null && u.OpenCodeSqliteMissingCli)
+                + " ollama=" + ollamaState);
+            b.AppendLine("features: cardLayout=" + (cfg.CardLayout ?? "auto") + " miniPill=" + (cfg.MiniPillMode ?? "all")
+                + " contextBar=" + YesNo(cfg.ShowContextBar) + " quietHours=" + YesNo(cfg.QuietHoursEnabled)
+                + " cooldownMin=" + cfg.AlertCooldownMinutes + " digest=" + (cfg.DigestEnabled ? cfg.DigestSchedule : "off")
+                + " customPricing=" + YesNo(File.Exists(Paths.CustomPricingFile)));
             b.AppendLine("probe: " + YesNo(cfg.ProbeEnabled) + " every=" + cfg.ProbeMinMinutes + "m mirror=" + (cfg.MirrorEnabled ? "on" : "off")
                 + " cli=" + CliKind() + "; admin api: " + YesNo(cfg.AdminEnabled) + " keyStored=" + YesNo(!string.IsNullOrEmpty(cfg.AdminKeyProtected)));
             b.AppendLine("integration: statusline=" + StatuslineState() + "; hooks=" + (HookInstaller.IsInstalled() ? "installed" : "not installed")
@@ -80,11 +93,16 @@ namespace ClaudeUsageWidget
             {
                 b.AppendLine(Window("5h", rl.FiveHour));
                 b.AppendLine(Window("7d", rl.SevenDay));
+                if ((rl.CodexFiveHour != null && rl.CodexFiveHour.Available) || (rl.CodexSevenDay != null && rl.CodexSevenDay.Available))
+                {
+                    b.AppendLine(Window("codex 5h", rl.CodexFiveHour));
+                    b.AppendLine(Window("codex 7d", rl.CodexSevenDay));
+                }
                 b.AppendLine("limit snapshot: " + (rl.FileFound ? "captured " + Fmt.Clock(rl.CapturedAt) + ", source " + rl.Source : "none"));
             }
             if (u != null)
-                b.AppendLine(string.Format(CultureInfo.InvariantCulture, "usage: ready={0} today={1} tokens/${2:0.00} week={3} tokens/${4:0.00} skippedLines={5} lastRecord={6}",
-                    YesNo(u.Ready), u.TodayTotal.Total, u.TodayTotal.Cost, u.WeekTotal.Total, u.WeekTotal.Cost, u.SkippedLines, Fmt.Clock(u.LastRecord)));
+                b.AppendLine(string.Format(CultureInfo.InvariantCulture, "usage: ready={0} today={1} tokens/${2:0.00} week={3} tokens/${4:0.00} skippedLines={5} cacheHits={6} diskReads={7} lastRecord={8}",
+                    YesNo(u.Ready), u.TodayTotal.Total, u.TodayTotal.Cost, u.WeekTotal.Total, u.WeekTotal.Cost, u.SkippedLines, u.CacheHitFiles, u.DiskReadFiles, Fmt.Clock(u.LastRecord)));
             if (!string.IsNullOrEmpty(probeFailed)) b.AppendLine("last probe error: " + probeFailed);
             if (org != null && !org.Ok) b.AppendLine("last admin api error: " + org.Error);
             if (WebhookSender.FailCount > 0) b.AppendLine("webhook failures: " + WebhookSender.FailCount + (string.IsNullOrEmpty(WebhookSender.LastError) ? "" : " (" + WebhookSender.LastError + ")"));

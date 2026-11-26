@@ -26,6 +26,8 @@ namespace ClaudeUsageWidget
         public LimitWindow SevenDay = new LimitWindow();
         public LimitWindow AntigravityFiveHour = new LimitWindow();
         public LimitWindow AntigravitySevenDay = new LimitWindow();
+        public LimitWindow CodexFiveHour = new LimitWindow();
+        public LimitWindow CodexSevenDay = new LimitWindow();
         public DateTime CapturedAt = DateTime.MinValue;
         public bool FileFound;
         public string Source = "statusline";
@@ -803,12 +805,15 @@ namespace ClaudeUsageWidget
         public bool Online;
         public int ModelCount;
         public List<string> ModelNames = new List<string>();
+        public int LoadedCount;
+        public List<string> LoadedModels = new List<string>();
+        public long TotalVramBytes;
         public DateTime LastChecked = DateTime.MinValue;
     }
 
     /// <summary>
-    /// Probe ringan ke server lokal Ollama (http://127.0.0.1:11434/api/tags)
-    /// untuk mendeteksi ketersediaan LLM lokal secara otomatis.
+    /// Probe ringan ke server lokal Ollama (/api/tags &amp; /api/ps)
+    /// untuk mendeteksi ketersediaan LLM lokal beserta model yang dimuat di VRAM.
     /// </summary>
     internal static class OllamaProbe
     {
@@ -841,11 +846,65 @@ namespace ClaudeUsageWidget
             return status;
         }
 
+        public static void ParsePsResponse(string json, OllamaStatus target)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(json)) return;
+            try
+            {
+                Dictionary<string, object> root = J.Parse(json);
+                IList models = J.Arr(root, "models");
+                if (models == null) return;
+                target.LoadedModels.Clear();
+                target.LoadedCount = 0;
+                target.TotalVramBytes = 0;
+                foreach (object o in models)
+                {
+                    Dictionary<string, object> m = o as Dictionary<string, object>;
+                    if (m == null) continue;
+                    string name = J.Str(m, "name") ?? J.Str(m, "model");
+                    if (!string.IsNullOrEmpty(name)) target.LoadedModels.Add(name);
+                    target.LoadedCount++;
+                    long vram = J.Long(m, "size_vram");
+                    if (vram <= 0) vram = J.Long(m, "size");
+                    if (vram > 0) target.TotalVramBytes += vram;
+                }
+                if (target.LoadedCount > 0) target.Online = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("ollama.parse_ps", ex);
+            }
+        }
+
+        private static async Task<string> FetchGetAsync(string url, int timeoutMs)
+        {
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+            req.Method = "GET";
+            req.Timeout = timeoutMs;
+            req.ReadWriteTimeout = timeoutMs;
+            using (WebResponse resp = await req.GetResponseAsync())
+            using (Stream s = resp.GetResponseStream())
+            using (StreamReader r = new StreamReader(s, Encoding.UTF8))
+                return await r.ReadToEndAsync();
+        }
+
         public static async Task<OllamaStatus> CheckAsync(int port, int timeoutMs = 1500)
         {
             if (port <= 0 || port > 65535) port = 11434;
-            string endpoint = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/tags", port);
-            return await CheckAsync(endpoint, timeoutMs);
+            string tagsUrl = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/tags", port);
+            OllamaStatus st = await CheckAsync(tagsUrl, timeoutMs);
+            if (st != null && st.Online)
+            {
+                try
+                {
+                    string psUrl = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/ps", port);
+                    string psJson = await FetchGetAsync(psUrl, timeoutMs);
+                    ParsePsResponse(psJson, st);
+                    Current = st;
+                }
+                catch { }
+            }
+            return st;
         }
 
         public static async Task<OllamaStatus> CheckAsync(string endpoint = "http://127.0.0.1:11434/api/tags", int timeoutMs = 1500)
@@ -853,17 +912,8 @@ namespace ClaudeUsageWidget
             OllamaStatus st = new OllamaStatus();
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(endpoint);
-                req.Method = "GET";
-                req.Timeout = timeoutMs;
-                req.ReadWriteTimeout = timeoutMs;
-                using (WebResponse resp = await req.GetResponseAsync())
-                using (Stream s = resp.GetResponseStream())
-                using (StreamReader r = new StreamReader(s, Encoding.UTF8))
-                {
-                    string json = await r.ReadToEndAsync();
-                    st = ParseResponse(json);
-                }
+                string json = await FetchGetAsync(endpoint, timeoutMs);
+                st = ParseResponse(json);
             }
             catch
             {

@@ -99,9 +99,43 @@ namespace ClaudeUsageWidget
         // Pembaruan otomatis (GitHub Releases)
         public bool AutoUpdateCheck { get; set; }
 
+        // Layout kartu 3+ provider, Mode Mini HUD Pill, & Bar Konteks Sesi
+        public string CardLayout { get; set; }         // "auto", "2col", "3col"
+        public string MiniPillMode { get; set; }       // "all", "highest", "cost_runway"
+        public bool ShowContextBar { get; set; }
+
+        // Ekspansi scanner CLI lain
+        public bool ScanGeminiCli { get; set; }
+        public bool ScanOpenCode { get; set; }
+
+        // Quiet Hours & Cooldown Alert (menit)
+        public bool QuietHoursEnabled { get; set; }
+        public int QuietStartHour { get; set; }
+        public int QuietEndHour { get; set; }
+        public int AlertCooldownMinutes { get; set; }
+
+        // Scheduled Webhook Digest
+        public bool DigestEnabled { get; set; }
+        public string DigestSchedule { get; set; }     // "daily", "weekly"
+        public int DigestHour { get; set; }
+        public string LastDigestKey { get; set; }
+
         public AppConfig()
         {
             AutoUpdateCheck = true;
+            CardLayout = "auto";
+            MiniPillMode = "all";
+            ShowContextBar = true;
+            ScanGeminiCli = true;
+            ScanOpenCode = true;
+            QuietHoursEnabled = false;
+            QuietStartHour = 22;
+            QuietEndHour = 7;
+            AlertCooldownMinutes = 15;
+            DigestEnabled = false;
+            DigestSchedule = "daily";
+            DigestHour = 18;
+            LastDigestKey = "";
             OpacityPercent = 90;
             ShowFloating = true;
             ProbeMinMinutes = 10;
@@ -152,41 +186,88 @@ namespace ClaudeUsageWidget
                     AppConfig c = J.Ser.Deserialize<AppConfig>(File.ReadAllText(Paths.ConfigFile, Encoding.UTF8));
                     if (c != null)
                     {
-                        if (c.OpacityPercent < 30 || c.OpacityPercent > 100) c.OpacityPercent = 90;
-                        if (c.ProbeMinMinutes < 5 || c.ProbeMinMinutes > 240) c.ProbeMinMinutes = 10;
-                        if (string.IsNullOrEmpty(c.ProbeModel)) c.ProbeModel = "claude-haiku-5-5";
-                        if (c.Theme != "light" && c.Theme != "system") c.Theme = "dark";
-                        if (!LangPacks.Exists(c.Language)) c.Language = "en";   // "en", "id", atau kode paket bahasa terpasang
-                        if (c.HistoryDays != 30) c.HistoryDays = 14;
-                        if (c.DockEdge != "bottom" && c.DockEdge != "left" && c.DockEdge != "right" &&
-                            c.DockEdge != "top-left" && c.DockEdge != "top-right" &&
-                            c.DockEdge != "bottom-left" && c.DockEdge != "bottom-right" &&
-                            c.DockEdge != "top-center" && c.DockEdge != "bottom-center")
-                            c.DockEdge = "top";
-                        if (c.DockMonitor == null) c.DockMonitor = "";
-                        if (double.IsNaN(c.BudgetDaily) || c.BudgetDaily < 0) c.BudgetDaily = 0;
-                        if (double.IsNaN(c.BudgetMonthly) || c.BudgetMonthly < 0) c.BudgetMonthly = 0;
-                        if (c.HookNotifyMinSeconds < 0 || c.HookNotifyMinSeconds > 3600) c.HookNotifyMinSeconds = 30;
-                        if (AlertEngine.ParseThresholds(c.AlertThresholds) == null) c.AlertThresholds = "80,95";
-                        if (string.IsNullOrWhiteSpace(c.Hotkey)) c.Hotkey = "Win+Alt+U";
-                        if (string.IsNullOrEmpty(c.CurrencySymbol)) c.CurrencySymbol = "Rp";
-                        if (c.CurrencyRate <= 0 || double.IsNaN(c.CurrencyRate)) c.CurrencyRate = 16200;
-                        if (c.BurnRateThresholdTokens <= 0) c.BurnRateThresholdTokens = 100000;
-                        if (!string.IsNullOrEmpty(c.WebhookUrl))
-                        {
-                            c.SetWebhookUrl(c.WebhookUrl);
-                            c.WebhookUrl = null;
-                        }
-                        if (c.OllamaPort <= 0 || c.OllamaPort > 65535) c.OllamaPort = 11434;
-                        if (c.Backdrop != "solid" && c.Backdrop != "acrylic" && c.Backdrop != "mica" && c.Backdrop != "mica-alt")
-                            c.Backdrop = DwmBackdrop.IsWindows11 ? "acrylic" : "solid";
-                        c.ShowInTaskbar = false;
+                        c.Normalize();
                         return c;
                     }
                 }
             }
             catch (Exception ex) { Log.Write("config.load", ex); }
             return new AppConfig();
+        }
+
+        public void Normalize()
+        {
+            if (OpacityPercent < 30 || OpacityPercent > 100) OpacityPercent = 90;
+            if (ProbeMinMinutes < 5 || ProbeMinMinutes > 240) ProbeMinMinutes = 10;
+            if (string.IsNullOrEmpty(ProbeModel)) ProbeModel = "claude-haiku-5-5";
+            if (Theme != "light" && Theme != "system") Theme = "dark";
+            if (!LangPacks.Exists(Language)) Language = "en";   // "en", "id", atau kode paket bahasa terpasang
+            if (HistoryDays != 30) HistoryDays = 14;
+            if (DockEdge != "bottom" && DockEdge != "left" && DockEdge != "right" &&
+                DockEdge != "top-left" && DockEdge != "top-right" &&
+                DockEdge != "bottom-left" && DockEdge != "bottom-right" &&
+                DockEdge != "top-center" && DockEdge != "bottom-center")
+                DockEdge = "top";
+            if (DockMonitor == null) DockMonitor = "";
+            if (double.IsNaN(BudgetDaily) || BudgetDaily < 0) BudgetDaily = 0;
+            if (double.IsNaN(BudgetMonthly) || BudgetMonthly < 0) BudgetMonthly = 0;
+            if (HookNotifyMinSeconds < 0 || HookNotifyMinSeconds > 3600) HookNotifyMinSeconds = 30;
+            if (AlertEngine.ParseThresholds(AlertThresholds) == null) AlertThresholds = "80,95";
+            if (string.IsNullOrWhiteSpace(Hotkey)) Hotkey = "Win+Alt+U";
+            if (string.IsNullOrEmpty(CurrencySymbol)) CurrencySymbol = "Rp";
+            if (CurrencyRate <= 0 || double.IsNaN(CurrencyRate)) CurrencyRate = 16200;
+            if (BurnRateThresholdTokens <= 0) BurnRateThresholdTokens = 100000;
+            if (!string.IsNullOrEmpty(WebhookUrl))
+            {
+                SetWebhookUrl(WebhookUrl);
+                WebhookUrl = null;
+            }
+            if (OllamaPort <= 0 || OllamaPort > 65535) OllamaPort = 11434;
+            if (Backdrop != "solid" && Backdrop != "acrylic" && Backdrop != "mica" && Backdrop != "mica-alt")
+                Backdrop = DwmBackdrop.IsWindows11 ? "acrylic" : "solid";
+            if (CardLayout != "2col" && CardLayout != "3col") CardLayout = "auto";
+            if (MiniPillMode != "highest" && MiniPillMode != "cost_runway") MiniPillMode = "all";
+            if (QuietStartHour < 0 || QuietStartHour > 23) QuietStartHour = 22;
+            if (QuietEndHour < 0 || QuietEndHour > 23) QuietEndHour = 7;
+            if (AlertCooldownMinutes < 1 || AlertCooldownMinutes > 1440) AlertCooldownMinutes = 15;
+            if (DigestSchedule != "weekly") DigestSchedule = "daily";
+            if (DigestHour < 0 || DigestHour > 23) DigestHour = 18;
+            if (LastDigestKey == null) LastDigestKey = "";
+            ShowInTaskbar = false;
+        }
+
+        public string ExportProfileJson()
+        {
+            AppConfig clone = J.Ser.Deserialize<AppConfig>(J.Ser.Serialize(this));
+            clone.AdminKeyProtected = null;
+            clone.WebhookUrlProtected = null;
+            clone.WebhookUrl = null;
+            clone.LastDigestKey = "";
+            return J.Ser.Serialize(clone);
+        }
+
+        public static AppConfig ImportProfileJson(string json, AppConfig preserveSecretsFrom)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            AppConfig c = J.Ser.Deserialize<AppConfig>(json);
+            if (c == null) return null;
+            c.WebhookUrl = null;
+            c.AdminKeyProtected = preserveSecretsFrom != null ? preserveSecretsFrom.AdminKeyProtected : null;
+            c.WebhookUrlProtected = preserveSecretsFrom != null ? preserveSecretsFrom.WebhookUrlProtected : null;
+            c.Normalize();
+            return c;
+        }
+
+        public void ApplyProfileFrom(AppConfig src)
+        {
+            if (src == null) return;
+            foreach (System.Reflection.PropertyInfo p in typeof(AppConfig).GetProperties())
+            {
+                if (!p.CanRead || !p.CanWrite) continue;
+                if (p.Name == "AdminKeyProtected" || p.Name == "WebhookUrlProtected" || p.Name == "WebhookUrl") continue;
+                p.SetValue(this, p.GetValue(src, null), null);
+            }
+            Normalize();
         }
 
         public void Save()

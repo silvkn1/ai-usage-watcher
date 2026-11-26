@@ -18,6 +18,108 @@ namespace ClaudeUsageWidget
         public static string CurrencySymbol = "Rp";
         public static double CurrencyRate = 16200;
         public static bool CurrencyShowBoth = true;
+        public static string CardLayout = "auto";
+        public static string MiniPillMode = "all";
+        public static bool ShowContextBar = true;
+    }
+
+    internal static class ContextLimits
+    {
+        public static long WindowForModel(string model)
+        {
+            if (string.IsNullOrEmpty(model)) return 200000L;
+            if (model.IndexOf("gemini", StringComparison.OrdinalIgnoreCase) >= 0) return 1000000L;
+            if (model.IndexOf("[1m]", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                model.IndexOf("-1m", StringComparison.OrdinalIgnoreCase) >= 0) return 1000000L;
+            if (model.IndexOf("gpt-5", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                model.IndexOf("codex", StringComparison.OrdinalIgnoreCase) >= 0) return 400000L;
+            return 200000L;
+        }
+
+        public static string FormatCapShort(long window)
+        {
+            if (window >= 1000000L) return "1M";
+            if (window >= 400000L) return "400k";
+            return "200k";
+        }
+    }
+
+    internal static class QuietHours
+    {
+        public static bool IsActive(AppConfig cfg, DateTime now)
+        {
+            if (cfg == null || !cfg.QuietHoursEnabled) return false;
+            int h = now.Hour;
+            int start = cfg.QuietStartHour;
+            int end = cfg.QuietEndHour;
+            if (start == end) return true;
+            if (start < end) return h >= start && h < end;
+            return h >= start || h < end;
+        }
+    }
+
+    internal static class DigestScheduler
+    {
+        public static string ComputePeriodKey(string schedule, DateTime now)
+        {
+            if (string.Equals(schedule, "weekly", StringComparison.OrdinalIgnoreCase))
+            {
+                Calendar cal = CultureInfo.InvariantCulture.Calendar;
+                int wk = cal.GetWeekOfYear(now, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+                return string.Format(CultureInfo.InvariantCulture, "{0:0000}-W{1:00}", now.Year, wk);
+            }
+            return now.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        }
+
+        public static bool ShouldSend(AppConfig cfg, DateTime now)
+        {
+            if (cfg == null || !cfg.DigestEnabled || !cfg.WebhookEnabled) return false;
+            if (QuietHours.IsActive(cfg, now)) return false;
+            if (string.Equals(cfg.DigestSchedule, "weekly", StringComparison.OrdinalIgnoreCase))
+            {
+                if (now.DayOfWeek != DayOfWeek.Sunday || now.Hour < cfg.DigestHour) return false;
+            }
+            else if (now.Hour < cfg.DigestHour)
+            {
+                return false;
+            }
+            string key = ComputePeriodKey(cfg.DigestSchedule, now);
+            return !string.Equals(cfg.LastDigestKey, key, StringComparison.Ordinal);
+        }
+
+        public static string BuildDigestText(RateLimitSnapshot limits, UsageSnapshot usage, HistoryStore history, AppConfig cfg)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(StatusFormatter.Format(limits, usage,
+                cfg == null || cfg.ScanClaude,
+                cfg == null || cfg.ScanGemini,
+                cfg != null && cfg.ScanCodex,
+                OllamaProbe.Current));
+            if (history != null)
+            {
+                DayStat[] last7 = history.Series(7);
+                double sum7 = 0; long tok7 = 0;
+                for (int i = 0; i < last7.Length; i++) { sum7 += last7[i].Cost; tok7 += last7[i].Tokens; }
+                sb.AppendLine(string.Format("• 7d Total: {0} · {1}", Fmt.Usd(sum7), Fmt.Tokens(tok7)));
+                sb.AppendLine(string.Format("• Month-to-Date: {0}", Fmt.Usd(history.MonthToDateCost(DateTime.Now))));
+            }
+            return sb.ToString().TrimEnd();
+        }
+    }
+
+    internal static class CommandParser
+    {
+        public static string ParseCommandName(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            try
+            {
+                Dictionary<string, object> d = J.Parse(json);
+                string cmd = J.Str(d, "cmd") ?? J.Str(d, "command");
+                return string.IsNullOrWhiteSpace(cmd) ? null : cmd.Trim().ToLowerInvariant();
+            }
+            catch { return null; }
+        }
     }
 
     internal static class ThemeUtil
@@ -118,6 +220,10 @@ namespace ClaudeUsageWidget
                 Check("antigravity_five_hour", snap.AntigravityFiveHour, thresholds, resetNotify, silent, r);
             if (snap.AntigravitySevenDay != null && snap.AntigravitySevenDay.Available)
                 Check("antigravity_seven_day", snap.AntigravitySevenDay, thresholds, resetNotify, silent, r);
+            if (snap.CodexFiveHour != null && snap.CodexFiveHour.Available)
+                Check("codex_five_hour", snap.CodexFiveHour, thresholds, resetNotify, silent, r);
+            if (snap.CodexSevenDay != null && snap.CodexSevenDay.Available)
+                Check("codex_seven_day", snap.CodexSevenDay, thresholds, resetNotify, silent, r);
             _baselined = true;
             return r;
         }
@@ -238,24 +344,22 @@ namespace ClaudeUsageWidget
         /// </summary>
         public static void IconSpec(RateLimitSnapshot limits, out string text, out Color badge, out bool weekly)
         {
-            IconSpec(limits, true, true, out text, out badge, out weekly);
+            IconSpec(limits, true, true, false, out text, out badge, out weekly);
         }
 
         public static void IconSpec(RateLimitSnapshot limits, bool scanClaude, bool scanGemini, out string text, out Color badge, out bool weekly)
         {
+            IconSpec(limits, scanClaude, scanGemini, false, out text, out badge, out weekly);
+        }
+
+        public static void IconSpec(RateLimitSnapshot limits, bool scanClaude, bool scanGemini, bool scanCodex, out string text, out Color badge, out bool weekly)
+        {
             LimitWindow w5 = null, w7 = null;
-            if (scanClaude && limits.FiveHour != null && limits.FiveHour.Available)
+            if (limits != null)
             {
-                w5 = limits.FiveHour;
-                w7 = limits.SevenDay;
-            }
-            if (scanGemini && limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available)
-            {
-                if (w5 == null || !w5.Available || w5.IsStale || (limits.AntigravityFiveHour.UsedPercent > w5.UsedPercent))
-                {
-                    w5 = limits.AntigravityFiveHour;
-                    w7 = limits.AntigravitySevenDay;
-                }
+                if (scanClaude) PickHigherWindow(limits.FiveHour, limits.SevenDay, ref w5, ref w7);
+                if (scanGemini) PickHigherWindow(limits.AntigravityFiveHour, limits.AntigravitySevenDay, ref w5, ref w7);
+                if (scanCodex) PickHigherWindow(limits.CodexFiveHour, limits.CodexSevenDay, ref w5, ref w7);
             }
             weekly = w7 != null && w7.Available && !w7.IsStale && Math.Round(w7.UsedPercent) >= 100;
             LimitWindow w = weekly ? w7 : w5;
@@ -264,6 +368,16 @@ namespace ClaudeUsageWidget
             int v = Math.Max(0, Math.Min(100, Opts.ShowRemaining ? 100 - used : used));
             text = show ? v.ToString() : "--";
             badge = show ? TrayIconPainter.StatusColor(w.UsedPercent) : TrayIconPainter.StGray;
+        }
+
+        private static void PickHigherWindow(LimitWindow cand5, LimitWindow cand7, ref LimitWindow w5, ref LimitWindow w7)
+        {
+            if (cand5 == null || !cand5.Available) return;
+            if (w5 == null || !w5.Available || w5.IsStale || (!cand5.IsStale && cand5.UsedPercent > w5.UsedPercent))
+            {
+                w5 = cand5;
+                w7 = cand7;
+            }
         }
 
         private static string Line(LimitWindow w, string withReset, string noReset)
@@ -277,7 +391,17 @@ namespace ClaudeUsageWidget
 
         private static string ProviderSummary(string name, LimitWindow w5, LimitWindow w7, bool shortPrefix)
         {
-            string prefix = shortPrefix ? (name.StartsWith("C", StringComparison.OrdinalIgnoreCase) ? "C: " : "AG: ") : (name + ": ");
+            string prefix;
+            if (shortPrefix)
+            {
+                if (name.StartsWith("A", StringComparison.OrdinalIgnoreCase)) prefix = "AG: ";
+                else if (name.StartsWith("Codex", StringComparison.OrdinalIgnoreCase)) prefix = "CX: ";
+                else prefix = "C: ";
+            }
+            else
+            {
+                prefix = name + ": ";
+            }
             string s5 = L.T("tip.l5n", Pct(w5));
             if (!shortPrefix && w5 != null && w5.Available && !w5.IsStale && w5.ResetsAt != DateTime.MinValue)
                 s5 += " (" + Fmt.Until(w5.ResetsAt) + ")";
@@ -291,18 +415,31 @@ namespace ClaudeUsageWidget
         /// maxLen: 127 bila batas tooltip bisa diperluas, selain itu 63 (batas NotifyIcon.Text).</summary>
         public static string Tooltip(RateLimitSnapshot limits, UsageSnapshot usage, string probeFailed, int maxLen)
         {
-            return Tooltip(limits, usage, probeFailed, maxLen, true, true);
+            return Tooltip(limits, usage, probeFailed, maxLen, true, true, false);
         }
 
         public static string Tooltip(RateLimitSnapshot limits, UsageSnapshot usage, string probeFailed, int maxLen, bool scanClaude, bool scanGemini)
         {
-            List<string> lines = new List<string>();
+            return Tooltip(limits, usage, probeFailed, maxLen, scanClaude, scanGemini, false);
+        }
 
-            if (scanClaude && scanGemini)
+        public static string Tooltip(RateLimitSnapshot limits, UsageSnapshot usage, string probeFailed, int maxLen, bool scanClaude, bool scanGemini, bool scanCodex)
+        {
+            List<string> lines = new List<string>();
+            bool hasCodexData = scanCodex && ((usage != null && usage.CodexWeek.Total > 0) ||
+                (limits != null && ((limits.CodexFiveHour != null && limits.CodexFiveHour.Available) ||
+                                    (limits.CodexSevenDay != null && limits.CodexSevenDay.Available))));
+            int count = (scanClaude ? 1 : 0) + (scanGemini ? 1 : 0) + (scanCodex && (hasCodexData || (!scanClaude && !scanGemini)) ? 1 : 0);
+
+            if (count >= 2)
             {
                 bool shortPrefix = maxLen <= 63;
-                lines.Add(ProviderSummary("Claude", limits != null ? limits.FiveHour : null, limits != null ? limits.SevenDay : null, shortPrefix));
-                lines.Add(ProviderSummary("Antigravity", limits != null ? limits.AntigravityFiveHour : null, limits != null ? limits.AntigravitySevenDay : null, shortPrefix));
+                if (scanClaude)
+                    lines.Add(ProviderSummary("Claude", limits != null ? limits.FiveHour : null, limits != null ? limits.SevenDay : null, shortPrefix));
+                if (scanGemini)
+                    lines.Add(ProviderSummary("Antigravity", limits != null ? limits.AntigravityFiveHour : null, limits != null ? limits.AntigravitySevenDay : null, shortPrefix));
+                if (scanCodex && (hasCodexData || (!scanClaude && !scanGemini)))
+                    lines.Add(ProviderSummary("Codex", limits != null ? limits.CodexFiveHour : null, limits != null ? limits.CodexSevenDay : null, shortPrefix));
             }
             else if (scanClaude)
             {
@@ -332,6 +469,21 @@ namespace ClaudeUsageWidget
                 else
                 {
                     lines.Add(ProviderSummary("Antigravity", w5, w7, true));
+                }
+            }
+            else if (scanCodex)
+            {
+                LimitWindow w5 = limits != null ? limits.CodexFiveHour : null;
+                LimitWindow w7 = limits != null ? limits.CodexSevenDay : null;
+                if (maxLen > 63 && ((w5 != null && w5.Available) || (w7 != null && w7.Available)))
+                {
+                    lines.Add("Codex CLI:");
+                    lines.Add("  " + Line(w5, "tip.l5", "tip.l5n"));
+                    lines.Add("  " + Line(w7, "tip.l7", "tip.l7n"));
+                }
+                else
+                {
+                    lines.Add("Codex CLI: " + Fmt.Tokens(usage != null ? usage.CodexToday.Total : 0) + " · " + Fmt.UsdShort(usage != null ? usage.CodexToday.Cost : 0));
                 }
             }
             else
@@ -435,42 +587,23 @@ namespace ClaudeUsageWidget
             double minMins = double.MaxValue;
             if (limits != null)
             {
-                if (limits.FiveHour != null && limits.FiveHour.Available && !limits.FiveHour.IsStale)
-                {
-                    double leftPct = Math.Max(0, 100.0 - limits.FiveHour.UsedPercent);
-                    if (limits.FiveHour.UsedPercent > 5)
-                    {
-                        double elapsed = Pace.ElapsedAt(limits.FiveHour, DateTime.Now, Pace.FiveHourSecs);
-                        if (!double.IsNaN(elapsed) && elapsed > 0.05)
-                        {
-                            double pctPerMin = limits.FiveHour.UsedPercent / (elapsed * 300.0);
-                            if (pctPerMin > 0)
-                            {
-                                double m = leftPct / pctPerMin;
-                                if (m < minMins) minMins = m;
-                            }
-                        }
-                    }
-                }
-                if (limits.AntigravityFiveHour != null && limits.AntigravityFiveHour.Available && !limits.AntigravityFiveHour.IsStale)
-                {
-                    double leftPct = Math.Max(0, 100.0 - limits.AntigravityFiveHour.UsedPercent);
-                    if (limits.AntigravityFiveHour.UsedPercent > 5)
-                    {
-                        double elapsed = Pace.ElapsedAt(limits.AntigravityFiveHour, DateTime.Now, Pace.FiveHourSecs);
-                        if (!double.IsNaN(elapsed) && elapsed > 0.05)
-                        {
-                            double pctPerMin = limits.AntigravityFiveHour.UsedPercent / (elapsed * 300.0);
-                            if (pctPerMin > 0)
-                            {
-                                double m = leftPct / pctPerMin;
-                                if (m < minMins) minMins = m;
-                            }
-                        }
-                    }
-                }
+                ConsiderWindow(limits.FiveHour, ref minMins);
+                ConsiderWindow(limits.AntigravityFiveHour, ref minMins);
+                ConsiderWindow(limits.CodexFiveHour, ref minMins);
             }
             return (minMins < double.MaxValue && minMins > 0) ? minMins : 0;
+        }
+
+        private static void ConsiderWindow(LimitWindow w, ref double minMins)
+        {
+            if (w == null || !w.Available || w.IsStale || w.UsedPercent <= 5) return;
+            double leftPct = Math.Max(0, 100.0 - w.UsedPercent);
+            double elapsed = Pace.ElapsedAt(w, DateTime.Now, Pace.FiveHourSecs);
+            if (double.IsNaN(elapsed) || elapsed <= 0.05) return;
+            double pctPerMin = w.UsedPercent / (elapsed * 300.0);
+            if (pctPerMin <= 0) return;
+            double m = leftPct / pctPerMin;
+            if (m < minMins) minMins = m;
         }
     }
 
@@ -509,14 +642,36 @@ namespace ClaudeUsageWidget
                     : "0%";
                 sb.AppendLine("• Antigravity: 5h " + s5 + " · 7d " + s7);
             }
-            if (scanCodex && usage != null && usage.CodexWeek.Total > 0)
+            if (scanCodex && usage != null && (usage.CodexWeek.Total > 0 || (limits != null && limits.CodexFiveHour != null && limits.CodexFiveHour.Available)))
             {
-                sb.AppendLine(string.Format("• Codex CLI: Today {0} (≈{1}) · 7d {2}",
-                    Fmt.Tokens(usage.CodexToday.Total), Fmt.Usd(usage.CodexToday.Cost), Fmt.Tokens(usage.CodexWeek.Total)));
+                string lim = "";
+                if (limits != null && ((limits.CodexFiveHour != null && limits.CodexFiveHour.Available) || (limits.CodexSevenDay != null && limits.CodexSevenDay.Available)))
+                {
+                    string c5 = (limits.CodexFiveHour != null && limits.CodexFiveHour.Available && !limits.CodexFiveHour.IsStale)
+                        ? string.Format("{0}%", (int)Math.Round(limits.CodexFiveHour.UsedPercent)) : "n/a";
+                    string c7 = (limits.CodexSevenDay != null && limits.CodexSevenDay.Available && !limits.CodexSevenDay.IsStale)
+                        ? string.Format("{0}%", (int)Math.Round(limits.CodexSevenDay.UsedPercent)) : "n/a";
+                    lim = " · 5h " + c5 + " · 7d " + c7;
+                }
+                sb.AppendLine(string.Format("• Codex CLI: Today {0} (≈{1}) · 7d {2}{3}",
+                    Fmt.Tokens(usage.CodexToday.Total), Fmt.Usd(usage.CodexToday.Cost), Fmt.Tokens(usage.CodexWeek.Total), lim));
             }
             if (ollama != null && ollama.Online)
             {
-                sb.AppendLine(string.Format("• Ollama: Online ({0} models)", ollama.ModelCount));
+                string olVram = ollama.LoadedCount > 0 && ollama.TotalVramBytes > 0
+                    ? string.Format(CultureInfo.InvariantCulture, " · {0} loaded ({1:0.0} GB VRAM)", ollama.LoadedCount, ollama.TotalVramBytes / (1024.0 * 1024.0 * 1024.0))
+                    : (ollama.LoadedCount > 0 ? string.Format(CultureInfo.InvariantCulture, " · {0} loaded", ollama.LoadedCount) : "");
+                sb.AppendLine(string.Format("• Ollama: Online ({0} models{1})", ollama.ModelCount, olVram));
+            }
+            if (usage != null && usage.GeminiCliWeek.Total > 0)
+            {
+                sb.AppendLine(string.Format("• Gemini CLI: Today {0} (≈{1}) · 7d {2}",
+                    Fmt.Tokens(usage.GeminiCliToday.Total), Fmt.Usd(usage.GeminiCliToday.Cost), Fmt.Tokens(usage.GeminiCliWeek.Total)));
+            }
+            if (usage != null && usage.OpenCodeWeek.Total > 0)
+            {
+                sb.AppendLine(string.Format("• OpenCode: Today {0} (≈{1}) · 7d {2}",
+                    Fmt.Tokens(usage.OpenCodeToday.Total), Fmt.Usd(usage.OpenCodeToday.Cost), Fmt.Tokens(usage.OpenCodeWeek.Total)));
             }
             if (usage != null)
             {
@@ -631,6 +786,18 @@ namespace ClaudeUsageWidget
                         if (rl.AntigravitySevenDay.ResetsAt != DateTime.MinValue)
                             d["antigravity_7d_resets_at"] = rl.AntigravitySevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
+                    if (rl.CodexFiveHour != null && rl.CodexFiveHour.Available)
+                    {
+                        d["codex_5h_percent"] = Math.Round(rl.CodexFiveHour.UsedPercent, 1);
+                        if (rl.CodexFiveHour.ResetsAt != DateTime.MinValue)
+                            d["codex_5h_resets_at"] = rl.CodexFiveHour.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
+                    if (rl.CodexSevenDay != null && rl.CodexSevenDay.Available)
+                    {
+                        d["codex_7d_percent"] = Math.Round(rl.CodexSevenDay.UsedPercent, 1);
+                        if (rl.CodexSevenDay.ResetsAt != DateTime.MinValue)
+                            d["codex_7d_resets_at"] = rl.CodexSevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
                 }
 
                 d["today_tokens"] = u.TodayTotal.Total;
@@ -646,6 +813,22 @@ namespace ClaudeUsageWidget
                     d["codex_today_tokens"] = u.CodexToday.Total;
                     d["codex_today_cost_usd"] = Math.Round(u.CodexToday.Cost, 4);
                 }
+                if (u.GeminiCliWeek.Total > 0)
+                {
+                    d["gemini_cli_today_tokens"] = u.GeminiCliToday.Total;
+                    d["gemini_cli_today_cost_usd"] = Math.Round(u.GeminiCliToday.Cost, 4);
+                }
+                if (u.OpenCodeWeek.Total > 0)
+                {
+                    d["opencode_today_tokens"] = u.OpenCodeToday.Total;
+                    d["opencode_today_cost_usd"] = Math.Round(u.OpenCodeToday.Cost, 4);
+                }
+                if (u.Sessions != null)
+                {
+                    d["running_sessions"] = u.Sessions.RunningCount;
+                    d["confirm_sessions"] = u.Sessions.ConfirmCount;
+                    d["done_sessions"] = u.Sessions.DoneCount;
+                }
 
                 double runway = RunwayEstimator.EstimateMinutes(rl, u);
                 if (runway > 0) d["runway_minutes"] = Math.Round(runway, 1);
@@ -655,6 +838,11 @@ namespace ClaudeUsageWidget
                     d["ollama_online"] = true;
                     d["ollama_model_count"] = OllamaProbe.Current.ModelCount;
                     d["ollama_models"] = OllamaProbe.Current.ModelNames;
+                    d["ollama_loaded_count"] = OllamaProbe.Current.LoadedCount;
+                    if (OllamaProbe.Current.LoadedModels.Count > 0)
+                        d["ollama_loaded_models"] = OllamaProbe.Current.LoadedModels;
+                    if (OllamaProbe.Current.TotalVramBytes > 0)
+                        d["ollama_vram_bytes"] = OllamaProbe.Current.TotalVramBytes;
                 }
 
                 string json = PrettyJson.Write(d);

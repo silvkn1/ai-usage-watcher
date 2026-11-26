@@ -5,7 +5,7 @@
 <h1 align="center">AI Usage Watcher</h1>
 
 <p align="center">
-  <em>Real-time Desktop Quota &amp; Token Monitor for Claude Code and Google Antigravity</em>
+  <em>Real-time Desktop Quota &amp; Token Monitor for Claude Code, Google Antigravity, OpenAI Codex CLI, &amp; Ollama</em>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
 </p>
 
-**AI Usage Watcher** is a lightweight, native Windows desktop widget and system tray monitor for tracking token consumption, estimated API costs, and quota rate limits from **Claude Code** and **Google Antigravity (Gemini)** in real time.
+**AI Usage Watcher** is a lightweight, native Windows desktop widget and system tray monitor for tracking token consumption, estimated API costs, and quota rate limits from **Claude Code**, **Google Antigravity (Gemini)**, **OpenAI Codex CLI**, and **Ollama** in real time.
 
 Built with pure C# Windows Forms on the built-in **.NET Framework 4.8** of Windows: ultra-compact footprint (~385 KB), zero additional runtime installations, zero external NuGet or Node dependencies, and **zero taskbar clutter** (`WS_EX_TOOLWINDOW`).
 
@@ -108,27 +108,32 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 
 ## ✨ Core Features
 
-### 📊 Multi-Provider AI Monitoring (Claude Code + Google Antigravity)
+### 📊 Multi-Provider AI Monitoring (Claude Code + Antigravity + Codex CLI + Ollama)
 - **Local Claude Code Logs (`~/.claude/projects/**/*.jsonl`)**: Incrementally scans prompt, output, and cache tokens with cross-file deduplication and local timestamps.
 - **Local Antigravity Logs (`~/.gemini/antigravity/brain/**/transcript.jsonl`)**: Real-time transcript scanner for Google Antigravity models (Gemini 2.5/3.0 Pro & Flash, Claude Opus/Sonnet via Antigravity).
+- **Local OpenAI Codex CLI Logs (`~/.codex/sessions/**/rollout-*.jsonl`)**: Parses Codex session metadata, `turn_context`, incremental `last_token_usage`, and 5-hour / weekly `rate_limits`, plus WSL2 session auto-discovery.
+- **Gemini CLI & OpenCode Scanners**: Tracks Gemini CLI (`~/.gemini/tmp/**/chats/session-*.json`) and OpenCode (`~/.local/share/opencode/storage/message/**/*.json`, plus optional read-only `sqlite3` CLI query when installed on PATH) alongside persistent incremental file-offset caching (`scan_cache.json`).
+- **3+ Provider Cards & Interactive Context Bar**: Switchable 2-column pager (`1/2 ▸`) or 3-column grid layout so Claude, Antigravity, Codex, Gemini CLI, and OpenCode get equal cards, plus an interactive per-model **Session Context Bar** (`200k` / `400k` / `1M` auto-detected) with `/compact` copy, active terminal launch, per-session quick-jump menu from session badges, and customizable Mini HUD Pill modes (`All`, `Highest %`, `Cost + Runway`).
 - **Official Connect-RPC Quota**: Retrieves remaining quota directly from the Antigravity Language Server (`RetrieveUserQuotaSummary`) by auto-discovering daemon sockets in `hub_*.json`.
-- **Rolling 5-Hour & 7-Day Limits**: Tracks rolling 5-hour and 7-day rate limits for both Claude and Antigravity with countdown timers and exact reset timestamps, e.g., `17h 59m (24 Nov 02:00)`.
+- **Rolling 5-Hour & 7-Day Limits**: Tracks rolling 5-hour and 7-day rate limits across Claude, Antigravity, and Codex CLI with countdown timers and exact reset timestamps, e.g., `17h 59m (24 Nov 02:00)`.
 - **Runway Forecast**: Dynamically projects remaining minutes/hours until quota exhaustion (`Runway: ~45m`) when active consumption exceeds 5,000 tokens / 10 min.
 - **Top 2 Models Breakdown**: Highlights the two most active AI models and their token volume (e.g., `Sonnet 3.5 1.8M`, `Haiku 3.5 600K`) directly on provider cards.
 - **Visual Pacing Marker**: A white indicator line along rate limit bars compares elapsed time against quota consumed, alerting you if your current pacing risks hitting limits early.
 - **Sync Schedule & Update Status**: Transparent statusline `Updated [time] · Next sync [time] (or on chat)` so you always know when quota metrics refresh.
-- **Flexible Provider Selection**: Independently enable or disable Claude, Gemini/Antigravity, or Admin API monitoring in Settings. The widget automatically switches between Single Card and Dual Cards layout.
+- **Flexible Provider Selection**: Independently enable or disable Claude, Gemini/Antigravity, Codex CLI, Ollama, or Admin API monitoring in Settings or Setup Wizard (including live in-place language switching on Apply).
 
 ### ⚡ Productivity & Reporting (Quick Actions)
 - **First-Run Setup Wizard**: Welcomes new users on first launch with an intuitive 3-step configuration: automatically detects installed AI tools (Claude Code, Google Antigravity, Ollama), customizes visual themes & Windows 11 glass blur, sets screen docking position, and installs the VS Code/Cursor companion extension. Can be rerun anytime from the tray menu (**"Setup Wizard..."**).
 - **VS Code & Cursor Status Bar Companion**: Live status bar metrics inside VS Code and Cursor! One-click installation from the tray menu (**"Install VS Code / Cursor Status Bar..."**) copies the lightweight extension to `%USERPROFILE%\.vscode\extensions` and `%USERPROFILE%\.cursor\extensions`. Displays live quota percentages, costs, and cache savings (`$(dashboard) C: 42% | AG: 20% | $0.85`) in the footer status bar with rich markdown tooltips.
 - **Windows 11 Mica & Acrylic Blur**: Native frosted glass translucency using Windows Desktop Window Manager (DWM) APIs. Choose between **Acrylic Blur**, **Mica**, **Mica Alt**, or **Solid** in Settings.
 - **Multi-Monitor Snap & 4-Corner Docking**: Quickly snap the widget to any monitor (Display 1, Display 2, etc.) and dock to all 4 corners (**Top-Left**, **Top-Right**, **Bottom-Left**, **Bottom-Right**) or edge centers via the tray menu or Settings.
-- **Project Cost Explorer & 35-Day Activity Heatmap**: Dedicated GUI dialog (`Project Cost Explorer...` from tray) with a GitHub-style 35-day activity contribution heatmap (5 weeks x 7 days) visualizing daily token density and hover tooltips. Includes a per-project breakdown with "Open Folder", "Open Terminal", and "Copy Markdown" table export.
+- **Project Cost Explorer, 30-Day Provider Trends & Expensive Sessions**: Dedicated tabbed GUI (`Project Cost Explorer...` from tray) with a GitHub-style 35-day activity contribution heatmap, live search filter, provider column, clickable sort headers, Grand Total footer, 30-day stacked provider cost trends chart, Expensive Sessions anomaly detector (low cache hit / high spend), "Open Folder", "Open Terminal" (Windows Terminal `wt.exe` preferred), "Open in VS Code", and "Copy Markdown" export.
+- **VS Code & Cursor Quick Actions Menu**: Clicking the companion status bar opens a Quick Pick menu to force refresh the desktop widget, open Project Cost Explorer, toggle compact/full mode, copy status summary or `/compact`, or inspect raw JSON.
 - **Prompt Cache Savings & Hit Rate**: Live indicator displaying exact dollar savings and cache hit percentage (`⚡ Saved ≈$X.XX (Cache YY%)`) on provider cards and status summaries.
 - **Default Global Hotkey**: Press `Win+Alt+U` (with automatic fallback to `Ctrl+Alt+U`) anywhere across Windows to instantly toggle widget visibility on and off.
 - **Companion Status JSON Exporter**: Exports real-time usage metrics to `~/.ai-usage-status.json` and `<AppData>\status.json` for external terminal status bars, tmux, shell prompts, or custom scripts.
-- **Ollama Local LLM Auto-Detector**: Automatically detects local Ollama instances (customizable port in Settings, default `11434`) and exports model counts and names.
+- **Ollama Local LLM & VRAM Detector**: Queries `/api/tags` and `/api/ps` on local Ollama (configurable port in Setup Wizard & Settings, default `11434`), shows a live green online badge, loaded models and VRAM (`GB`) on the widget, and exports model/VRAM counts to status JSON.
+- **Custom Pricing Overrides, Quiet Hours, Digest & Portable Profiles**: Supports `custom_pricing.json` overrides, JSON history export, configurable alert cooldowns, Quiet Hours muting chimes & webhooks, scheduled Daily/Weekly Webhook Digests, and secret-free Settings profile export/import.
 - **Quick Launch via Double-Click**:
   - *Double-click Claude card*: Opens a new CMD terminal directly in the last active project directory (`LastActiveCwd`).
   - *Double-click Antigravity card*: Opens the Google Antigravity storage directory in Windows Explorer.
@@ -147,7 +152,7 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 - **Session Context Alert**: Monitors session context window against the 200k token limit; alerts when exceeding 75% (150k tokens) so you know when to run `/compact`.
 - **Burn Rate Spike Detector**: Flags anomalous token spikes in a rolling 10-minute window (default: >100k tokens / 10 min).
 - **Audio Chimes**: Native Windows system sound effects for critical usage events.
-- **Discord / Slack / Telegram Webhooks**: Automatically dispatches alerts to team channels when limits approach or unexpected expenditure surges occur.
+- **Discord / Slack / Telegram Webhooks**: Auto-formats alert payloads per provider (Slack/Telegram/Discord/Generic), verifies HTTP responses, tracks failures in Diagnostics, and includes a **Test** button in Settings > Alerts.
 
 ### 🪟 Windows-Native Zero Distraction Design
 - **Zero Taskbar Footprint**: Floating window configured with `WS_EX_TOOLWINDOW` and `ShowInTaskbar = false`, never cluttering your taskbar or `Alt+Tab` switcher.
@@ -194,7 +199,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Compile full distribution release package (.zip + SHA256 checksums)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Execute 58 automated unit tests
+# Execute 84 automated unit tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -229,8 +234,8 @@ ai-usage-watcher/
 │   └── Webhook.cs            # Alert dispatcher for Discord, Slack, Telegram, & Generic webhooks
 ├── companion/                # VS Code & Cursor status bar extension
 ├── statusline/               # Statusline wrapper scripts for Claude Code CLI (PowerShell & Bash)
-├── tests/
-│   └── UnitTests.cs          # 58 automated unit tests (.NET 4.8 test runner)
+└── tests/
+    └── UnitTests.cs          # 84 automated unit tests (.NET 4.8 test runner)
 ├── assets/                # Application logo assets (2-color minimalist vector & .ico)
 ├── docs/img/              # Feature documentation screenshots
 │   ├── id/                # Indonesian UI screenshots

@@ -57,6 +57,12 @@ namespace ClaudeUsageWidget
         private readonly CheckBox _chkCodex = new CheckBox();
         private readonly Label _lblCodexStatus = new Label();
         private readonly Label _lblCodexDesc = new Label();
+        private readonly CheckBox _chkGeminiCli = new CheckBox();
+        private readonly Label _lblGeminiCliStatus = new Label();
+        private readonly Label _lblGeminiCliDesc = new Label();
+        private readonly CheckBox _chkOpenCode = new CheckBox();
+        private readonly Label _lblOpenCodeStatus = new Label();
+        private readonly Label _lblOpenCodeDesc = new Label();
         private readonly CheckBox _chkOllama = new CheckBox();
         private readonly Label _lblOllamaStatus = new Label();
         private readonly Label _lblOllamaDesc = new Label();
@@ -69,6 +75,8 @@ namespace ClaudeUsageWidget
         private readonly ComboBox _cboTheme = new ComboBox();
         private readonly Label _lblBackdrop = new Label();
         private readonly ComboBox _cboBackdrop = new ComboBox();
+        private readonly Label _lblCardLayout = new Label();
+        private readonly ComboBox _cboCardLayout = new ComboBox();
         private readonly CheckBox _chkDock = new CheckBox();
         private readonly Label _lblEdge = new Label();
         private readonly ComboBox _cboEdge = new ComboBox();
@@ -321,6 +329,8 @@ namespace ClaudeUsageWidget
             bool claudeFound = Directory.Exists(Paths.ProjectsDir);
             bool geminiFound = Directory.Exists(Paths.AntigravityBrainDir);
             bool codexFound = Directory.Exists(Paths.CodexSessionsDir);
+            bool geminiCliFound = Directory.Exists(Paths.GeminiCliTmpDir);
+            bool openCodeFound = Directory.Exists(Paths.OpenCodeDataDir);
 
             // Provider 1: Claude Code
             t.Controls.Add(BuildProviderCard(
@@ -341,6 +351,20 @@ namespace ClaudeUsageWidget
                 _chkCodex, L.T("wizard.codex.title"), _cfg.ScanCodex || codexFound,
                 _lblCodexStatus, codexFound ? L.T("wizard.detected") : L.T("wizard.notdetected"), codexFound,
                 _lblCodexDesc, L.T("wizard.codex.desc")
+            ));
+
+            // Provider 4: Gemini CLI
+            t.Controls.Add(BuildProviderCard(
+                _chkGeminiCli, L.T("wizard.geminicli.title"), _cfg.ScanGeminiCli || geminiCliFound,
+                _lblGeminiCliStatus, geminiCliFound ? L.T("wizard.detected") : L.T("wizard.notdetected"), geminiCliFound,
+                _lblGeminiCliDesc, L.T("wizard.geminicli.desc")
+            ));
+
+            // Provider 5: OpenCode
+            t.Controls.Add(BuildProviderCard(
+                _chkOpenCode, L.T("wizard.opencode.title"), _cfg.ScanOpenCode || openCodeFound,
+                _lblOpenCodeStatus, openCodeFound ? L.T("wizard.detected") : L.T("wizard.notdetected"), openCodeFound,
+                _lblOpenCodeDesc, L.T("wizard.opencode.desc")
             ));
 
             // Provider 4: Ollama
@@ -531,9 +555,24 @@ namespace ClaudeUsageWidget
             _rbPill.AutoSize = true;
             _rbPill.UseMnemonic = false;
             _rbPill.Checked = _cfg.Compact;
-            _rbPill.Margin = new Padding(22, 0, 0, 8);
+            _rbPill.Margin = new Padding(22, 0, 0, 12);
             t.Controls.Add(_rbPill, 0, 7);
             t.SetColumnSpan(_rbPill, 2);
+
+            _lblCardLayout.Text = L.T("wizard.cardlayout");
+            _lblCardLayout.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblCardLayout.AutoSize = true;
+            _lblCardLayout.UseMnemonic = false;
+            _lblCardLayout.Anchor = AnchorStyles.Left;
+            t.Controls.Add(_lblCardLayout, 0, 8);
+
+            _cboCardLayout.DropDownStyle = ComboBoxStyle.DropDownList;
+            _cboCardLayout.Width = 220;
+            _cboCardLayout.Items.Add(L.T("set.cardlayout.auto"));
+            _cboCardLayout.Items.Add(L.T("set.cardlayout.2col"));
+            _cboCardLayout.Items.Add(L.T("set.cardlayout.3col"));
+            _cboCardLayout.SelectedIndex = _cfg.CardLayout == "3col" ? 2 : (_cfg.CardLayout == "2col" ? 1 : 0);
+            t.Controls.Add(_cboCardLayout, 1, 8);
 
             _page2.Controls.Add(t);
         }
@@ -683,12 +722,21 @@ namespace ClaudeUsageWidget
             _lblCodexStatus.Text = Directory.Exists(Paths.CodexSessionsDir) ? L.T("wizard.detected") : L.T("wizard.notdetected");
             _lblCodexDesc.Text = L.T("wizard.codex.desc");
 
+            _chkGeminiCli.Text = L.T("wizard.geminicli.title");
+            _lblGeminiCliStatus.Text = Directory.Exists(Paths.GeminiCliTmpDir) ? L.T("wizard.detected") : L.T("wizard.notdetected");
+            _lblGeminiCliDesc.Text = L.T("wizard.geminicli.desc");
+
+            _chkOpenCode.Text = L.T("wizard.opencode.title");
+            _lblOpenCodeStatus.Text = Directory.Exists(Paths.OpenCodeDataDir) ? L.T("wizard.detected") : L.T("wizard.notdetected");
+            _lblOpenCodeDesc.Text = L.T("wizard.opencode.desc");
+
             _chkOllama.Text = L.T("wizard.ollama.title");
             _lblOllamaStatus.Text = "Port " + (int)_numOllamaPort.Value;
             _lblOllamaDesc.Text = L.T("wizard.ollama.desc");
 
             _lblTheme.Text = L.T("wizard.theme");
             _lblBackdrop.Text = L.T("wizard.backdrop");
+            _lblCardLayout.Text = L.T("wizard.cardlayout");
             _chkDock.Text = L.T("wizard.dock.enable");
             _lblEdge.Text = L.T("wizard.dock.pos");
             _lblMode.Text = L.T("wizard.view.mode");
@@ -783,6 +831,8 @@ namespace ClaudeUsageWidget
             _cfg.ScanClaude = _chkClaude.Checked;
             _cfg.ScanGemini = _chkGemini.Checked;
             _cfg.ScanCodex = _chkCodex.Checked;
+            _cfg.ScanGeminiCli = _chkGeminiCli.Checked;
+            _cfg.ScanOpenCode = _chkOpenCode.Checked;
             _cfg.OllamaEnabled = _chkOllama.Checked;
             _cfg.OllamaPort = (int)_numOllamaPort.Value;
 
@@ -795,6 +845,7 @@ namespace ClaudeUsageWidget
                 _cfg.DockEdge = Edges[_cboEdge.SelectedIndex];
 
             _cfg.Compact = _rbPill.Checked;
+            _cfg.CardLayout = _cboCardLayout.SelectedIndex == 2 ? "3col" : (_cboCardLayout.SelectedIndex == 1 ? "2col" : "auto");
 
             if (_chkCurrency.Checked)
             {

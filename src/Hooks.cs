@@ -262,12 +262,13 @@ namespace ClaudeUsageWidget
     /// <summary>Peristiwa dari hook: berkas notify.json kecil (jenis, lama respons, cap waktu). Tanpa isi percakapan.</summary>
     internal static class NotifyEvents
     {
-        public static void Write(string kind, long elapsedSeconds, long tsUnix)
+        public static void Write(string kind, long elapsedSeconds, long tsUnix, string sid = null)
         {
             Paths.Ensure();
+            string sidPart = string.IsNullOrEmpty(sid) ? "" : ",\"sid\":\"" + sid + "\"";
             AtomicFile.Write(Paths.NotifyFile,
                 "{\"kind\":\"" + kind + "\",\"elapsed\":" + elapsedSeconds.ToString(CultureInfo.InvariantCulture)
-                + ",\"ts\":" + tsUnix.ToString(CultureInfo.InvariantCulture) + "}");
+                + ",\"ts\":" + tsUnix.ToString(CultureInfo.InvariantCulture) + sidPart + "}");
         }
 
         /// <summary>Baca lalu hapus peristiwa; null bila tidak ada atau rusak.</summary>
@@ -325,12 +326,33 @@ namespace ClaudeUsageWidget
                             try { File.Delete(f); } catch { }
                         }
                     }
-                    NotifyEvents.Write("stop", elapsed, now);
+                    NotifyEvents.Write("stop", elapsed, now, sid);
                 }
-                else if (kind == "input") NotifyEvents.Write("input", -1, now);
+                else if (kind == "input") NotifyEvents.Write("input", -1, now, sid);
             }
             catch { }
             return 0;
+        }
+
+        public static List<string> GetActiveHookSessionIds(int maxAgeMinutes = 15)
+        {
+            List<string> ids = new List<string>();
+            try
+            {
+                if (!Directory.Exists(Paths.HooksDir)) return ids;
+                DateTime cutoffUtc = DateTime.UtcNow.AddMinutes(-maxAgeMinutes);
+                foreach (string f in Directory.GetFiles(Paths.HooksDir, "*.txt"))
+                {
+                    try
+                    {
+                        if (File.GetLastWriteTimeUtc(f) >= cutoffUtc)
+                            ids.Add(Path.GetFileNameWithoutExtension(f));
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return ids;
         }
 
         private static string ReadStdin(int timeoutMs)

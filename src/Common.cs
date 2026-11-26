@@ -10,7 +10,7 @@ using System.Web.Script.Serialization;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("AI Usage Watcher")]
 [assembly: System.Reflection.AssemblyProduct("AI Usage Watcher")]
-[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
 
 namespace ClaudeUsageWidget
 {
@@ -112,6 +112,11 @@ namespace ClaudeUsageWidget
         }
         public static string ConfigFile { get { return Path.Combine(AppDir, "config.json"); } }
         public static string PricingFile { get { return Path.Combine(AppDir, "pricing.json"); } }
+        public static string CustomPricingFile { get { return Path.Combine(AppDir, "custom_pricing.json"); } }
+        public static string ScanCacheFile { get { return Path.Combine(AppDir, "scan_cache.json"); } }
+        public static string CommandFile { get { return Path.Combine(AppDir, "command.json"); } }
+        public static string GeminiCliTmpDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".gemini", "tmp"); } }
+        public static string OpenCodeDataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "opencode"); } }
         public static string LogFile { get { return Path.Combine(AppDir, "widget.log"); } }
         public static string StatusExportJson { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ai-usage-status.json"); } }
         public static string AppStatusJson { get { return Path.Combine(AppDir, "status.json"); } }

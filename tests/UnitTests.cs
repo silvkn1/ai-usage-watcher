@@ -1512,6 +1512,11 @@ namespace Tests
                     Assert.NotNull(cboTheme, "_theme ComboBox must exist");
                     Assert.Equal(L.T("set.theme.dark"), cboTheme.Items[0].ToString(), "Theme dropdown items must re-translate live");
                     Assert.True(cboTheme.SelectedIndex >= 0, "ComboBox SelectedIndex must be preserved on i18n refresh");
+
+                    FieldInfo fiOpacityLbl = typeof(SettingsForm).GetField("_opacityLbl", BindingFlags.NonPublic | BindingFlags.Instance);
+                    Label lblOp = fiOpacityLbl.GetValue(sf) as Label;
+                    Assert.NotNull(lblOp, "_opacityLbl must exist");
+                    Assert.Equal(L.T("set.opacity", cfg.OpacityPercent), lblOp.Text, "Parameterized _opacityLbl must re-translate live");
                 }
 
                 using (SetupWizardForm wiz = new SetupWizardForm(new AppConfig()))
@@ -1528,6 +1533,873 @@ namespace Tests
             finally
             {
                 L.Set(origLang);
+            }
+        }
+
+        public static void Test_Codex_RateLimits_And_TrayText_And_Alerts()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_cxrl_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string nowUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                long resetUnix = (long)(DateTime.UtcNow.AddHours(3) - new DateTime(1970, 1, 1)).TotalSeconds;
+                string tokLine = string.Format(
+                    "{{\"timestamp\":\"{0}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"token_count\",\"rate_limits\":{{\"primary\":{{\"used_percent\":42,\"resets_at\":{1}}},\"secondary\":{{\"used_percent\":85,\"resets_at\":{1}}}}},\"info\":{{\"last_token_usage\":{{\"input_tokens\":500,\"cached_input_tokens\":100,\"output_tokens\":200}}}}}}}}",
+                    nowUtc, resetUnix
+                );
+                File.WriteAllLines(Path.Combine(tempDir, "rollout-rl.jsonl"), new[] { tokLine });
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+                UsageSnapshot snap = sc.Snapshot();
+
+                Assert.True(snap.CodexFiveHour.Available, "Codex 5h limit must be parsed");
+                Assert.Equal(42.0, snap.CodexFiveHour.UsedPercent, "Codex 5h percent must match primary.used_percent");
+                Assert.True(snap.CodexSevenDay.Available, "Codex 7d limit must be parsed");
+                Assert.Equal(85.0, snap.CodexSevenDay.UsedPercent, "Codex 7d percent must match secondary.used_percent");
+
+                RateLimitSnapshot rl = new RateLimitSnapshot();
+                rl.CodexFiveHour = snap.CodexFiveHour;
+                rl.CodexSevenDay = snap.CodexSevenDay;
+
+                string iconTxt; Color badge; bool weekly;
+                bool prevRem = Opts.ShowRemaining;
+                Opts.ShowRemaining = false;
+                try
+                {
+                    TrayText.IconSpec(rl, false, false, true, out iconTxt, out badge, out weekly);
+                    Assert.Equal("42", iconTxt, "Codex-only tray icon must show 5h percent");
+                    string tip = TrayText.Tooltip(rl, snap, null, 127, false, false, true);
+                    Assert.True(tip.Contains("Codex CLI:"), "Codex-only tray tooltip must display Codex header");
+                    Assert.False(tip.Contains(L.T("tip.noproviders")), "Codex-only tooltip must not report no active providers");
+                }
+                finally { Opts.ShowRemaining = prevRem; }
+
+                AlertEngine ae = new AlertEngine();
+                rl.CodexFiveHour.UsedPercent = 10;
+                ae.Evaluate(rl, new[] { 80, 95 }, true); // baseline
+                rl.CodexFiveHour.UsedPercent = 82;
+                List<Alert> alerts = ae.Evaluate(rl, new[] { 80, 95 }, true);
+                Assert.True(alerts.Count == 1 && alerts[0].Window == "codex_five_hour", "AlertEngine must fire on codex_five_hour threshold");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_ProjectExplorer_Provider_Sort_And_Summary()
+        {
+            UsageSnapshot snap = new UsageSnapshot();
+            snap.WeekProjects["AlphaApp"] = new Tally { Cost = 1.25, Input = 50000, Requests = 10 };
+            snap.TodayProjects["AlphaApp"] = new Tally { Cost = 0.25, Input = 10000, Requests = 2 };
+            snap.ProjectProviders["AlphaApp"] = "Claude";
+            snap.WeekProjects["BetaCodex"] = new Tally { Cost = 2.50, Input = 90000, Requests = 20 };
+            snap.TodayProjects["BetaCodex"] = new Tally { Cost = 0.50, Input = 20000, Requests = 5 };
+            snap.ProjectProviders["BetaCodex"] = "Codex";
+
+            using (ProjectExplorerForm form = new ProjectExplorerForm(snap, null))
+            {
+                IntPtr h = form.Handle;
+                FieldInfo fiList = typeof(ProjectExplorerForm).GetField("_list", BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo fiSearch = typeof(ProjectExplorerForm).GetField("_searchBox", BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo fiSummary = typeof(ProjectExplorerForm).GetField("_summaryLabel", BindingFlags.NonPublic | BindingFlags.Instance);
+
+                ListView lv = fiList.GetValue(form) as ListView;
+                TextBox search = fiSearch.GetValue(form) as TextBox;
+                Label summary = fiSummary.GetValue(form) as Label;
+
+                Assert.NotNull(lv, "_list must exist");
+                Assert.Equal(7, lv.Columns.Count, "Explorer ListView must have 7 columns including Provider");
+                Assert.Equal(3, lv.Items.Count, "Initial list must contain both projects plus Grand Total row");
+                Assert.Equal(L.T("proj.grandtotal"), lv.Items[2].Text, "Last row must be Grand Total");
+                Assert.True(lv.Items[2].Tag == null, "Grand Total row must have null Tag");
+                Assert.Equal(Fmt.Tokens(140000), lv.Items[2].SubItems[4].Text, "Grand Total row must sum WeekTokens");
+                Assert.Equal("30", lv.Items[2].SubItems[5].Text, "Grand Total row must sum WeekRequests");
+                Assert.True(lv.Columns[3].Text.Contains("▼"), "Default sorted column header must show descending arrow");
+                Assert.True(summary.Text.Contains("2"), "Summary label must show 2 projects");
+
+                search.Text = "Beta";
+                Assert.Equal(2, lv.Items.Count, "Search filter must narrow list to BetaCodex plus Grand Total row");
+                Assert.Equal("Codex", lv.Items[0].SubItems[1].Text, "Filtered row must preserve Codex provider");
+                Assert.Equal(Fmt.Tokens(90000), lv.Items[1].SubItems[4].Text, "Filtered Grand Total row must sum only visible rows");
+                Assert.True(summary.Text.Contains("1"), "Summary label must update dynamically on filter");
+                Assert.True(ProjectExplorerForm.BuildMarkdownTable(new List<ProjectRow> {
+                    new ProjectRow { Name = "A", TodayCost = 0.45, WeekCost = 3.12, WeekTokens = 450000, WeekRequests = 82 },
+                    new ProjectRow { Name = "B", TodayCost = 0.10, WeekCost = 0.50, WeekTokens = 80000, WeekRequests = 15 }
+                }).Contains("| **Grand Total** | $0.55 | $3.62 |"), "Markdown table must include Grand Total row");
+            }
+        }
+
+        public static void Test_FloatingForm_CodexOnly_Card_And_Pill()
+        {
+            UsageSnapshot snap = new UsageSnapshot();
+            snap.Ready = true;
+            snap.CodexToday = new Tally { Input = 1200, Output = 300, Cost = 0.05, Requests = 1 };
+            snap.CodexWeek = new Tally { Input = 1200, Output = 300, Cost = 0.05, Requests = 1 };
+            snap.TodayTotal = snap.CodexToday;
+            snap.WeekTotal = snap.CodexWeek;
+
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.CodexFiveHour = new LimitWindow { Available = true, UsedPercent = 30 };
+            rl.CodexSevenDay = new LimitWindow { Available = true, UsedPercent = 12 };
+
+            ViewModel vm = new ViewModel();
+            vm.Usage = snap;
+            vm.Limits = rl;
+            vm.ScanClaude = false;
+            vm.ScanGemini = false;
+            vm.ScanCodex = true;
+
+            using (FloatingForm f = new FloatingForm())
+            {
+                IntPtr h = f.Handle;
+                f.SetData(vm);
+                MethodInfo buildRows = typeof(FloatingForm).GetMethod("BuildRows", BindingFlags.NonPublic | BindingFlags.Instance);
+                System.Collections.IList fullRows = buildRows.Invoke(f, null) as System.Collections.IList;
+                Assert.NotNull(fullRows);
+                bool foundCodexCard = false;
+                foreach (object r in fullRows)
+                {
+                    FieldInfo fiLeft = r.GetType().GetField("LeftCol");
+                    object lc = fiLeft != null ? fiLeft.GetValue(r) : null;
+                    if (lc != null)
+                    {
+                        FieldInfo fiTitle = lc.GetType().GetField("Title");
+                        if (fiTitle != null && "Codex CLI".Equals(fiTitle.GetValue(lc))) foundCodexCard = true;
+                    }
+                }
+                Assert.True(foundCodexCard, "Codex-only full mode must promote Codex CLI into card layout");
+
+                f.Compact = true;
+                System.Collections.IList pillRows = buildRows.Invoke(f, null) as System.Collections.IList;
+                Assert.Equal(1, pillRows.Count, "Compact Codex-only mode must render single Pill row");
+            }
+        }
+
+        public static void Test_Diag_Includes_Providers_And_Codex()
+        {
+            AppConfig cfg = new AppConfig();
+            cfg.ScanClaude = false;
+            cfg.ScanCodex = true;
+            cfg.OllamaEnabled = true;
+            cfg.OllamaPort = 11434;
+            RateLimitSnapshot rl = new RateLimitSnapshot();
+            rl.CodexFiveHour = new LimitWindow { Available = true, UsedPercent = 25 };
+
+            string report = Diag.Build(cfg, rl, new UsageSnapshot(), null, null, 3);
+            Assert.True(report.Contains("providers: claude=no"), "Diagnostics must report provider states");
+            Assert.True(report.Contains("codex=yes"), "Diagnostics must report ScanCodex state");
+            Assert.True(report.Contains("codex 5h: 25%"), "Diagnostics must report Codex 5h limit window");
+        }
+
+        public static void Test_MiniWidget_Background_Progress_Render()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                IntPtr h = f.Handle;
+                ViewModel vm = new ViewModel();
+                vm.Usage = new UsageSnapshot { Ready = true };
+                vm.Usage.TodayTotal.Cost = 1.00;
+                vm.BudgetDaily = 2.00;
+                vm.Limits = new RateLimitSnapshot();
+                vm.Limits.FiveHour = new LimitWindow { Available = true, UsedPercent = 0 };
+                vm.Limits.AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 0 };
+
+                f.Compact = true;
+                f.SetData(vm);
+
+                MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                Color emptyPixel;
+                using (Bitmap b0 = new Bitmap(f.Width, f.Height))
+                {
+                    using (Graphics g = Graphics.FromImage(b0))
+                        onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+                    emptyPixel = b0.GetPixel(10, f.Height - 2);
+                }
+
+                vm.Limits.FiveHour.UsedPercent = 85;
+                f.SetData(vm);
+                Color activePixel;
+                using (Bitmap b1 = new Bitmap(f.Width, f.Height))
+                {
+                    using (Graphics g = Graphics.FromImage(b1))
+                        onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+                    activePixel = b1.GetPixel(10, f.Height - 2);
+                }
+                Assert.True(emptyPixel.ToArgb() != activePixel.ToArgb(), "Mini widget bottom progress stripe/background must visually render when usage > 0%");
+            }
+        }
+
+        public static void Test_Session_Running_Done_And_Acknowledge_Lifecycle()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.TrackProjects = true;
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_sess_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan(); // _ready = true
+
+                string claudeFile = Path.Combine(tempDir, "sess-abc-123.jsonl");
+                string t1 = DateTime.UtcNow.AddSeconds(-5).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string userLine = string.Format(
+                    "{{\"type\":\"user\",\"timestamp\":\"{0}\",\"cwd\":\"C:\\\\MyApp\",\"message\":{{\"content\":\"hello\"}}}}",
+                    t1
+                );
+                File.WriteAllLines(claudeFile, new[] { userLine });
+                sc.Scan();
+                UsageSnapshot s1 = sc.Snapshot();
+                Assert.Equal(1, s1.Sessions.RunningCount, "User prompt must mark Claude session as running");
+                Assert.True(s1.Sessions.ClaudeRunning, "ClaudeRunning flag must be true");
+                Assert.Equal(0, s1.Sessions.DoneCount, "No done sessions expected yet");
+
+                string t2 = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string doneLine = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"r1\",\"cwd\":\"C:\\\\MyApp\",\"message\":{{\"id\":\"m1\",\"model\":\"claude-opus-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{{\"input_tokens\":500,\"output_tokens\":200,\"cache_read_input_tokens\":0}}}}}}",
+                    t2
+                );
+                File.WriteAllLines(claudeFile, new[] { userLine, doneLine });
+                sc.Scan();
+                UsageSnapshot s2 = sc.Snapshot();
+                Assert.Equal(0, s2.Sessions.RunningCount, "end_turn must clear running state");
+                Assert.Equal(1, s2.Sessions.DoneCount, "Completed turn must mark session as done to check");
+                Assert.True(s2.Sessions.ClaudeDone, "ClaudeDone flag must be true");
+
+                string agFile = Path.Combine(tempDir, "transcript.jsonl");
+                string agTool = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":1,\"tool_calls\":[{{\"name\":\"read_file\"}}],\"input_tokens\":200,\"output_tokens\":50,\"cache_read_tokens\":0}}",
+                    t1
+                );
+                File.WriteAllLines(agFile, new[] { agTool });
+                sc.Scan();
+                Assert.Equal(1, sc.Snapshot().Sessions.RunningCount, "Antigravity step with tool_calls must mark running");
+
+                string agDone = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":2,\"tool_calls\":[],\"input_tokens\":200,\"output_tokens\":100,\"cache_read_tokens\":0}}",
+                    t2
+                );
+                File.WriteAllLines(agFile, new[] { agTool, agDone });
+                sc.Scan();
+                Assert.Equal(2, sc.Snapshot().Sessions.DoneCount, "Finished Antigravity turn must add second done session");
+
+                sc.SyncHookSessions(new[] { "hook_only_1" });
+                Assert.Equal(1, sc.Snapshot().Sessions.RunningCount, "SyncHookSessions must track active hook session");
+                sc.MarkHookFinished("hook_only_1");
+                Assert.Equal(0, sc.Snapshot().Sessions.RunningCount, "MarkHookFinished must clear running state");
+                Assert.Equal(3, sc.Snapshot().Sessions.DoneCount, "MarkHookFinished must add done session to check");
+
+                sc.AcknowledgeDoneSessions();
+                Assert.Equal(0, sc.Snapshot().Sessions.DoneCount, "AcknowledgeDoneSessions must clear all done indicators");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_MiniWidget_Session_Badge_And_Click_Acknowledge()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                IntPtr h = f.Handle;
+                ViewModel vm = new ViewModel();
+                vm.Usage = new UsageSnapshot { Ready = true };
+                vm.Usage.TodayTotal.Cost = 0.75;
+                vm.Usage.Sessions.RunningCount = 1;
+                vm.Usage.Sessions.ClaudeRunning = true;
+                vm.Usage.Sessions.RunningLabels.Add("Claude · MyApp");
+                vm.Usage.Sessions.DoneCount = 2;
+                vm.Usage.Sessions.AntigravityDone = true;
+                vm.Usage.Sessions.DoneLabels.Add("Antigravity");
+
+                f.Compact = true;
+                f.SetData(vm);
+
+                PropertyInfo pDpi = typeof(FloatingForm).GetProperty("DpiScale", BindingFlags.Instance | BindingFlags.NonPublic);
+                float dpi = (float)pDpi.GetValue(f, null);
+                Assert.True(f.Width > (int)(225 * dpi), "Compact pill width must expand cleanly when session badges are active");
+
+                MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+                }
+
+                FieldInfo fiDoneRect = typeof(FloatingForm).GetField("_pillDoneRect", BindingFlags.Instance | BindingFlags.NonPublic);
+                Rectangle doneRect = (Rectangle)fiDoneRect.GetValue(f);
+                Assert.False(doneRect.IsEmpty, "Mini widget must expose clickable done badge rectangle");
+
+                bool clicked = false;
+                f.DoneSessionsClicked += delegate { clicked = true; };
+                MethodInfo onMouseDown = typeof(FloatingForm).GetMethod("OnMouseDown", BindingFlags.Instance | BindingFlags.NonPublic);
+                onMouseDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, doneRect.Left + doneRect.Width / 2, doneRect.Top + doneRect.Height / 2, 0) });
+                Assert.True(clicked, "Clicking done session badge on mini widget must fire DoneSessionsClicked");
+            }
+        }
+
+        public static void Test_Antigravity_Chunk_Exclusion_And_Confirm_Question_Indicator()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_agchunks_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string convDir = Path.Combine(tempDir, "brain", "conv-uuid-123", ".system_generated", "logs");
+                string chunkDir = Path.Combine(convDir, "chunks", "transcript");
+                string chunkFullDir = Path.Combine(convDir, "chunks", "transcript_full");
+                Directory.CreateDirectory(chunkDir);
+                Directory.CreateDirectory(chunkFullDir);
+
+                sc.Roots = delegate { return new List<string> { Path.Combine(tempDir, "brain") }; };
+                sc.Scan(); // _ready = true
+
+                string t1 = DateTime.UtcNow.AddSeconds(-4).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string t2 = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string runLine = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":1,\"tool_calls\":[{{\"name\":\"run_command\"}}],\"input_tokens\":500,\"output_tokens\":50,\"cache_read_tokens\":0}}",
+                    t1
+                );
+
+                // Put same/chunked entries inside chunks dirs as well as main transcript.jsonl
+                File.WriteAllLines(Path.Combine(convDir, "transcript.jsonl"), new[] { runLine });
+                File.WriteAllLines(Path.Combine(chunkDir, "00000001.jsonl"), new[] { runLine });
+                File.WriteAllLines(Path.Combine(chunkFullDir, "00000002.jsonl"), new[] { runLine });
+
+                // Background observer Claude file must not inflate running session count
+                string obsDir = Path.Combine(tempDir, "brain", "claude-mem-observer-sessions--1");
+                Directory.CreateDirectory(obsDir);
+                File.WriteAllLines(Path.Combine(obsDir, "obs1.jsonl"), new[] {
+                    string.Format("{{\"type\":\"user\",\"timestamp\":\"{0}\",\"message\":{{\"content\":\"bg\"}}}}", t1)
+                });
+
+                sc.Scan();
+                UsageSnapshot s1 = sc.Snapshot();
+                Assert.Equal(1, s1.Sessions.RunningCount, "Chunks and observer dirs must not inflate Antigravity active session count");
+                Assert.Equal(550L, s1.AntigravityToday.Total, "Chunks directory must not duplicate Antigravity token totals");
+
+                // Antigravity ask_question triggers Confirm (?) indicator
+                string askLine = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":2,\"tool_calls\":[{{\"name\":\"ask_question\"}}],\"input_tokens\":300,\"output_tokens\":50,\"cache_read_tokens\":0}}",
+                    t2
+                );
+                File.WriteAllLines(Path.Combine(convDir, "transcript.jsonl"), new[] { runLine, askLine });
+                sc.Scan();
+                UsageSnapshot s2 = sc.Snapshot();
+                Assert.Equal(0, s2.Sessions.RunningCount, "Session asking question must move out of Running");
+                Assert.Equal(1, s2.Sessions.ConfirmCount, "ask_question must trigger NeedsConfirm (?) indicator");
+                Assert.True(s2.Sessions.AntigravityConfirm, "AntigravityConfirm flag must be true");
+
+                // Hook input notification also triggers Confirm (?)
+                sc.MarkHookNeedsConfirm("claude_q_1");
+                UsageSnapshot s3 = sc.Snapshot();
+                Assert.Equal(2, s3.Sessions.ConfirmCount, "Hook input notification must trigger Claude confirmation indicator");
+                Assert.True(s3.Sessions.ClaudeConfirm, "ClaudeConfirm flag must be true");
+
+                sc.AcknowledgeDoneSessions();
+                Assert.Equal(0, sc.Snapshot().Sessions.ConfirmCount, "AcknowledgeDoneSessions must clear ? confirmation badges");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_MiniWidget_Confirm_Question_Badge()
+        {
+            using (FloatingForm f = new FloatingForm())
+            {
+                IntPtr h = f.Handle;
+                ViewModel vm = new ViewModel();
+                vm.Usage = new UsageSnapshot { Ready = true };
+                vm.Usage.Sessions.ConfirmCount = 1;
+                vm.Usage.Sessions.AntigravityConfirm = true;
+                vm.Usage.Sessions.ConfirmLabels.Add("Antigravity");
+
+                f.Compact = true;
+                f.SetData(vm);
+
+                PropertyInfo pDpi = typeof(FloatingForm).GetProperty("DpiScale", BindingFlags.Instance | BindingFlags.NonPublic);
+                float dpi = (float)pDpi.GetValue(f, null);
+                Assert.True(f.Width > (int)(225 * dpi), "Mini widget must expand when ? confirmation badge is active");
+
+                MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+                }
+
+                FieldInfo fiDoneRect = typeof(FloatingForm).GetField("_pillDoneRect", BindingFlags.Instance | BindingFlags.NonPublic);
+                Rectangle ackRect = (Rectangle)fiDoneRect.GetValue(f);
+                Assert.False(ackRect.IsEmpty, "Mini widget must expose clickable ? badge rectangle");
+            }
+        }
+
+        public static void Test_FloatingForm_MultiProvider_3Col_And_Switcher()
+        {
+            string prevLayout = Opts.CardLayout;
+            try
+            {
+                ViewModel vm = new ViewModel();
+                vm.ScanClaude = true; vm.ScanGemini = true; vm.ScanCodex = true; vm.ScanGeminiCli = true;
+                vm.Usage = new UsageSnapshot { Ready = true };
+                vm.Usage.CodexWeek.Input = 100; vm.Usage.CodexToday.Input = 100;
+                vm.Usage.GeminiCliWeek.Input = 100; vm.Usage.GeminiCliToday.Input = 100;
+                vm.Limits = new RateLimitSnapshot();
+
+                Opts.CardLayout = "2col";
+                using (FloatingForm f = new FloatingForm())
+                {
+                    IntPtr h = f.Handle;
+                    f.SetData(vm);
+                    MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                    using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                    using (Graphics g = Graphics.FromImage(bmp))
+                        onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+
+                    FieldInfo fiSw = typeof(FloatingForm).GetField("_cardsSwitchRect", BindingFlags.Instance | BindingFlags.NonPublic);
+                    Rectangle swRect = (Rectangle)fiSw.GetValue(f);
+                    Assert.False(swRect.IsEmpty, "2col mode with 3+ providers must expose card page switcher rect");
+
+                    MethodInfo onMouseDown = typeof(FloatingForm).GetMethod("OnMouseDown", BindingFlags.Instance | BindingFlags.NonPublic);
+                    onMouseDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, swRect.Left + 2, swRect.Top + 2, 0) });
+                    Assert.Equal(1, f.CardPage, "Clicking card switcher badge must advance CardPage");
+                }
+
+                Opts.CardLayout = "3col";
+                using (FloatingForm f3 = new FloatingForm())
+                {
+                    IntPtr h = f3.Handle;
+                    f3.CardPage = 0;
+                    f3.SetData(vm);
+                    PropertyInfo pDpi = typeof(FloatingForm).GetProperty("DpiScale", BindingFlags.Instance | BindingFlags.NonPublic);
+                    float dpi = (float)pDpi.GetValue(f3, null);
+                    Assert.True(f3.Width >= (int)(490 * dpi), "3col mode with 3+ providers must expand width for 3 columns");
+                }
+            }
+            finally
+            {
+                Opts.CardLayout = prevLayout;
+            }
+        }
+
+        public static void Test_FloatingForm_ContextBar_CopyCompact_And_Terminal()
+        {
+            bool prevCtx = Opts.ShowContextBar;
+            try
+            {
+                Opts.ShowContextBar = true;
+                using (FloatingForm f = new FloatingForm())
+                {
+                    IntPtr h = f.Handle;
+                    ViewModel vm = new ViewModel();
+                    vm.Usage = new UsageSnapshot { Ready = true, LastContextTokens = 160000, LastActiveCwd = "d:\\dummy\\proj" };
+                    f.SetData(vm);
+
+                    MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                    using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                    using (Graphics g = Graphics.FromImage(bmp))
+                        onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+
+                    FieldInfo fiCopy = typeof(FloatingForm).GetField("_ctxCopyRect", BindingFlags.Instance | BindingFlags.NonPublic);
+                    FieldInfo fiTerm = typeof(FloatingForm).GetField("_ctxTermRect", BindingFlags.Instance | BindingFlags.NonPublic);
+                    Rectangle copyRect = (Rectangle)fiCopy.GetValue(f);
+                    Rectangle termRect = (Rectangle)fiTerm.GetValue(f);
+                    Assert.False(copyRect.IsEmpty, "Context bar must render /compact copy rect");
+                    Assert.False(termRect.IsEmpty, "Context bar must render terminal jump rect when cwd set");
+
+                    bool copyFired = false, termFired = false;
+                    f.CopyCompactRequested += delegate { copyFired = true; };
+                    f.OpenActiveTerminalRequested += delegate { termFired = true; };
+                    MethodInfo onMouseDown = typeof(FloatingForm).GetMethod("OnMouseDown", BindingFlags.Instance | BindingFlags.NonPublic);
+                    onMouseDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, copyRect.Left + 2, copyRect.Top + 2, 0) });
+                    onMouseDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, termRect.Left + 2, termRect.Top + 2, 0) });
+                    Assert.True(copyFired, "Clicking /compact chip must fire CopyCompactRequested");
+                    Assert.True(termFired, "Clicking >_ chip must fire OpenActiveTerminalRequested");
+                }
+            }
+            finally
+            {
+                Opts.ShowContextBar = prevCtx;
+            }
+        }
+
+        public static void Test_FloatingForm_MiniPillModes()
+        {
+            string prevMode = Opts.MiniPillMode;
+            try
+            {
+                ViewModel vm = new ViewModel();
+                vm.Usage = new UsageSnapshot { Ready = true, TokensLast10m = 40000 };
+                vm.Usage.TodayTotal.Cost = 1.45;
+                vm.Usage.TodayTotal.Input = 25000;
+                vm.BudgetDaily = 5.0;
+                vm.Limits = new RateLimitSnapshot
+                {
+                    FiveHour = new LimitWindow { Available = true, UsedPercent = 42, ResetsAt = DateTime.Now.AddHours(3) },
+                    AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 85, ResetsAt = DateTime.Now.AddHours(2) }
+                };
+
+                foreach (string mode in new[] { "highest", "cost_runway" })
+                {
+                    Opts.MiniPillMode = mode;
+                    using (FloatingForm f = new FloatingForm())
+                    {
+                        IntPtr h = f.Handle;
+                        f.Compact = true;
+                        f.SetData(vm);
+                        Assert.True(f.Height < 39, "Mini pill height must remain compact in mode " + mode);
+                        MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                        using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                        using (Graphics g = Graphics.FromImage(bmp))
+                            onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+                    }
+                }
+            }
+            finally
+            {
+                Opts.MiniPillMode = prevMode;
+            }
+        }
+
+        public static void Test_OllamaProbe_Ps_Vram_Parsing()
+        {
+            OllamaStatus st = OllamaProbe.ParseResponse("{\"models\":[{\"name\":\"qwen2.5-coder:7b\"},{\"name\":\"llama3.2:3b\"}]}");
+            Assert.True(st.Online);
+            Assert.Equal(2, st.ModelCount);
+            OllamaProbe.ParsePsResponse("{\"models\":[{\"name\":\"qwen2.5-coder:7b\",\"size_vram\":4294967296}]}", st);
+            Assert.Equal(1, st.LoadedCount);
+            Assert.Equal(4294967296L, st.TotalVramBytes);
+            string formatted = StatusFormatter.Format(new RateLimitSnapshot(), new UsageSnapshot(), false, false, false, st);
+            Assert.True(formatted.IndexOf("1 loaded", StringComparison.OrdinalIgnoreCase) >= 0, "StatusFormatter must report loaded Ollama model count");
+            Assert.True(formatted.IndexOf("4.0 GB VRAM", StringComparison.OrdinalIgnoreCase) >= 0, "StatusFormatter must report VRAM usage");
+        }
+
+        public static void Test_CustomPricing_Override_Priority()
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), "cuw_custom_price_" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                File.WriteAllText(tmp, "{\"models\":[{\"prefix\":\"claude-sonnet-4\",\"input\":9.9,\"output\":19.8,\"cache_write_5m\":12.0,\"cache_write_1h\":15.0,\"cache_read\":0.9}]}");
+                Pricing p = Pricing.LoadFromFiles(null, tmp);
+                Assert.True(p.HasCustomPricing);
+                Price found = p.Find("claude-sonnet-4-6");
+                Assert.NotNull(found);
+                Assert.True(Math.Abs(found.Input - 9.9) < 0.001, "Custom pricing prefix must override built-in model");
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
+            }
+        }
+
+        public static void Test_ScanCache_SkipUnchanged_And_AppendDelta()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_cache_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string cacheFile = Path.Combine(tempDir, "scan_cache.json");
+                string logDir = Path.Combine(tempDir, "proj1");
+                Directory.CreateDirectory(logDir);
+                string logFile = Path.Combine(logDir, "sess1.jsonl");
+                string ts1 = DateTime.UtcNow.AddMinutes(-45).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string line1 = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"r1\",\"cwd\":\"d:\\\\proj1\",\"message\":{{\"id\":\"m1\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{{\"input_tokens\":100,\"output_tokens\":50,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}}}}",
+                    ts1);
+                File.WriteAllLines(logFile, new[] { line1 });
+
+                Pricing pr = Pricing.Load();
+                UsageScanner sc1 = new UsageScanner(pr);
+                sc1.CacheFilePath = cacheFile;
+                sc1.ScanGeminiCli = false; sc1.ScanOpenCode = false;
+                sc1.Roots = delegate { return new List<string> { tempDir }; };
+                sc1.Scan();
+                Assert.Equal(1, sc1.DiskReadFiles);
+                Assert.Equal(0, sc1.CacheHitFiles);
+                Assert.Equal(150L, sc1.Snapshot().ClaudeToday.Total);
+
+                UsageScanner sc2 = new UsageScanner(pr);
+                sc2.CacheFilePath = cacheFile;
+                sc2.ScanGeminiCli = false; sc2.ScanOpenCode = false;
+                sc2.Roots = delegate { return new List<string> { tempDir }; };
+                sc2.Scan();
+                Assert.Equal(1, sc2.CacheHitFiles, "Unchanged JSONL file on restart must hit scan cache");
+                Assert.Equal(0, sc2.DiskReadFiles, "Unchanged JSONL file must skip disk read on restart");
+                Assert.Equal(150L, sc2.Snapshot().ClaudeToday.Total, "Cached replay must restore exact tokens");
+
+                string ts2 = DateTime.UtcNow.AddMinutes(-40).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string line2 = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"r2\",\"cwd\":\"d:\\\\proj1\",\"message\":{{\"id\":\"m2\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{{\"input_tokens\":200,\"output_tokens\":25,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}}}}",
+                    ts2);
+                File.AppendAllLines(logFile, new[] { line2 });
+
+                UsageScanner sc3 = new UsageScanner(pr);
+                sc3.CacheFilePath = cacheFile;
+                sc3.ScanGeminiCli = false; sc3.ScanOpenCode = false;
+                sc3.Roots = delegate { return new List<string> { tempDir }; };
+                sc3.Scan();
+                Assert.Equal(375L, sc3.Snapshot().ClaudeToday.Total, "Appended JSONL after cache hit must accumulate delta accurately");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_GeminiCli_And_OpenCode_Session_Parsers()
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_cliext_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string gemChats = Path.Combine(tempDir, "gemtmp", "projhash", "chats");
+                string ocMsgDir = Path.Combine(tempDir, "opencode", "storage", "message", "sess_oc1");
+                Directory.CreateDirectory(gemChats);
+                Directory.CreateDirectory(ocMsgDir);
+
+                string nowIso = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                File.WriteAllText(Path.Combine(gemChats, "session-2026.json"), string.Format(
+                    "{{\"sessionId\":\"g1\",\"cwd\":\"d:\\\\mygemproj\",\"messages\":[{{\"id\":\"gm1\",\"timestamp\":\"{0}\",\"type\":\"gemini\",\"model\":\"gemini-2.5-pro\",\"tokens\":{{\"input\":1000,\"output\":200,\"cached\":400,\"thoughts\":50,\"total\":1650}}}}]}}",
+                    nowIso));
+
+                long epochMs = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+                File.WriteAllText(Path.Combine(ocMsgDir, "msg_1.json"), string.Format(CultureInfo.InvariantCulture,
+                    "{{\"id\":\"m_oc1\",\"sessionID\":\"sess_oc1\",\"role\":\"assistant\",\"modelID\":\"claude-sonnet-4-6\",\"path\":{{\"cwd\":\"d:\\\\myocproj\"}},\"time\":{{\"completed\":{0}}},\"tokens\":{{\"input\":500,\"output\":100,\"cache\":{{\"read\":300,\"write\":0}}}},\"cost\":0.02}}",
+                    epochMs));
+
+                UsageScanner sc = new UsageScanner(Pricing.Load());
+                sc.CacheFilePath = null;
+                sc.ScanClaude = false; sc.ScanGemini = false; sc.ScanCodex = false;
+                sc.ScanGeminiCli = true; sc.ScanOpenCode = true;
+                sc.Roots = delegate { return new List<string>(); };
+                sc.GeminiCliRoots = delegate { return new List<string> { Path.Combine(tempDir, "gemtmp") }; };
+                sc.OpenCodeDirs = delegate { return new List<string> { Path.Combine(tempDir, "opencode") }; };
+                sc.Scan();
+
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(1650L, snap.GeminiCliToday.Total, "Gemini CLI session tokens must include input+cached+output+thoughts");
+                Assert.Equal(900L, snap.OpenCodeToday.Total, "OpenCode message JSON tokens must parse accurately");
+                Assert.True(snap.ExpensiveSessions.Count >= 2, "ExpensiveSessions must collect Gemini CLI and OpenCode sessions");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_HistoryStore_ProviderBreakdown_And_JsonExport()
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), "cuw_test_hist_" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                HistoryStore hs = new HistoryStore(tmp);
+                Dictionary<string, double> pc = new Dictionary<string, double>();
+                pc["Claude"] = 1.25;
+                pc["Codex"] = 0.35;
+                hs.Merge(new[] { new DayStat(DateTime.Today, 5000, 1.60, 10, pc) });
+
+                HistoryStore reloaded = HistoryStore.LoadFrom(tmp);
+                DayStat[] ser = reloaded.Series(1);
+                Assert.True(Math.Abs(ser[0].CostFor("Claude") - 1.25) < 0.001, "HistoryStore must persist Claude provider cost breakdown");
+                Assert.True(Math.Abs(ser[0].CostFor("Codex") - 0.35) < 0.001, "HistoryStore must persist Codex provider cost breakdown");
+
+                string json = reloaded.ToJson();
+                Assert.True(json.Contains("\"providers\"") && json.Contains("\"Claude\""), "HistoryStore.ToJson must export provider breakdown");
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
+            }
+        }
+
+        public static void Test_ExpensiveSessions_Anomaly_Detection()
+        {
+            L.Set("en");
+            SessionCostRecord lowCache = new SessionCostRecord { Input = 20000, CacheRead = 1000, Output = 500, Cost = 0.40 };
+            string anomLow = ProjectExplorerForm.SessionAnomalyLabel(lowCache, 0.5, 4);
+            Assert.True(anomLow.IndexOf("Low cache", StringComparison.OrdinalIgnoreCase) >= 0, "Low cache ratio must flag anomaly");
+
+            SessionCostRecord highSpend = new SessionCostRecord { Input = 1000, CacheRead = 9000, Output = 500, Cost = 6.50 };
+            string anomHigh = ProjectExplorerForm.SessionAnomalyLabel(highSpend, 1.0, 4);
+            Assert.True(anomHigh.IndexOf("High spend", StringComparison.OrdinalIgnoreCase) >= 0, "High spend must flag anomaly");
+        }
+
+        public static void Test_QuietHours_And_DigestScheduler()
+        {
+            AppConfig cfg = new AppConfig();
+            cfg.QuietHoursEnabled = true;
+            cfg.QuietStartHour = 22;
+            cfg.QuietEndHour = 7;
+
+            Assert.True(QuietHours.IsActive(cfg, new DateTime(2026, 11, 25, 23, 30, 0)), "23:30 must be inside 22..7 quiet hours");
+            Assert.True(QuietHours.IsActive(cfg, new DateTime(2026, 11, 25, 6, 15, 0)), "06:15 must be inside 22..7 quiet hours");
+            Assert.False(QuietHours.IsActive(cfg, new DateTime(2026, 11, 25, 7, 0, 0)), "07:00 ends quiet hours");
+            Assert.False(QuietHours.IsActive(cfg, new DateTime(2026, 11, 25, 18, 0, 0)), "18:00 must be outside 22..7 quiet hours");
+
+            cfg.WebhookEnabled = true;
+            cfg.DigestEnabled = true;
+            cfg.DigestSchedule = "daily";
+            cfg.DigestHour = 18;
+            DateTime t18 = new DateTime(2026, 11, 25, 18, 5, 0);
+            Assert.True(DigestScheduler.ShouldSend(cfg, t18), "Daily digest should fire at DigestHour outside quiet hours");
+            cfg.LastDigestKey = DigestScheduler.ComputePeriodKey("daily", t18);
+            Assert.False(DigestScheduler.ShouldSend(cfg, t18), "Digest should not fire twice on the same period key");
+        }
+
+        public static void Test_Config_ExportImport_Excludes_Secrets()
+        {
+            AppConfig src = new AppConfig();
+            src.CardLayout = "3col";
+            src.MiniPillMode = "cost_runway";
+            src.AlertCooldownMinutes = 42;
+            src.QuietHoursEnabled = true;
+            src.AdminKeyProtected = "SECRET_DPAPI_ADMIN_BLOB";
+            src.WebhookUrlProtected = "SECRET_DPAPI_WEBHOOK_BLOB";
+
+            string exported = src.ExportProfileJson();
+            Assert.False(exported.Contains("SECRET_DPAPI_ADMIN_BLOB"), "Profile export must exclude AdminKeyProtected");
+            Assert.False(exported.Contains("SECRET_DPAPI_WEBHOOK_BLOB"), "Profile export must exclude WebhookUrlProtected");
+
+            AppConfig existing = new AppConfig();
+            existing.AdminKeyProtected = "LOCAL_ADMIN_KEY";
+            existing.WebhookUrlProtected = "LOCAL_WEBHOOK";
+            AppConfig imported = AppConfig.ImportProfileJson(exported, existing);
+            existing.ApplyProfileFrom(imported);
+            Assert.Equal("3col", existing.CardLayout);
+            Assert.Equal("cost_runway", existing.MiniPillMode);
+            Assert.Equal(42, existing.AlertCooldownMinutes);
+            Assert.True(existing.QuietHoursEnabled);
+            Assert.Equal("LOCAL_ADMIN_KEY", existing.AdminKeyProtected, "Profile import must preserve existing local DPAPI admin key");
+            Assert.Equal("LOCAL_WEBHOOK", existing.WebhookUrlProtected, "Profile import must preserve existing local DPAPI webhook key");
+        }
+
+        public static void Test_CommandParser_IPC()
+        {
+            Assert.Equal("toggle_compact", CommandParser.ParseCommandName("{\"cmd\":\"toggle_compact\",\"ts\":1700000000}"));
+            Assert.Equal("refresh", CommandParser.ParseCommandName("{\"command\":\"Refresh\"}"));
+            Assert.Equal((string)null, CommandParser.ParseCommandName("{broken"));
+        }
+
+        public static void Test_ContextLimits_PerModel()
+        {
+            Assert.Equal(1000000L, ContextLimits.WindowForModel("gemini-2.5-pro"));
+            Assert.Equal(1000000L, ContextLimits.WindowForModel("claude-sonnet-4-6[1m]"));
+            Assert.Equal(400000L, ContextLimits.WindowForModel("gpt-5-codex"));
+            Assert.Equal(200000L, ContextLimits.WindowForModel("claude-sonnet-4-6"));
+            Assert.Equal("1M", ContextLimits.FormatCapShort(1000000L));
+            Assert.Equal("400k", ContextLimits.FormatCapShort(400000L));
+            Assert.Equal("200k", ContextLimits.FormatCapShort(200000L));
+        }
+
+        public static void Test_UsageScanner_SessionCwd_And_SingleAcknowledge()
+        {
+            UsageScanner sc = new UsageScanner(Pricing.Load());
+            sc.CacheFilePath = null;
+            sc.ScanGeminiCli = false; sc.ScanOpenCode = false;
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_scwd_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan(); // _ready = true
+                string tNow = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                File.WriteAllLines(Path.Combine(tempDir, "s1.jsonl"), new[] {
+                    string.Format("{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"cwd\":\"d:\\\\projA\",\"requestId\":\"r1\",\"message\":{{\"id\":\"m1\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{{\"input_tokens\":100,\"output_tokens\":20,\"cache_read_input_tokens\":0}}}}}}", tNow)
+                });
+                File.WriteAllLines(Path.Combine(tempDir, "s2.jsonl"), new[] {
+                    string.Format("{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"cwd\":\"d:\\\\projB\",\"requestId\":\"r2\",\"message\":{{\"id\":\"m2\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{{\"input_tokens\":100,\"output_tokens\":20,\"cache_read_input_tokens\":0}}}}}}", tNow)
+                });
+                sc.Scan();
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(2, snap.Sessions.Items.Count, "Both sessions should be listed in Items");
+                SessionActivity s1 = snap.Sessions.Items.Find(delegate(SessionActivity x) { return x.Id == "s1"; });
+                Assert.NotNull(s1);
+                Assert.Equal("d:\\projA", s1.Cwd);
+                Assert.Equal("done", s1.State);
+
+                sc.AcknowledgeSession("s1");
+                UsageSnapshot after = sc.Snapshot();
+                Assert.Equal(0, after.Sessions.DoneCount, "AcknowledgeSession must clear only targeted session");
+                Assert.Equal(1, after.Sessions.RunningCount, "Running session s2 must stay active");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_Pricing_ValidateCustomJson()
+        {
+            Assert.Equal((string)null, Pricing.ValidateCustomJson("{\"models\":[{\"prefix\":\"my-model\",\"input\":1.5,\"output\":2.5}]}"));
+            Assert.NotNull(Pricing.ValidateCustomJson("{bad json"), "Malformed JSON must return validation error");
+            Assert.NotNull(Pricing.ValidateCustomJson("{\"models\":[{\"prefix\":\"bad\",\"input\":-1}]}"), "Negative rate must return validation error");
+        }
+
+        public static void Test_Diag_Includes_NewFields()
+        {
+            AppConfig cfg = new AppConfig();
+            cfg.CardLayout = "3col";
+            cfg.QuietHoursEnabled = true;
+            UsageSnapshot u = new UsageSnapshot { Ready = true, OpenCodeSqliteMissingCli = true, CacheHitFiles = 4, DiskReadFiles = 1 };
+            string report = Diag.Build(cfg, new RateLimitSnapshot(), u, null, null, 10);
+            Assert.True(report.Contains("sqliteMissingCli=yes"), "Diag must expose sqliteMissingCli");
+            Assert.True(report.Contains("cardLayout=3col"), "Diag must expose CardLayout");
+            Assert.True(report.Contains("cacheHits=4"), "Diag must expose CacheHitFiles");
+        }
+
+        public static void Test_FloatingForm_DynamicContext_And_SessionMenu()
+        {
+            bool prevCtx = Opts.ShowContextBar;
+            try
+            {
+                Opts.ShowContextBar = true;
+                using (FloatingForm f = new FloatingForm())
+                {
+                    IntPtr h = f.Handle;
+                    ViewModel vm = new ViewModel();
+                    vm.Usage = new UsageSnapshot { Ready = true, LastContextTokens = 250000, LastContextModel = "gemini-2.5-pro" };
+                    vm.Usage.Sessions.RunningCount = 1;
+                    vm.Usage.Sessions.Items.Add(new SessionActivity { Id = "srun", Provider = "Claude", Project = "projA", State = "running" });
+                    f.Compact = false;
+                    f.SetData(vm);
+
+                    MethodInfo mBuild = typeof(FloatingForm).GetMethod("BuildRows", BindingFlags.Instance | BindingFlags.NonPublic);
+                    var rows = (System.Collections.IList)mBuild.Invoke(f, null);
+                    bool found1M = false;
+                    foreach (object r in rows)
+                    {
+                        string k = r.GetType().GetField("Kind").GetValue(r).ToString();
+                        string left = r.GetType().GetField("Left").GetValue(r) as string;
+                        if (k == "ContextBar" && left != null && left.Contains("1M")) found1M = true;
+                    }
+                    Assert.True(found1M, "Gemini model ContextBar must show / 1M cap instead of hardcoded 200k");
+
+                    MethodInfo onPaint = typeof(FloatingForm).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic);
+                    using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                    using (Graphics g = Graphics.FromImage(bmp))
+                        onPaint.Invoke(f, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, f.Width, f.Height)) });
+
+                    FieldInfo fiSessRow = typeof(FloatingForm).GetField("_sessRowRect", BindingFlags.Instance | BindingFlags.NonPublic);
+                    Rectangle sr = (Rectangle)fiSessRow.GetValue(f);
+                    Assert.False(sr.IsEmpty, "Sessions row rect must be interactive");
+
+                    bool menuFired = false;
+                    f.SessionMenuRequested += delegate { menuFired = true; };
+                    MethodInfo onMouseDown = typeof(FloatingForm).GetMethod("OnMouseDown", BindingFlags.Instance | BindingFlags.NonPublic);
+                    onMouseDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, sr.Left + 5, sr.Top + 2, 0) });
+                    Assert.True(menuFired, "Clicking Sessions row must fire SessionMenuRequested");
+                }
+            }
+            finally
+            {
+                Opts.ShowContextBar = prevCtx;
             }
         }
     }

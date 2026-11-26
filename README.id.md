@@ -5,7 +5,7 @@
 <h1 align="center">AI Usage Watcher</h1>
 
 <p align="center">
-  <em>Real-time Desktop Quota &amp; Token Monitor for Claude Code and Google Antigravity</em>
+  <em>Real-time Desktop Quota &amp; Token Monitor for Claude Code, Google Antigravity, OpenAI Codex CLI, &amp; Ollama</em>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
 </p>
 
-**AI Usage Watcher** adalah aplikasi widget desktop ringan (native Windows) dan monitor system tray untuk memantau konsumsi token, estimasi biaya API, serta batas kuota (*rate limits*) dari **Claude Code** dan **Google Antigravity (Gemini)** secara *real-time*.
+**AI Usage Watcher** adalah aplikasi widget desktop ringan (native Windows) dan monitor system tray untuk memantau konsumsi token, estimasi biaya API, serta batas kuota (*rate limits*) dari **Claude Code**, **Google Antigravity (Gemini)**, **OpenAI Codex CLI**, dan **Ollama** secara *real-time*.
 
 Dibuat menggunakan C# Windows Forms murni pada **.NET Framework 4.8** bawaan Windows: berukuran sangat kecil (~385 KB), tanpa instalasi runtime tambahan, tanpa dependensi Visual Studio atau paket NuGet eksternal, dan **tanpa pernah memakan taskbar** (*zero taskbar clutter*).
 
@@ -108,27 +108,32 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 
 ## ✨ Fitur Utama
 
-### 📊 Pemantauan Multi-Provider AI (Claude Code + Google Antigravity)
+### 📊 Pemantauan Multi-Provider AI (Claude Code + Antigravity + Codex CLI + Ollama)
 - **Log Lokal Claude Code (`~/.claude/projects/**/*.jsonl`)**: Pindai token prompt, output, serta cache secara inkremental dan dedup lintas file dengan waktu lokal.
 - **Log Lokal Antigravity (`~/.gemini/antigravity/brain/**/transcript.jsonl`)**: Pemantau *real-time* transkrip Google Antigravity untuk menghitung token model Gemini 2.5/3.0 Pro & Flash serta model pihak ketiga (Claude Opus/Sonnet di Antigravity).
+- **Log Lokal OpenAI Codex CLI (`~/.codex/sessions/**/rollout-*.jsonl`)**: Memindai metadata sesi Codex, `turn_context`, `last_token_usage` inkremental, dan `rate_limits` 5-jam / mingguan, termasuk pemindaian sesi di WSL2.
+- **Pemindai Gemini CLI & OpenCode**: Memantau sesi Gemini CLI (`~/.gemini/tmp/**/chats/session-*.json`) dan OpenCode (`~/.local/share/opencode/storage/message/**/*.json`, plus fallback query read-only `sqlite3` CLI bila tersedia di PATH) lengkap dengan cache offset file inkremental (`scan_cache.json`).
+- **Kartu 3+ Provider & Bar Konteks Sesi Interaktif**: Pilihan layout grid 3 kolom atau pengalih halaman 2 kolom (`1/2 ▸`), bar **Konteks Sesi** dinamis per-model (`200k` / `400k` / `1M`) dengan tombol cepat `/compact`, buka terminal aktif, menu jump per-sesi di badge sesi, serta kustomisasi metrik Mini HUD Pill (`All`, `Highest %`, `Cost + Runway`).
 - **Rate Limits Resmi via Connect-RPC**: Mengambil persentase sisa kuota resmi Antigravity langsung dari background Language Server (`RetrieveUserQuotaSummary`) melalui deteksi otomatis berkas daemon `hub_*.json` pada loopback `127.0.0.1`.
-- **Rate Limits 5 Jam & 7 Hari**: Menghitung konsumsi kuota berjalan 5 jam (*rolling 5-hour window*) dan mingguan untuk Claude maupun Antigravity, lengkap dengan countdown waktu dan jam reset pasti e.g. `17h 59m (24 Nov 02:00)`.
+- **Rate Limits 5 Jam & 7 Hari**: Menghitung konsumsi kuota berjalan 5 jam (*rolling 5-hour window*) dan mingguan untuk Claude, Antigravity, dan Codex CLI, lengkap dengan countdown waktu dan jam reset pasti e.g. `17h 59m (24 Nov 02:00)`.
 - **Prediksi Habis Kuota (Runway Forecast)**: Memperkirakan sisa menit/jam sampai kuota habis (`Runway: ~45m`) secara dinamis saat laju konsumsi aktif (`TokensLast10m > 5.000`).
 - **Breakdown Model Teratas pada Kartu**: Memperlihatkan 2 model paling banyak digunakan beserta total tokennya (mis. `Sonnet 3.5 1.8M`, `Haiku 3.5 600K`) langsung di kartu provider.
 - **Penanda Laju (Pacing Marker)**: Garis putih pada bar menunjukkan rasio waktu yang telah berlalu dibanding persentase kuota yang terpakai. Peringatan otomatis jika laju pemakaian diprediksi menghabiskan kuota sebelum waktu reset.
 - **Jadwal Sinkronisasi & Info Pembaruan**: Menampilkan statusline pembaruan data `Diperbarui [jam] · Sinkronisasi [jam berikutnya] (atau saat chat)` agar pengguna selalu tahu kapan kuota disegarkan.
-- **Seleksi Provider Fleksibel**: Pengguna dapat mengaktifkan atau menonaktifkan pemantauan Claude, Gemini/Antigravity, atau Admin API secara independen melalui tab Pengaturan Data. Tampilan widget otomatis beradaptasi menjadi Single Card saat hanya 1 provider aktif, atau Dual Cards saat keduanya aktif.
+- **Seleksi Provider Fleksibel**: Pengguna dapat mengaktifkan atau menonaktifkan pemantauan Claude, Gemini/Antigravity, Codex CLI, Ollama, atau Admin API melalui Pengaturan maupun Setup Wizard (termasuk pergantian bahasa UI langsung saat klik Apply).
 
 ### ⚡ Produktivitas & Laporan (Aksi Cepat)
 - **Panduan Penyiapan Awal (Setup Wizard)**: Menyambut pengguna saat pertama kali menjalankan aplikasi dengan panduan 3 langkah interaktif: otomatis mendeteksi tool AI yang terpasang (Claude Code, Google Antigravity, Ollama), mengatur tema visual & efek kaca buram Windows 11, menentukan posisi tempel layar, dan memasang ekstensi status bar VS Code/Cursor. Dapat dijalankan ulang kapan saja lewat menu tray (**"Panduan Penyiapan..."**).
 - **Status Bar Pendamping VS Code & Cursor**: Pantau metrik langsung di footer status bar VS Code dan Cursor! Pasang sekali klik dari menu tray (**"Pasang Status Bar VS Code / Cursor..."**) yang langsung menyalin ekstensi ke `%USERPROFILE%\.vscode\extensions` dan `%USERPROFILE%\.cursor\extensions`. Menampilkan persen kuota, biaya hari ini, dan penghematan cache (`$(dashboard) C: 42% | AG: 20% | $0.85`) di status bar dengan tooltip Markdown lengkap.
 - **Efek Kaca Buram Windows 11 (Mica & Acrylic)**: Efek blur transparan asli Windows menggunakan API Desktop Window Manager (DWM). Pilih antara **Kaca Buram Akrilik (Acrylic)**, **Mica**, **Mica Alt**, atau **Solid / Polos** di tab Pengaturan Tampilan.
 - **Snap Multi-Monitor & Tempel 4 Sudut Layar**: Pilihan layar monitor (Display 1, Display 2, dst.) dan snap otomatis dengan presisi magnetik ke 4 sudut layar (**Kiri-Atas**, **Kanan-Atas**, **Kiri-Bawah**, **Kanan-Bawah**) atau tepi tengah langsung dari menu tray atau dialog Pengaturan.
-- **Eksplorasi Biaya Proyek & Heatmap Aktivitas 35 Hari**: Dialog GUI khusus (`Eksplorasi Biaya Proyek...` di tray) dengan Heatmap kontribusi aktivitas 35 hari (5 minggu x 7 hari) gaya GitHub yang memperlihatkan densitas token harian dan tooltip rincian. Dilengkapi tabel proyek per direktori dengan tombol "Buka Folder", "Buka Terminal", dan "Salin Markdown".
+- **Eksplorasi Biaya Proyek, Tren Penyedia 30 Hari & Sesi Terboros**: Dialog GUI bertab (`Eksplorasi Biaya Proyek...` di tray) dengan Heatmap 35 hari, kotak filter, kolom Penyedia (Provider), Grand Total, grafik tren biaya 30 hari per penyedia, detektor anomali **Sesi Terboros** (cache hit rendah / biaya tinggi), tombol "Buka Folder", "Buka Terminal" (`wt.exe`), "Buka di VS Code", dan "Salin Markdown".
+- **Menu Aksi Cepat Status Bar VS Code / Cursor**: Klik status bar membuka Quick Pick menu untuk refresh paksa widget, buka Eksplorasi Biaya Proyek, toggle mode ringkas/lengkap, salin ringkasan atau `/compact`, maupun buka file JSON mentah.
 - **Penghematan Prompt Cache & Hit Rate**: Indikator hijau langsung di kartu provider: `⚡ Hemat ≈$X.XX (Cache YY%)` untuk mengetahui seberapa besar efisiensi biaya dari caching prompt.
 - **Global Hotkey Bawaan**: Tekan `Win+Alt+U` (dengan fallback otomatis ke `Ctrl+Alt+U`) di mana saja untuk menampilkan/menyembunyikan widget secara instan.
 - **Ekspor Status JSON Pendamping**: Mengekspor ringkasan status real-time ke `~/.ai-usage-status.json` dan `<AppData>\status.json` untuk integrasi status bar terminal, tmux, shell prompt, atau skrip eksternal.
-- **Detektor Otomatis LLM Lokal Ollama**: Mendeteksi instans lokal Ollama secara otomatis (port dapat dikonfigurasi di Pengaturan, default `11434`) dan mengekspor jumlah serta daftar model ke status JSON.
+- **Detektor Otomatis LLM Lokal Ollama & VRAM**: Memantau `/api/tags` dan `/api/ps` pada Ollama lokal (port default `11434`), menampilkan indikator hijau live, model yang dimuat di VRAM beserta ukurannya (`GB`) di widget, serta ekspor ke status JSON.
+- **Harga Kustom, Jam Hening, Digest Terjadwal & Cadangan Profil**: Mendukung override harga `custom_pricing.json`, ekspor riwayat JSON, cooldown alert fleksibel, Jam Hening untuk membisukan suara & webhook, ringkasan Webhook Harian/Mingguan terjadwal, serta ekspor/impor profil pengaturan tanpa rahasia DPAPI.
 - **Quick Launch via Double-Click**:
   - *Klik ganda kartu Claude*: Membuka terminal CMD baru langsung di folder direktori kerja proyek terakhir (`LastActiveCwd`).
   - *Klik ganda kartu Antigravity*: Membuka folder Antigravity langsung di Windows Explorer.
@@ -147,7 +152,7 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 - **Session Context Alert**: Memantau ukuran konteks sesi aktif terhadap batas 200k token; memberi peringatan jika mencapai >75% (150k token) agar Anda tahu kapan waktu yang tepat menjalankan `/compact`.
 - **Burn Rate Spike Detector**: Mendeteksi lonjakan token tidak wajar dalam jendela 10 menit terakhir (default: >100k token / 10 menit).
 - **Audio Chimes**: Efek suara notifikasi sistem Windows untuk setiap peristiwa penting.
-- **Discord / Slack / Telegram Webhook**: Kirim peringatan otomatis ke channel tim Anda saat limit mendekati batas atau lonjakan pengeluaran terjadi.
+- **Discord / Slack / Telegram Webhook**: Memformat payload otomatis sesuai target (Discord/Slack/Telegram/Generic), memverifikasi status HTTP, melaporkan kegagalan ke Diagnostik, dan dilengkapi tombol **Uji** di Pengaturan > Notifikasi.
 
 ### 🪟 Desain Khusus Windows (Zero Distraction)
 - **Zero Taskbar Footprint**: Jendela floating menggunakan `WS_EX_TOOLWINDOW` dan `ShowInTaskbar = false`, tidak pernah mengotori taskbar maupun menu `Alt+Tab`.
@@ -194,7 +199,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Kompilasi paket distribusi rilis lengkap (.zip + SHA256)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Menjalankan 58 automated unit test suite
+# Menjalankan 84 automated unit test suite
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -230,7 +235,7 @@ ai-usage-watcher/
 ├── companion/                # Ekstensi status bar VS Code & Cursor
 ├── statusline/               # Pembungkus statusline untuk Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs          # 58 automated unit tests (.NET 4.8 test runner mandiri)
+│   └── UnitTests.cs          # 84 automated unit tests (.NET 4.8 test runner mandiri)
 ├── assets/                # Aset ikon aplikasi (vektor minimalis 2-warna & icon format .ico)
 ├── docs/img/              # Tangkapan layar fitur untuk dokumentasi
 │   ├── id/                # Tangkapan layar antarmuka Bahasa Indonesia

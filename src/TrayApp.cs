@@ -26,10 +26,10 @@ namespace ClaudeUsageWidget
         private readonly FloatingForm _float;
         private readonly ContextMenuStrip _menu;
         private readonly System.Windows.Forms.Timer _tick, _debounce, _fsTimer;
-        private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher, _codexWatcher;
+        private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher, _codexWatcher, _hooksWatcher, _gemCliWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miData, _miExit, _miCsv, _miReport, _miProjects;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miData, _miExit, _miCsv, _miJson, _miReport, _miProjects, _miMarkSessions;
         private ToolStripMenuItem _miViewGroup, _miToolsGroup, _miHelpGroup;
         private ToolStripSeparator _sepProject;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
@@ -54,10 +54,12 @@ namespace ClaudeUsageWidget
             if (_miCompanion != null) _miCompanion.Text = L.T("tray.companion");
             _miData.Text = L.T("tray.datafolder");
             _miCsv.Text = L.T("tray.exportcsv");
+            if (_miJson != null) _miJson.Text = L.T("tray.exportjson");
             if (_miReport != null) _miReport.Text = L.T("tray.exportreport");
             _miAutostart.Text = L.T("tray.autostart");
             _miExit.Text = L.T("tray.exit");
             UpdateQuickJumpMenu();
+            UpdateMarkSessionsMenu();
             _probeStatus = null;    // pesan galat lama masih berbahasa sebelumnya; diganti saat refresh berikutnya
         }
         private IntPtr _iconHandle = IntPtr.Zero;
@@ -91,6 +93,8 @@ namespace ClaudeUsageWidget
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
             _scanner.ScanCodex = _cfg.ScanCodex;
+            _scanner.ScanGeminiCli = _cfg.ScanGeminiCli;
+            _scanner.ScanOpenCode = _cfg.ScanOpenCode;
             _scanner.Roots = ProjectRoots;
             _scanner.SetTrackProjects(true);   // statistik proyek disimpan di memori untuk Project Explorer; _cfg.ShowProjects hanya kontrol tampilan widget
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
@@ -108,6 +112,10 @@ namespace ClaudeUsageWidget
             _float.CompactToggled += delegate { SetCompact(!_float.Compact); };
             _float.ClaudeCardDoubleClicked += delegate { OpenProjectTerminal(); };
             _float.AntigravityCardDoubleClicked += delegate { OpenAntigravityFolder(); };
+            _float.DoneSessionsClicked += delegate { AcknowledgeDoneSessions(); };
+            _float.SessionMenuRequested += delegate(object s, MouseEventArgs me) { ShowSessionJumpMenu(_float, me.Location); };
+            _float.CopyCompactRequested += delegate { CopyCompactCommand(); };
+            _float.OpenActiveTerminalRequested += delegate { OpenProjectTerminal(); };
             IntPtr force = _float.Handle;   // buat handle sekarang (untuk DPI & ukuran)
             _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
@@ -167,7 +175,7 @@ namespace ClaudeUsageWidget
             }
 
             _debounce = new System.Windows.Forms.Timer();
-            _debounce.Interval = 2000;
+            _debounce.Interval = 800;
             _debounce.Tick += delegate { _debounce.Stop(); RequestScan(false); };
 
             _hotkey = new HotkeyWindow();
@@ -175,6 +183,7 @@ namespace ClaudeUsageWidget
             ApplyHotkey(false);
 
             StartWatchers();
+            _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessionIds());
             HandleNotify();   // peristiwa hook yang tertinggal (yang basi diabaikan)
             ReloadLimits();
             RequestScan();
@@ -215,6 +224,10 @@ namespace ClaudeUsageWidget
                 _popup = new FloatingForm(true);
                 _popup.Backdrop = _cfg.Backdrop;
                 _popup.Dismissed += delegate { _popupHiddenAt = DateTime.Now; };
+                _popup.DoneSessionsClicked += delegate { AcknowledgeDoneSessions(); };
+                _popup.SessionMenuRequested += delegate(object s, MouseEventArgs me) { ShowSessionJumpMenu(_popup, me.Location); };
+                _popup.CopyCompactRequested += delegate { CopyCompactCommand(); };
+                _popup.OpenActiveTerminalRequested += delegate { OpenProjectTerminal(); };
                 IntPtr force = _popup.Handle;   // buat handle agar ukuran/DPI benar
             }
             _popupAnchor = TrayIconRect();
@@ -306,8 +319,13 @@ namespace ClaudeUsageWidget
             }
             if (_cfg.ScanGemini && Directory.Exists(Paths.AntigravityBrainDir))
                 if (!r.Contains(Paths.AntigravityBrainDir, StringComparer.OrdinalIgnoreCase)) r.Add(Paths.AntigravityBrainDir);
-            if (_cfg.ScanCodex && Directory.Exists(Paths.CodexSessionsDir))
-                if (!r.Contains(Paths.CodexSessionsDir, StringComparer.OrdinalIgnoreCase)) r.Add(Paths.CodexSessionsDir);
+            if (_cfg.ScanCodex)
+            {
+                if (Directory.Exists(Paths.CodexSessionsDir) && !r.Contains(Paths.CodexSessionsDir, StringComparer.OrdinalIgnoreCase))
+                    r.Add(Paths.CodexSessionsDir);
+                if (_cfg.ScanWsl)
+                    foreach (string w in WslRoots.GetCodex()) if (!r.Contains(w, StringComparer.OrdinalIgnoreCase)) r.Add(w);
+            }
             return r;
         }
 
@@ -344,10 +362,23 @@ namespace ClaudeUsageWidget
         // ---------------- anggaran biaya, peristiwa hook, ekspor CSV ----------------
         private readonly BudgetEngine _budget = new BudgetEngine();
 
+        private bool IsQuietNow() { return QuietHours.IsActive(_cfg, DateTime.Now); }
+
+        private void CopyCompactCommand()
+        {
+            try
+            {
+                Clipboard.SetText("/compact");
+                ShowBalloon(L.T("msg.compact.copied"), ToolTipIcon.Info);
+            }
+            catch (Exception ex) { Log.Write("copy.compact", ex); }
+        }
+
         private void RunBudget()
         {
             if (_usage == null || !_usage.Ready) return;
             if (_cfg.BudgetDaily <= 0 && _cfg.BudgetMonthly <= 0) return;
+            bool quiet = IsQuietNow();
             foreach (BudgetAlert a in _budget.Evaluate(_usage.TodayTotal.Cost, _history.MonthToDateCost(DateTime.Now),
                          _cfg.BudgetDaily, _cfg.BudgetMonthly, DateTime.Now))
             {
@@ -358,12 +389,12 @@ namespace ClaudeUsageWidget
 
                 Log.Write("alert budget " + (a.Monthly ? "month " : "day ") + a.Percent);
                 ShowBalloon(text, exceeded ? ToolTipIcon.Error : ToolTipIcon.Warning);
-                if (_cfg.AudioAlertsEnabled)
+                if (_cfg.AudioAlertsEnabled && !quiet)
                 {
                     AudioAlert.PlayWarning();
                     if (exceeded) AudioAlert.PlayWarning();
                 }
-                if (_cfg.WebhookEnabled)
+                if (_cfg.WebhookEnabled && !quiet)
                     WebhookSender.Send(_cfg.GetWebhookUrl(), exceeded ? "⚠️ Budget Limit Exceeded!" : "AI Usage Watcher Budget Alert", text);
             }
         }
@@ -377,10 +408,26 @@ namespace ClaudeUsageWidget
             Dictionary<string, object> e = NotifyEvents.TryTake();
             if (e == null) return;
             string kind = J.Str(e, "kind");
+            string sid = J.Str(e, "sid");
             long elapsed = J.Long(e, "elapsed");
             double ts = J.Num(e, "ts");
             double nowUnix = (DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
             if (!double.IsNaN(ts) && nowUnix - ts > 90) return;                               // peristiwa basi (widget baru jalan)
+
+            if (kind == "stop")
+            {
+                _scanner.MarkHookFinished(sid);
+                _usage = _scanner.Snapshot();
+                Refresh();
+            }
+            else if (kind == "input")
+            {
+                _scanner.MarkHookNeedsConfirm(sid);
+                _usage = _scanner.Snapshot();
+                Refresh();
+            }
+
+            if (kind == "prompt") return;
             if (kind == _lastNotifyKind && (DateTime.Now - _lastNotifyAt).TotalSeconds < 15) return;   // redam peristiwa beruntun
             string text;
             if (kind == "stop")
@@ -398,12 +445,13 @@ namespace ClaudeUsageWidget
             _lastNotifyAt = DateTime.Now; _lastNotifyKind = kind;
             Log.Write("notify " + kind + (elapsed >= 0 ? " " + elapsed + "s" : ""));
             ShowBalloon(text, ToolTipIcon.Info);
-            if (_cfg.AudioAlertsEnabled)
+            bool quiet = IsQuietNow();
+            if (_cfg.AudioAlertsEnabled && !quiet)
             {
                 if (kind == "input") AudioAlert.PlayPrompt();
                 else AudioAlert.PlayNotify();
             }
-            if (_cfg.WebhookEnabled && kind == "input")
+            if (_cfg.WebhookEnabled && kind == "input" && !quiet)
             {
                 WebhookSender.Send(_cfg.GetWebhookUrl(), "Claude Code Input Required", text);
             }
@@ -427,6 +475,25 @@ namespace ClaudeUsageWidget
                     MessageBox.Show(L.T("msg.csv.done", d.FileName), L.AppName);
                 }
                 catch (Exception ex) { Log.Write("csv", ex); MessageBox.Show(ex.Message, L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            }
+        }
+
+        private void ExportJson()
+        {
+            if (_history.Count == 0) { MessageBox.Show(L.T("msg.csv.empty"), L.AppName); return; }
+            using (SaveFileDialog d = new SaveFileDialog())
+            {
+                d.Filter = L.T("msg.json.filter");
+                d.FileName = "ai-usage-history-" + DateTime.Now.ToString("yyyyMMdd") + ".json";
+                d.DefaultExt = "json";
+                d.OverwritePrompt = true;
+                if (d.ShowDialog() != DialogResult.OK) return;
+                try
+                {
+                    File.WriteAllText(d.FileName, _history.ToJson(), new System.Text.UTF8Encoding(false));
+                    MessageBox.Show(L.T("msg.csv.done", d.FileName), L.AppName);
+                }
+                catch (Exception ex) { Log.Write("json.export", ex); MessageBox.Show(ex.Message, L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             }
         }
 
@@ -465,6 +532,8 @@ namespace ClaudeUsageWidget
                 else if (a.Window == "seven_day") name = L.T("limit7");
                 else if (a.Window == "antigravity_five_hour") name = L.T("limit5.ag");
                 else if (a.Window == "antigravity_seven_day") name = L.T("limit7.ag");
+                else if (a.Window == "codex_five_hour") name = L.T("limit5.cx");
+                else if (a.Window == "codex_seven_day") name = L.T("limit7.cx");
                 else name = a.Window;
                 string text;
                 if (a.IsReset) text = L.T("alert.reset", name);
@@ -476,12 +545,13 @@ namespace ClaudeUsageWidget
                 }
                 Log.Write("alert " + a.Window + (a.IsReset ? " reset" : " " + a.Threshold));
                 ShowBalloon(text, a.IsReset ? ToolTipIcon.Info : ToolTipIcon.Warning);
-                if (_cfg.AudioAlertsEnabled)
+                bool quiet = IsQuietNow();
+                if (_cfg.AudioAlertsEnabled && !quiet)
                 {
                     if (a.IsReset) AudioAlert.PlayNotify();
                     else AudioAlert.PlayWarning();
                 }
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.GetWebhookUrl(), "AI Usage Watcher Alert", text);
+                if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "AI Usage Watcher Alert", text);
             }
         }
 
@@ -491,13 +561,15 @@ namespace ClaudeUsageWidget
         private void CheckBurnRate()
         {
             if (!_cfg.BurnRateAlertEnabled || _usage == null || !_usage.Ready) return;
-            if (_usage.TokensLast10m >= _cfg.BurnRateThresholdTokens && (DateTime.Now - _lastBurnRateAlert).TotalMinutes >= 15)
+            int cd = Math.Max(1, _cfg.AlertCooldownMinutes);
+            if (_usage.TokensLast10m >= _cfg.BurnRateThresholdTokens && (DateTime.Now - _lastBurnRateAlert).TotalMinutes >= cd)
             {
                 _lastBurnRateAlert = DateTime.Now;
                 string text = L.T("alert.burnrate", Fmt.Tokens(_usage.TokensLast10m));
                 ShowBalloon(text, ToolTipIcon.Warning);
-                if (_cfg.AudioAlertsEnabled) AudioAlert.PlayWarning();
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.GetWebhookUrl(), "Token Burn Rate Alert", text);
+                bool quiet = IsQuietNow();
+                if (_cfg.AudioAlertsEnabled && !quiet) AudioAlert.PlayWarning();
+                if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "Token Burn Rate Alert", text);
                 Log.Write("alert burnrate " + _usage.TokensLast10m);
             }
         }
@@ -505,14 +577,18 @@ namespace ClaudeUsageWidget
         private void CheckContextAlert()
         {
             if (!_cfg.ContextAlertEnabled || _usage == null || !_usage.Ready) return;
-            if (_usage.LastContextTokens >= 150000 && (DateTime.Now - _lastContextAlert).TotalMinutes >= 20)
+            int cd = Math.Max(1, _cfg.AlertCooldownMinutes);
+            long cap = ContextLimits.WindowForModel(_usage.LastContextModel);
+            double pctExact = (double)_usage.LastContextTokens / cap * 100.0;
+            if (pctExact >= 75.0 && (DateTime.Now - _lastContextAlert).TotalMinutes >= cd)
             {
                 _lastContextAlert = DateTime.Now;
-                int pct = (int)Math.Round((double)_usage.LastContextTokens / 200000.0 * 100.0);
+                int pct = (int)Math.Round(pctExact);
                 string text = L.T("alert.context", Fmt.Tokens(_usage.LastContextTokens), pct);
                 ShowBalloon(text, ToolTipIcon.Warning);
-                if (_cfg.AudioAlertsEnabled) AudioAlert.PlayWarning();
-                if (_cfg.WebhookEnabled) WebhookSender.Send(_cfg.GetWebhookUrl(), "Session Context Alert", text);
+                bool quiet = IsQuietNow();
+                if (_cfg.AudioAlertsEnabled && !quiet) AudioAlert.PlayWarning();
+                if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "Session Context Alert", text);
                 Log.Write("alert context " + _usage.LastContextTokens);
             }
         }
@@ -523,6 +599,86 @@ namespace ClaudeUsageWidget
             Opts.CurrencySymbol = _cfg.CurrencySymbol;
             Opts.CurrencyRate = _cfg.CurrencyRate;
             Opts.CurrencyShowBoth = _cfg.CurrencyShowBoth;
+            Opts.CardLayout = _cfg.CardLayout;
+            Opts.MiniPillMode = _cfg.MiniPillMode;
+            Opts.ShowContextBar = _cfg.ShowContextBar;
+        }
+
+        private ContextMenuStrip _sessionJumpMenu;
+
+        private void AcknowledgeDoneSessions()
+        {
+            _scanner.AcknowledgeDoneSessions();
+            _usage = _scanner.Snapshot();
+            Refresh();
+            UpdateMarkSessionsMenu();
+        }
+
+        private void ShowSessionJumpMenu(Control anchor, Point loc)
+        {
+            if (anchor == null || _usage == null || _usage.Sessions == null || _usage.Sessions.Items.Count == 0) return;
+            try
+            {
+                if (_sessionJumpMenu != null) { _sessionJumpMenu.Dispose(); _sessionJumpMenu = null; }
+                ContextMenuStrip sm = new ContextMenuStrip();
+                bool hasCode = ProcessHelper.HasVSCode();
+                bool anyAck = false;
+                foreach (SessionActivity sa in _usage.Sessions.Items)
+                {
+                    SessionActivity item = sa;
+                    string icon = item.State == "confirm" ? "? " : (item.State == "running" ? "● " : "✓ ");
+                    string lbl = string.IsNullOrEmpty(item.Project) || string.Equals(item.Project, item.Provider, StringComparison.OrdinalIgnoreCase)
+                        ? item.Provider
+                        : item.Provider + " · " + item.Project;
+                    ToolStripMenuItem mi = new ToolStripMenuItem(icon + lbl);
+                    bool dirOk = !string.IsNullOrEmpty(item.Cwd) && Directory.Exists(item.Cwd);
+                    if (dirOk)
+                    {
+                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.term", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenTerminal(item.Cwd); }));
+                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.folder", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenFolder(item.Cwd); }));
+                        if (hasCode) mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.vscode", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenVSCode(item.Cwd); }));
+                    }
+                    if (item.State != "running")
+                    {
+                        anyAck = true;
+                        if (dirOk) mi.DropDownItems.Add(new ToolStripSeparator());
+                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.ack"), null, delegate
+                        {
+                            _scanner.AcknowledgeSession(item.Id);
+                            _usage = _scanner.Snapshot();
+                            Refresh();
+                            UpdateMarkSessionsMenu();
+                        }));
+                    }
+                    sm.Items.Add(mi);
+                }
+                if (anyAck)
+                {
+                    sm.Items.Add(new ToolStripSeparator());
+                    sm.Items.Add(new ToolStripMenuItem(L.T("sess.menu.ackall"), null, delegate { AcknowledgeDoneSessions(); }));
+                }
+                MenuTheme.Apply(sm);
+                _sessionJumpMenu = sm;
+                sm.Show(anchor, loc);
+            }
+            catch (Exception ex) { Log.Write("sess.menu", ex); }
+        }
+
+        private void UpdateMarkSessionsMenu()
+        {
+            if (_miMarkSessions == null) return;
+            int pending = (_usage != null && _usage.Sessions != null)
+                ? (_usage.Sessions.DoneCount + _usage.Sessions.ConfirmCount)
+                : 0;
+            _miMarkSessions.Text = L.T("tray.marksessions", pending);
+            _miMarkSessions.Visible = pending > 0;
+        }
+
+        private void SyncHookSessionsAndRefresh()
+        {
+            _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessionIds());
+            _usage = _scanner.Snapshot();
+            Refresh();
         }
 
         private void UpdateQuickJumpMenu()
@@ -611,14 +767,19 @@ namespace ClaudeUsageWidget
             // 2. Submenu: Laporan & Alat (Reports & Tools)
             _miToolsGroup = new ToolStripMenuItem(L.T("tray.menu.tools"));
             _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
+            _miMarkSessions = new ToolStripMenuItem(L.T("tray.marksessions", 0), null, delegate { AcknowledgeDoneSessions(); });
+            _miMarkSessions.Visible = false;
             _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
+            _miJson = new ToolStripMenuItem(L.T("tray.exportjson"), null, delegate { ExportJson(); });
             _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
             _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
 
             _miToolsGroup.DropDownItems.Add(_miProjects);
+            _miToolsGroup.DropDownItems.Add(_miMarkSessions);
             _miToolsGroup.DropDownItems.Add(_miReport);
             _miToolsGroup.DropDownItems.Add(_miCsv);
+            _miToolsGroup.DropDownItems.Add(_miJson);
             _miToolsGroup.DropDownItems.Add(new ToolStripSeparator());
             _miToolsGroup.DropDownItems.Add(_miData);
             _miToolsGroup.DropDownItems.Add(_miCompanion);
@@ -671,6 +832,7 @@ namespace ClaudeUsageWidget
                 _miShow.Checked = _cfg.ShowFloating;
                 if (_miSnap != null) PopulateSnapMenu(_miSnap);
                 UpdateQuickJumpMenu();
+                UpdateMarkSessionsMenu();
                 MenuTheme.Apply(m);
             };
             return m;
@@ -931,10 +1093,12 @@ namespace ClaudeUsageWidget
             SettingsCallbacks cb = new SettingsCallbacks();
             cb.ExportCsv = ExportCsv;
             cb.Diagnostics = delegate { return Diag.Build(_cfg, _limits, _usage, _probeFailed, _org, _history.Count); };
+            cb.IsOpenCodeSqliteMissing = delegate { return _usage != null && _usage.OpenCodeSqliteMissingCli; };
             cb.CheckUpdates = delegate { CheckForUpdates(true); };
             cb.PricingUpdated = delegate
             {
                 _pricing = Pricing.Load();
+                CheckCustomPricingWarning();
                 _scanner.ResetWithPricing(_pricing);
                 RequestScan();
             };
@@ -964,9 +1128,18 @@ namespace ClaudeUsageWidget
 
         private void ApplyConfigChanges(string oldEdge, string oldMonitor)
         {
+            bool scanTogglesChanged =
+                _scanner.ScanClaude != _cfg.ScanClaude ||
+                _scanner.ScanGemini != _cfg.ScanGemini ||
+                _scanner.ScanCodex != _cfg.ScanCodex ||
+                _scanner.ScanGeminiCli != _cfg.ScanGeminiCli ||
+                _scanner.ScanOpenCode != _cfg.ScanOpenCode;
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
             _scanner.ScanCodex = _cfg.ScanCodex;
+            _scanner.ScanGeminiCli = _cfg.ScanGeminiCli;
+            _scanner.ScanOpenCode = _cfg.ScanOpenCode;
+            if (scanTogglesChanged) _scanner.ResetWithPricing(_pricing);
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
             _scanner.AntigravityQuota7dTokens = _cfg.AntigravityQuota7dTokens;
             StartWatchers();
@@ -1041,6 +1214,8 @@ namespace ClaudeUsageWidget
             if (_appWatcher != null) { try { _appWatcher.Dispose(); } catch { } _appWatcher = null; }
             if (_geminiWatcher != null) { try { _geminiWatcher.Dispose(); } catch { } _geminiWatcher = null; }
             if (_codexWatcher != null) { try { _codexWatcher.Dispose(); } catch { } _codexWatcher = null; }
+            if (_gemCliWatcher != null) { try { _gemCliWatcher.Dispose(); } catch { } _gemCliWatcher = null; }
+            if (_hooksWatcher != null) { try { _hooksWatcher.Dispose(); } catch { } _hooksWatcher = null; }
 
             if (_cfg.ScanClaude)
             {
@@ -1073,6 +1248,8 @@ namespace ClaudeUsageWidget
                         _ui.Post(delegate { ReloadLimits(); }, null);
                     else if (string.Equals(e.Name, "notify.json", StringComparison.OrdinalIgnoreCase))
                         _ui.Post(delegate { HandleNotify(); }, null);
+                    else if (string.Equals(e.Name, "command.json", StringComparison.OrdinalIgnoreCase))
+                        _ui.Post(delegate { HandleExternalCommand(); }, null);
                 };
                 _appWatcher.Changed += h2; _appWatcher.Created += h2;
                 _appWatcher.Renamed += delegate(object s, RenamedEventArgs e) { h2(s, e); };
@@ -1121,15 +1298,102 @@ namespace ClaudeUsageWidget
                 }
                 catch (Exception ex) { Log.Write("watch.codex", ex); }
             }
+            if (_cfg.ScanGeminiCli)
+            {
+                try
+                {
+                    if (Directory.Exists(Paths.GeminiCliTmpDir))
+                    {
+                        _gemCliWatcher = new FileSystemWatcher(Paths.GeminiCliTmpDir, "session-*.json");
+                        _gemCliWatcher.IncludeSubdirectories = true;
+                        _gemCliWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName;
+                        _gemCliWatcher.InternalBufferSize = 64 * 1024;
+                        FileSystemEventHandler hGc = delegate(object s, FileSystemEventArgs e)
+                        {
+                            lock (_dirty) _dirty.Add(e.FullPath);
+                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                        };
+                        _gemCliWatcher.Changed += hGc; _gemCliWatcher.Created += hGc;
+                        _gemCliWatcher.EnableRaisingEvents = true;
+                    }
+                }
+                catch (Exception ex) { Log.Write("watch.gemcli", ex); }
+            }
+            try
+            {
+                Directory.CreateDirectory(Paths.HooksDir);
+                _hooksWatcher = new FileSystemWatcher(Paths.HooksDir, "*.txt");
+                _hooksWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
+                FileSystemEventHandler hHooks = delegate { _ui.Post(delegate { SyncHookSessionsAndRefresh(); }, null); };
+                _hooksWatcher.Created += hHooks; _hooksWatcher.Changed += hHooks; _hooksWatcher.Deleted += hHooks;
+                _hooksWatcher.Renamed += delegate(object s, RenamedEventArgs e) { SyncHookSessionsAndRefresh(); };
+                _hooksWatcher.EnableRaisingEvents = true;
+            }
+            catch (Exception ex) { Log.Write("watch.hooks", ex); }
+        }
+
+        private void HandleExternalCommand()
+        {
+            try
+            {
+                if (!File.Exists(Paths.CommandFile)) return;
+                string raw = null;
+                for (int i = 0; i < 3; i++)
+                {
+                    try { raw = File.ReadAllText(Paths.CommandFile); break; }
+                    catch { Thread.Sleep(40); }
+                }
+                try { File.Delete(Paths.CommandFile); } catch { }
+                string cmd = CommandParser.ParseCommandName(raw);
+                if (string.IsNullOrEmpty(cmd)) return;
+                if (cmd == "refresh")
+                {
+                    ReloadLimits(); RequestScan(); MaybeFetchOrg(true); MaybeCheckOllama(true);
+                }
+                else if (cmd == "open_explorer") OpenProjectExplorer();
+                else if (cmd == "toggle_compact") SetCompact(!_float.Compact);
+                else if (cmd == "copy_status") CopyStatus();
+                else if (cmd == "copy_compact") CopyCompactCommand();
+                else if (cmd == "open_terminal") OpenProjectTerminal();
+                else if (cmd == "open_settings") OpenSettings();
+            }
+            catch (Exception ex) { Log.Write("ipc.cmd", ex); }
+        }
+
+        private void MaybeSendDigest()
+        {
+            DateTime now = DateTime.Now;
+            if (!DigestScheduler.ShouldSend(_cfg, now)) return;
+            _cfg.LastDigestKey = DigestScheduler.ComputePeriodKey(_cfg.DigestSchedule, now);
+            _cfg.Save();
+            string title = string.Equals(_cfg.DigestSchedule, "weekly", StringComparison.OrdinalIgnoreCase)
+                ? "Weekly AI Usage Digest"
+                : "Daily AI Usage Digest";
+            string body = DigestScheduler.BuildDigestText(_limits, _usage, _history, _cfg);
+            WebhookSender.Send(_cfg.GetWebhookUrl(), title, body);
+            Log.Write("digest.sent " + _cfg.LastDigestKey);
+        }
+
+        private DateTime _lastCustomPricingWarnedAt = DateTime.MinValue;
+
+        private void CheckCustomPricingWarning()
+        {
+            if (_pricing == null || string.IsNullOrEmpty(_pricing.LastCustomError)) return;
+            if (_pricing.LoadedCustomFileTime == _lastCustomPricingWarnedAt) return;
+            _lastCustomPricingWarnedAt = _pricing.LoadedCustomFileTime;
+            ShowBalloon(L.T("msg.pricing.invalid", _pricing.LastCustomError), ToolTipIcon.Warning);
         }
 
         private void OnTick()
         {
             try
             {
-                if (File.Exists(Paths.PricingFile) && File.GetLastWriteTimeUtc(Paths.PricingFile) != _pricing.LoadedFileTime)
+                DateTime mainTime = File.Exists(Paths.PricingFile) ? File.GetLastWriteTimeUtc(Paths.PricingFile) : DateTime.MinValue;
+                DateTime customTime = File.Exists(Paths.CustomPricingFile) ? File.GetLastWriteTimeUtc(Paths.CustomPricingFile) : DateTime.MinValue;
+                if (mainTime != _pricing.LoadedFileTime || customTime != _pricing.LoadedCustomFileTime)
                 {
                     _pricing = Pricing.Load();
+                    CheckCustomPricingWarning();
                     _scanner.ResetWithPricing(_pricing);
                 }
             }
@@ -1141,6 +1405,7 @@ namespace ClaudeUsageWidget
             MaybeFetchGoogleRate(false);
             MaybeFetchAntigravityRate(false);
             MaybeCheckOllama(false);
+            MaybeSendDigest();
             if (_cfg.AutoUpdateCheck && (DateTime.Now - _lastUpdateCheck).TotalHours >= 24)
             {
                 CheckForUpdates(false);
@@ -1207,13 +1472,26 @@ namespace ClaudeUsageWidget
         private void ReloadLimits()
         {
             _limits = RateLimitReader.Read();
-            if (!_limits.AntigravityFiveHour.Available && _usage != null && _usage.AntigravityFiveHour != null && _usage.AntigravityFiveHour.Available)
-            {
-                _limits.AntigravityFiveHour = _usage.AntigravityFiveHour;
-                _limits.AntigravitySevenDay = _usage.AntigravitySevenDay;
-            }
+            SyncUsageDerivedLimits(_usage);
             Refresh();
             RunAlerts();
+        }
+
+        private void SyncUsageDerivedLimits(UsageSnapshot snap)
+        {
+            if (snap == null) return;
+            if (!_limits.AntigravityFiveHour.Available && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
+            {
+                _limits.AntigravityFiveHour = snap.AntigravityFiveHour;
+                _limits.AntigravitySevenDay = snap.AntigravitySevenDay;
+            }
+            if (_cfg.ScanCodex)
+            {
+                if (!_limits.CodexFiveHour.Available && snap.CodexFiveHour != null && snap.CodexFiveHour.Available)
+                    _limits.CodexFiveHour = snap.CodexFiveHour;
+                if (!_limits.CodexSevenDay.Available && snap.CodexSevenDay != null && snap.CodexSevenDay.Available)
+                    _limits.CodexSevenDay = snap.CodexSevenDay;
+            }
         }
 
         private void MaybeFetchAntigravityRate(bool force)
@@ -1246,6 +1524,7 @@ namespace ClaudeUsageWidget
                     lock (_dirty) { dirty = new List<string>(_dirty); _dirty.Clear(); }
                     try
                     {
+                        _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessionIds());
                         if (doFull) _scanner.Scan();
                         else if (dirty.Count > 0) _scanner.ScanFiles(dirty);
                     }
@@ -1255,11 +1534,7 @@ namespace ClaudeUsageWidget
                     _ui.Post(delegate
                     {
                         _usage = snap;
-                        if (!_limits.AntigravityFiveHour.Available && snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
-                        {
-                            _limits.AntigravityFiveHour = snap.AntigravityFiveHour;
-                            _limits.AntigravitySevenDay = snap.AntigravitySevenDay;
-                        }
+                        SyncUsageDerivedLimits(snap);
                         Refresh();
                         MaybeProbe(false);
                         RunBudget();
@@ -1343,10 +1618,13 @@ namespace ClaudeUsageWidget
             OllamaStatus prev = OllamaProbe.Current;
             bool wasOnline = prev != null && prev.Online;
             int wasCount = prev != null ? prev.ModelCount : 0;
+            int wasLoaded = prev != null ? prev.LoadedCount : 0;
+            long wasVram = prev != null ? prev.TotalVramBytes : 0;
             try
             {
                 OllamaStatus cur = await OllamaProbe.CheckAsync(_cfg.OllamaPort);
-                if (cur != null && (force || cur.Online != wasOnline || cur.ModelCount != wasCount))
+                if (cur != null && (force || cur.Online != wasOnline || cur.ModelCount != wasCount ||
+                                    cur.LoadedCount != wasLoaded || cur.TotalVramBytes != wasVram))
                     Refresh();
             }
             catch { }
@@ -1362,6 +1640,8 @@ namespace ClaudeUsageWidget
             vm.ScanClaude = _cfg.ScanClaude;
             vm.ScanGemini = _cfg.ScanGemini;
             vm.ScanCodex = _cfg.ScanCodex;
+            vm.ScanGeminiCli = _cfg.ScanGeminiCli;
+            vm.ScanOpenCode = _cfg.ScanOpenCode;
             vm.Ollama = OllamaProbe.Current;
             vm.ProbeStatus = _probeStatus;
             vm.History = _history.Series(_cfg.HistoryDays);
@@ -1385,7 +1665,7 @@ namespace ClaudeUsageWidget
         {
             // Satu angka besar: limit 5 jam, atau limit mingguan (cincin putih) bila mingguan sudah penuh.
             string txt; Color badge; bool weekly;
-            TrayText.IconSpec(_limits, _cfg.ScanClaude, _cfg.ScanGemini, out txt, out badge, out weekly);
+            TrayText.IconSpec(_limits, _cfg.ScanClaude, _cfg.ScanGemini, _cfg.ScanCodex, out txt, out badge, out weekly);
 
             Size sz = SystemInformation.SmallIconSize;
             using (Bitmap bmp = new Bitmap(sz.Width, sz.Height))
@@ -1411,7 +1691,7 @@ namespace ClaudeUsageWidget
         private static readonly System.Reflection.MethodInfo NiUpdate = typeof(NotifyIcon).GetMethod("UpdateIcon", Priv);
         private static readonly bool LongTipOk = NiText != null && NiAdded != null && NiUpdate != null;
 
-        private string Tooltip() { return TrayText.Tooltip(_limits, _usage, _probeFailed, LongTipOk ? 127 : 63, _cfg.ScanClaude, _cfg.ScanGemini); }
+        private string Tooltip() { return TrayText.Tooltip(_limits, _usage, _probeFailed, LongTipOk ? 127 : 63, _cfg.ScanClaude, _cfg.ScanGemini, _cfg.ScanCodex); }
 
         private void SetTrayTip(string text)
         {
@@ -1583,6 +1863,9 @@ namespace ClaudeUsageWidget
                 if (_appWatcher != null) _appWatcher.Dispose();
                 if (_geminiWatcher != null) _geminiWatcher.Dispose();
                 if (_codexWatcher != null) _codexWatcher.Dispose();
+                if (_gemCliWatcher != null) _gemCliWatcher.Dispose();
+                if (_hooksWatcher != null) _hooksWatcher.Dispose();
+                if (_sessionJumpMenu != null) _sessionJumpMenu.Dispose();
                 _tray.Visible = false;
                 _tray.Dispose();
                 if (_icon != null) _icon.Dispose();

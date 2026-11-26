@@ -16,7 +16,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $src = $PSScriptRoot
-$files = 'AIUsageWatcher.exe', 'ClaudeUsageWidget.exe', 'cuw-statusline.sh', 'cuw-statusline.ps1', 'install-statusline.ps1', 'uninstall.ps1', 'README.md'
+$files = 'AIUsageWatcher.exe', 'cuw-statusline.sh', 'cuw-statusline.ps1', 'install-statusline.ps1', 'uninstall.ps1', 'README.md'
 
 $rel = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue).Release
 if (-not $rel -or $rel -lt 528040) { throw '.NET Framework 4.8 diperlukan (bawaan Windows 10 versi 1903 ke atas / Windows 11).' }
@@ -28,6 +28,7 @@ Start-Sleep -Milliseconds 500
 
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 foreach ($f in $files) { Copy-Item (Join-Path $src $f) (Join-Path $InstallDir $f) -Force }
+Copy-Item (Join-Path $InstallDir 'AIUsageWatcher.exe') (Join-Path $InstallDir 'ClaudeUsageWidget.exe') -Force
 $compSrc = Join-Path $src 'companion'
 if (Test-Path $compSrc) { Copy-Item -Path $compSrc -Destination $InstallDir -Recurse -Force }
 $exe = Join-Path $InstallDir 'AIUsageWatcher.exe'
@@ -39,7 +40,7 @@ if (-not $NoShortcut) {
     $s = $ws.CreateShortcut($lnk)
     $s.TargetPath = $exe
     $s.WorkingDirectory = $InstallDir
-    $s.Description = 'Pemantau Pemakaian AI (Claude Code & Gemini Antigravity)'
+    $s.Description = 'Pemantau Pemakaian AI (Claude Code, Antigravity, Codex CLI & Ollama)'
     $s.Save()
     Write-Host "Shortcut Start Menu: $lnk"
 }

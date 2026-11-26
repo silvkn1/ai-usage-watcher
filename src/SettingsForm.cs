@@ -12,6 +12,7 @@ namespace ClaudeUsageWidget
     {
         public Action ExportCsv;
         public Func<string> Diagnostics;
+        public Func<bool> IsOpenCodeSqliteMissing;
         public Action Apply;
         public Action CheckUpdates;
         public Action PricingUpdated;
@@ -54,11 +55,15 @@ namespace ClaudeUsageWidget
         private readonly TextBox _currencySymbol = new TextBox();
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
         private readonly CheckBox _scanClaude = new CheckBox(), _scanGemini = new CheckBox(), _scanCodex = new CheckBox(), _adminData = new CheckBox();
+        private readonly CheckBox _scanGeminiCli = new CheckBox(), _scanOpenCode = new CheckBox();
         private readonly CheckBox _ollamaOn = new CheckBox();
         private readonly NumericUpDown _ollamaPort = new NumericUpDown();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
         private readonly CheckBox _burnRateOn = new CheckBox();
-        private readonly NumericUpDown _burnRateTokens = new NumericUpDown();
+        private readonly NumericUpDown _burnRateTokens = new NumericUpDown(), _cooldownMins = new NumericUpDown();
+        private readonly CheckBox _quietOn = new CheckBox(), _digestOn = new CheckBox(), _contextBar = new CheckBox();
+        private readonly NumericUpDown _quietStart = new NumericUpDown(), _quietEnd = new NumericUpDown(), _digestHour = new NumericUpDown();
+        private readonly ComboBox _cardLayout = new ComboBox(), _pillMode = new ComboBox(), _digestSchedule = new ComboBox();
         private readonly CheckBox _webhookOn = new CheckBox();
         private readonly TextBox _webhookUrl = new TextBox();
         private readonly Button _webhookTestBtn = new Button();
@@ -244,6 +249,21 @@ namespace ClaudeUsageWidget
 
             AddCheck(t, _compact, L.T("set.compact"), _cfg.Compact);
             AddCheck(t, _click, L.T("set.click"), _cfg.ClickThrough);
+            AddCheck(t, _contextBar, L.T("set.contextbar"), _cfg.ShowContextBar);
+
+            _cardLayout.DropDownStyle = ComboBoxStyle.DropDownList; _cardLayout.Width = 220;
+            _cardLayout.Items.Add(L.T("set.cardlayout.auto"));
+            _cardLayout.Items.Add(L.T("set.cardlayout.2col"));
+            _cardLayout.Items.Add(L.T("set.cardlayout.3col"));
+            _cardLayout.SelectedIndex = _cfg.CardLayout == "3col" ? 2 : (_cfg.CardLayout == "2col" ? 1 : 0);
+            AddRow(t, L.T("set.cardlayout"), _cardLayout);
+
+            _pillMode.DropDownStyle = ComboBoxStyle.DropDownList; _pillMode.Width = 220;
+            _pillMode.Items.Add(L.T("set.pillmode.all"));
+            _pillMode.Items.Add(L.T("set.pillmode.highest"));
+            _pillMode.Items.Add(L.T("set.pillmode.cost_runway"));
+            _pillMode.SelectedIndex = _cfg.MiniPillMode == "highest" ? 1 : (_cfg.MiniPillMode == "cost_runway" ? 2 : 0);
+            AddRow(t, L.T("set.pillmode"), _pillMode);
 
             AddNote(t, L.T("set.h.currency"), "head");
             AddCheck(t, _currencyOn, L.T("set.currency.enable"), _cfg.CurrencyCustomEnabled);
@@ -338,6 +358,9 @@ namespace ClaudeUsageWidget
             _burnRateTokens.Minimum = 1000; _burnRateTokens.Maximum = 10000000; _burnRateTokens.Increment = 10000; _burnRateTokens.Width = 110;
             _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
             AddRow(t, L.T("set.burnrate.th"), _burnRateTokens);
+            _cooldownMins.Minimum = 1; _cooldownMins.Maximum = 1440; _cooldownMins.Width = 90;
+            _cooldownMins.Value = Math.Max(1, Math.Min(1440, _cfg.AlertCooldownMinutes <= 0 ? 15 : _cfg.AlertCooldownMinutes));
+            AddRow(t, L.T("set.cooldown"), _cooldownMins);
             AddNote(t, L.T("set.alerts.note"), "dim");
 
             AddNote(t, L.T("set.h.webhook"), "head");
@@ -357,6 +380,25 @@ namespace ClaudeUsageWidget
             webhookRow.Controls.Add(_webhookUrl);
             webhookRow.Controls.Add(_webhookTestBtn);
             AddRow(t, L.T("set.webhook.url"), webhookRow);
+
+            AddNote(t, L.T("set.h.quiethours"), "head");
+            AddCheck(t, _quietOn, L.T("set.quiet.enable"), _cfg.QuietHoursEnabled);
+            _quietStart.Minimum = 0; _quietStart.Maximum = 23; _quietStart.Width = 70;
+            _quietStart.Value = Math.Max(0, Math.Min(23, _cfg.QuietStartHour));
+            AddRow(t, L.T("set.quiet.start"), _quietStart);
+            _quietEnd.Minimum = 0; _quietEnd.Maximum = 23; _quietEnd.Width = 70;
+            _quietEnd.Value = Math.Max(0, Math.Min(23, _cfg.QuietEndHour));
+            AddRow(t, L.T("set.quiet.end"), _quietEnd);
+
+            AddCheck(t, _digestOn, L.T("set.digest.enable"), _cfg.DigestEnabled);
+            _digestSchedule.DropDownStyle = ComboBoxStyle.DropDownList; _digestSchedule.Width = 170;
+            _digestSchedule.Items.Add(L.T("set.digest.daily"));
+            _digestSchedule.Items.Add(L.T("set.digest.weekly"));
+            _digestSchedule.SelectedIndex = _cfg.DigestSchedule == "weekly" ? 1 : 0;
+            AddRow(t, L.T("set.digest.schedule"), _digestSchedule);
+            _digestHour.Minimum = 0; _digestHour.Maximum = 23; _digestHour.Width = 70;
+            _digestHour.Value = Math.Max(0, Math.Min(23, _cfg.DigestHour));
+            AddRow(t, L.T("set.digest.hour"), _digestHour);
 
             SetupMoney(_budgetDay, _cfg.BudgetDaily);
             AddRow(t, L.T("set.budget.day"), _budgetDay);
@@ -417,6 +459,13 @@ namespace ClaudeUsageWidget
             AddCheck(t, _scanClaude, L.T("set.claude"), _cfg.ScanClaude);
             AddCheck(t, _scanGemini, L.T("set.gemini"), _cfg.ScanGemini);
             AddCheck(t, _scanCodex, L.T("set.codex"), _cfg.ScanCodex);
+            AddCheck(t, _scanGeminiCli, L.T("set.geminicli"), _cfg.ScanGeminiCli);
+            AddCheck(t, _scanOpenCode, L.T("set.opencode"), _cfg.ScanOpenCode);
+            if ((_cb != null && _cb.IsOpenCodeSqliteMissing != null && _cb.IsOpenCodeSqliteMissing()) ||
+                (System.IO.File.Exists(System.IO.Path.Combine(Paths.OpenCodeDataDir, "opencode.db")) && ProcessHelper.FindExecutableOnPath("sqlite3.exe") == null))
+            {
+                AddNote(t, L.T("set.opencode.sqlite_warn"), "warn");
+            }
             AddCheck(t, _adminData, L.T("set.claude_api"), _cfg.AdminEnabled);
             _adminData.CheckedChanged += delegate { if (_admin.Checked != _adminData.Checked) _admin.Checked = _adminData.Checked; };
             _admin.CheckedChanged += delegate { if (_adminData.Checked != _admin.Checked) _adminData.Checked = _admin.Checked; };
@@ -428,8 +477,25 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.ollama.port"), _ollamaPort);
 
             AddCheck(t, _wsl, L.T("set.wsl"), _cfg.ScanWsl);
-            _extraDirs.Width = 260; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
-            AddRow(t, L.T("set.extradirs"), _extraDirs);
+            _extraDirs.Width = 185; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
+            _extraDirs.Margin = new Padding(0, 2, 0, 0);
+            Button browseExtra = new Button(); browseExtra.Text = L.T("set.browse"); browseExtra.AutoSize = true;
+            browseExtra.Margin = new Padding(6, 0, 0, 0);
+            browseExtra.Click += delegate
+            {
+                using (FolderBrowserDialog d = new FolderBrowserDialog())
+                {
+                    if (d.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(d.SelectedPath)) return;
+                    string cur = _extraDirs.Text.Trim();
+                    string picked = d.SelectedPath.Trim();
+                    if (string.IsNullOrEmpty(cur)) _extraDirs.Text = picked;
+                    else if (cur.IndexOf(picked, StringComparison.OrdinalIgnoreCase) < 0) _extraDirs.Text = cur.TrimEnd(';') + ";" + picked;
+                }
+            };
+            FlowLayoutPanel extraRow = new FlowLayoutPanel();
+            extraRow.AutoSize = true; extraRow.WrapContents = false; extraRow.Margin = new Padding(0);
+            extraRow.Controls.Add(_extraDirs); extraRow.Controls.Add(browseExtra);
+            AddRow(t, L.T("set.extradirs"), extraRow);
             AddNote(t, L.T("set.sources.note"), "dim");
             AddCheck(t, _projects, L.T("set.projects"), _cfg.ShowProjects);
 
@@ -474,12 +540,25 @@ namespace ClaudeUsageWidget
                     btnFetchPricing.Text = L.T("set.pricing.fetch");
                 }
             };
+            Button customPricing = new Button(); customPricing.Text = L.T("set.pricing.custom"); customPricing.AutoSize = true;
+            customPricing.Click += delegate { Pricing.EnsureCustomTemplate(); try { Process.Start("notepad.exe", "\"" + Paths.CustomPricingFile + "\""); } catch { } };
             pp.Controls.Add(pricing);
+            pp.Controls.Add(customPricing);
             pp.Controls.Add(btnFetchPricing);
 
             Label pnote = new Label(); pnote.AutoSize = true; pnote.Tag = "dim"; pnote.Anchor = AnchorStyles.Left;
             pnote.Text = L.T("set.pricing.note");
             t.Controls.Add(pp); t.Controls.Add(pnote);
+
+            AddNote(t, L.T("set.h.backup"), "head");
+            FlowLayoutPanel bp = new FlowLayoutPanel(); bp.AutoSize = true; bp.WrapContents = false;
+            Button btnExportProf = new Button(); btnExportProf.Text = L.T("set.profile.export"); btnExportProf.AutoSize = true;
+            btnExportProf.Click += OnExportProfileClick;
+            Button btnImportProf = new Button(); btnImportProf.Text = L.T("set.profile.import"); btnImportProf.AutoSize = true;
+            btnImportProf.Click += OnImportProfileClick;
+            bp.Controls.Add(btnExportProf);
+            bp.Controls.Add(btnImportProf);
+            t.Controls.Add(bp); t.SetColumnSpan(bp, 2);
         }
 
         private void CopyDiagnostics()
@@ -523,10 +602,10 @@ namespace ClaudeUsageWidget
             _key.UseSystemPasswordChar = true; _key.Width = 260;
             AddRow(t, L.T("set.admin.key"), _key);
             _keyState.AutoSize = true; _keyState.Tag = "dim";
-            _keyState.Text = string.IsNullOrEmpty(_cfg.AdminKeyProtected) ? L.T("set.admin.nokey") : L.T("set.admin.stored");
+            RefreshKeyState();
             _keyState.MaximumSize = new Size(260, 0);
             Button clear = new Button(); clear.Text = L.T("set.admin.clear"); clear.AutoSize = true;
-            clear.Click += delegate { _clearKey = true; _key.Text = ""; _keyState.Text = L.T("set.admin.cleared"); };
+            clear.Click += delegate { _clearKey = true; _key.Text = ""; RefreshKeyState(); };
             FlowLayoutPanel kp = new FlowLayoutPanel(); kp.AutoSize = true; kp.FlowDirection = FlowDirection.TopDown; kp.WrapContents = false;
             kp.Controls.Add(_keyState); kp.Controls.Add(clear);
             t.Controls.Add(new Label()); t.Controls.Add(kp);
@@ -720,7 +799,8 @@ namespace ClaudeUsageWidget
                     continue;
                 }
 
-                if ((c is Label || c is CheckBox || c is Button) && !string.IsNullOrEmpty(c.Text))
+                if ((c is Label || c is CheckBox || c is Button) && !string.IsNullOrEmpty(c.Text)
+                    && c != _opacityLbl && c != _hookState && c != _keyState)
                 {
                     string key;
                     if (rev.TryGetValue(c.Text, out key))
@@ -734,6 +814,13 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private void RefreshKeyState()
+        {
+            _keyState.Text = _clearKey
+                ? L.T("set.admin.cleared")
+                : (string.IsNullOrEmpty(_cfg.AdminKeyProtected) ? L.T("set.admin.nokey") : L.T("set.admin.stored"));
+        }
+
         internal void RefreshI18n()
         {
             CaptureI18nBindings();
@@ -741,6 +828,9 @@ namespace ClaudeUsageWidget
             try
             {
                 foreach (Action a in _i18n) a();
+                _opacityLbl.Text = L.T("set.opacity", _opacity.Value);
+                RefreshHookState();
+                RefreshKeyState();
             }
             finally
             {
@@ -808,6 +898,8 @@ namespace ClaudeUsageWidget
             _cfg.ScanClaude = _scanClaude.Checked;
             _cfg.ScanGemini = _scanGemini.Checked;
             _cfg.ScanCodex = _scanCodex.Checked;
+            _cfg.ScanGeminiCli = _scanGeminiCli.Checked;
+            _cfg.ScanOpenCode = _scanOpenCode.Checked;
             _cfg.ScanWsl = _wsl.Checked;
             _cfg.ShowProjects = _projects.Checked;
             _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
@@ -819,6 +911,9 @@ namespace ClaudeUsageWidget
             _cfg.OpacityPercent = _opacity.Value;
             _cfg.ShowFloating = _showFloat.Checked;
             _cfg.Compact = _compact.Checked;
+            _cfg.ShowContextBar = _contextBar.Checked;
+            _cfg.CardLayout = _cardLayout.SelectedIndex == 2 ? "3col" : (_cardLayout.SelectedIndex == 1 ? "2col" : "auto");
+            _cfg.MiniPillMode = _pillMode.SelectedIndex == 1 ? "highest" : (_pillMode.SelectedIndex == 2 ? "cost_runway" : "all");
             _cfg.DockTop = _dock.Checked;
             _cfg.AlwaysOnTop = _onTop.Checked;
             _cfg.HideOnFullscreen = _hideFs.Checked;
@@ -842,6 +937,13 @@ namespace ClaudeUsageWidget
             _cfg.ContextAlertEnabled = _contextOn.Checked;
             _cfg.BurnRateAlertEnabled = _burnRateOn.Checked;
             _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
+            _cfg.AlertCooldownMinutes = (int)_cooldownMins.Value;
+            _cfg.QuietHoursEnabled = _quietOn.Checked;
+            _cfg.QuietStartHour = (int)_quietStart.Value;
+            _cfg.QuietEndHour = (int)_quietEnd.Value;
+            _cfg.DigestEnabled = _digestOn.Checked;
+            _cfg.DigestSchedule = _digestSchedule.SelectedIndex == 1 ? "weekly" : "daily";
+            _cfg.DigestHour = (int)_digestHour.Value;
             _cfg.WebhookEnabled = _webhookOn.Checked;
             _cfg.SetWebhookUrl(_webhookUrl.Text.Trim());
             _cfg.OllamaEnabled = _ollamaOn.Checked;
@@ -854,6 +956,118 @@ namespace ClaudeUsageWidget
             _key.Text = "";
             _cfg.Save();
             return true;
+        }
+
+        private void OnExportProfileClick(object sender, EventArgs e)
+        {
+            if (!SaveToConfig()) return;
+            using (SaveFileDialog d = new SaveFileDialog())
+            {
+                d.Filter = L.T("msg.json.filter");
+                d.FileName = "ai-usage-profile-" + DateTime.Now.ToString("yyyyMMdd") + ".json";
+                d.DefaultExt = "json";
+                d.OverwritePrompt = true;
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    System.IO.File.WriteAllText(d.FileName, _cfg.ExportProfileJson(), new System.Text.UTF8Encoding(false));
+                    MessageBox.Show(this, L.T("msg.profile.exported", d.FileName), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("profile.export", ex);
+                    MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        }
+
+        private void OnImportProfileClick(object sender, EventArgs e)
+        {
+            using (OpenFileDialog d = new OpenFileDialog())
+            {
+                d.Filter = L.T("msg.json.filter");
+                d.CheckFileExists = true;
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    string json = System.IO.File.ReadAllText(d.FileName, System.Text.Encoding.UTF8);
+                    AppConfig imported = AppConfig.ImportProfileJson(json, _cfg);
+                    if (imported == null) throw new InvalidOperationException("Empty profile");
+                    _cfg.ApplyProfileFrom(imported);
+                    _cfg.Save();
+                    SyncControlsFromConfig();
+                    L.Set(_cfg.Language);
+                    Palette.Apply(ThemeUtil.ResolveLight(_cfg.Theme));
+                    RefreshI18n();
+                    ApplyTheme();
+                    if (_cb != null && _cb.Apply != null) _cb.Apply();
+                    MessageBox.Show(this, L.T("msg.profile.imported"), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    Log.Write("profile.import", ex);
+                    MessageBox.Show(this, L.T("msg.profile.invalid", ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        }
+
+        private void SyncControlsFromConfig()
+        {
+            int li = _langCodes.IndexOf(_cfg.Language);
+            _lang.SelectedIndex = li >= 0 ? li : 0;
+            _theme.SelectedIndex = _cfg.Theme == "light" ? 1 : (_cfg.Theme == "system" ? 2 : 0);
+            _opacity.Value = Math.Max(30, Math.Min(100, _cfg.OpacityPercent));
+            _remaining.Checked = _cfg.ShowRemaining;
+            _histDays.SelectedIndex = _cfg.HistoryDays == 30 ? 1 : 0;
+            _dock.Checked = _cfg.DockTop;
+            int ei = Array.IndexOf(Edges, _cfg.DockEdge); _edge.SelectedIndex = ei >= 0 ? ei : 0;
+            int mi = string.IsNullOrEmpty(_cfg.DockMonitor) ? 0 : _monitorNames.IndexOf(_cfg.DockMonitor); _monitor.SelectedIndex = mi >= 0 ? mi : 0;
+            int bi = Array.IndexOf(Backdrops, _cfg.Backdrop); _backdrop.SelectedIndex = bi >= 0 ? bi : 0;
+            _compact.Checked = _cfg.Compact;
+            _click.Checked = _cfg.ClickThrough;
+            _contextBar.Checked = _cfg.ShowContextBar;
+            _cardLayout.SelectedIndex = _cfg.CardLayout == "3col" ? 2 : (_cfg.CardLayout == "2col" ? 1 : 0);
+            _pillMode.SelectedIndex = _cfg.MiniPillMode == "highest" ? 1 : (_cfg.MiniPillMode == "cost_runway" ? 2 : 0);
+            _currencyOn.Checked = _cfg.CurrencyCustomEnabled;
+            _currencySymbol.Text = _cfg.CurrencySymbol ?? "Rp";
+            _currencyRate.Value = (decimal)Math.Max(1, Math.Min(10000000, _cfg.CurrencyRate <= 0 ? 16200 : _cfg.CurrencyRate));
+            _currencyBoth.Checked = _cfg.CurrencyShowBoth;
+            _showFloat.Checked = _cfg.ShowFloating;
+            _onTop.Checked = _cfg.AlwaysOnTop;
+            _hideFs.Checked = _cfg.HideOnFullscreen;
+            _autoUpdate.Checked = _cfg.AutoUpdateCheck;
+            _hotkeyOn.Checked = _cfg.HotkeyEnabled;
+            _hotkeyText.Text = _cfg.Hotkey ?? "Win+Alt+U";
+            _alertsOn.Checked = _cfg.AlertsEnabled;
+            _alertTh.Text = _cfg.AlertThresholds ?? "80,95";
+            _resetOn.Checked = _cfg.ResetNotify;
+            _audioOn.Checked = _cfg.AudioAlertsEnabled;
+            _contextOn.Checked = _cfg.ContextAlertEnabled;
+            _burnRateOn.Checked = _cfg.BurnRateAlertEnabled;
+            _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
+            _cooldownMins.Value = Math.Max(1, Math.Min(1440, _cfg.AlertCooldownMinutes <= 0 ? 15 : _cfg.AlertCooldownMinutes));
+            _webhookOn.Checked = _cfg.WebhookEnabled;
+            _quietOn.Checked = _cfg.QuietHoursEnabled;
+            _quietStart.Value = Math.Max(0, Math.Min(23, _cfg.QuietStartHour));
+            _quietEnd.Value = Math.Max(0, Math.Min(23, _cfg.QuietEndHour));
+            _digestOn.Checked = _cfg.DigestEnabled;
+            _digestSchedule.SelectedIndex = _cfg.DigestSchedule == "weekly" ? 1 : 0;
+            _digestHour.Value = Math.Max(0, Math.Min(23, _cfg.DigestHour));
+            _scanClaude.Checked = _cfg.ScanClaude;
+            _scanGemini.Checked = _cfg.ScanGemini;
+            _scanCodex.Checked = _cfg.ScanCodex;
+            _scanGeminiCli.Checked = _cfg.ScanGeminiCli;
+            _scanOpenCode.Checked = _cfg.ScanOpenCode;
+            _wsl.Checked = _cfg.ScanWsl;
+            _projects.Checked = _cfg.ShowProjects;
+            _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
+            _ollamaOn.Checked = _cfg.OllamaEnabled;
+            _ollamaPort.Value = _cfg.OllamaPort > 0 && _cfg.OllamaPort <= 65535 ? _cfg.OllamaPort : 11434;
+            _admin.Checked = _cfg.AdminEnabled;
+            _probe.Checked = _cfg.ProbeEnabled;
+            _probeMin.Value = Math.Max(5, Math.Min(240, _cfg.ProbeMinMinutes));
+            _mirror.Checked = _cfg.MirrorEnabled;
+            _mirrorPath.Text = _cfg.MirrorFilePath ?? "";
         }
 
         private void OnApply(object sender, EventArgs e)

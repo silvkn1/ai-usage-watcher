@@ -8,14 +8,30 @@ using System.Threading.Tasks;
 
 namespace ClaudeUsageWidget
 {
-    /// <summary>Total satu hari (waktu lokal). Hanya agregat: tanggal, token, biaya, jumlah request.</summary>
+    /// <summary>Total satu hari (waktu lokal). Hanya agregat: tanggal, token, biaya, jumlah request, dan rincian biaya per provider.</summary>
     internal class DayStat
     {
         public DateTime Date;
         public long Tokens;
         public double Cost;
         public long Requests;
-        public DayStat(DateTime date, long tokens, double cost, long requests) { Date = date.Date; Tokens = tokens; Cost = cost; Requests = requests; }
+        public Dictionary<string, double> ProviderCosts;
+
+        public DayStat(DateTime date, long tokens, double cost, long requests)
+            : this(date, tokens, cost, requests, null) { }
+
+        public DayStat(DateTime date, long tokens, double cost, long requests, Dictionary<string, double> providerCosts)
+        {
+            Date = date.Date; Tokens = tokens; Cost = cost; Requests = requests;
+            ProviderCosts = providerCosts;
+        }
+
+        public double CostFor(string provider)
+        {
+            if (ProviderCosts == null || string.IsNullOrEmpty(provider)) return 0;
+            double v;
+            return ProviderCosts.TryGetValue(provider, out v) ? v : 0;
+        }
     }
 
     /// <summary>
@@ -29,18 +45,23 @@ namespace ClaudeUsageWidget
         private const int KeepDays = 120;
         private readonly Dictionary<string, DayStat> _d = new Dictionary<string, DayStat>();
         private readonly object _gate = new object();
+        private readonly string _filePath;
         private string _lastSaved = "";
+
+        public HistoryStore() : this(Path.Combine(Paths.AppDir, "history.json")) { }
+        internal HistoryStore(string filePath) { _filePath = filePath; }
 
         private static string Key(DateTime d) { return d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
 
-        public static HistoryStore Load()
+        public static HistoryStore Load() { return LoadFrom(Path.Combine(Paths.AppDir, "history.json")); }
+
+        public static HistoryStore LoadFrom(string path)
         {
-            HistoryStore h = new HistoryStore();
+            HistoryStore h = new HistoryStore(path);
             try
             {
-                string f = Path.Combine(Paths.AppDir, "history.json");
-                if (!File.Exists(f)) return h;
-                string txt = File.ReadAllText(f, Encoding.UTF8);
+                if (!File.Exists(path)) return h;
+                string txt = File.ReadAllText(path, Encoding.UTF8);
                 Dictionary<string, object> root = J.Parse(txt);
                 System.Collections.IList arr = J.Arr(root, "days");
                 if (arr != null)
@@ -50,7 +71,18 @@ namespace ClaudeUsageWidget
                         DateTime dt;
                         if (!DateTime.TryParseExact(J.Str(e, "d"), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dt)) continue;
                         double cost = J.Num(e, "c");
-                        h._d[Key(dt)] = new DayStat(dt, J.Long(e, "t"), double.IsNaN(cost) ? 0 : cost, J.Long(e, "r"));
+                        Dictionary<string, object> pRaw = J.Obj(e, "p");
+                        Dictionary<string, double> pCosts = null;
+                        if (pRaw != null && pRaw.Count > 0)
+                        {
+                            pCosts = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                            foreach (KeyValuePair<string, object> kv in pRaw)
+                            {
+                                double pv = J.ToNum(kv.Value);
+                                if (!double.IsNaN(pv) && pv > 0) pCosts[kv.Key] = pv;
+                            }
+                        }
+                        h._d[Key(dt)] = new DayStat(dt, J.Long(e, "t"), double.IsNaN(cost) ? 0 : cost, J.Long(e, "r"), pCosts);
                     }
                 h._lastSaved = txt;
             }
@@ -91,13 +123,31 @@ namespace ClaudeUsageWidget
                     if (i > 0) sb.Append(',');
                     sb.Append("{\"d\":\"").Append(keys[i]).Append("\",\"t\":").Append(s.Tokens.ToString(CultureInfo.InvariantCulture))
                       .Append(",\"c\":").Append(s.Cost.ToString("0.####", CultureInfo.InvariantCulture))
-                      .Append(",\"r\":").Append(s.Requests.ToString(CultureInfo.InvariantCulture)).Append('}');
+                      .Append(",\"r\":").Append(s.Requests.ToString(CultureInfo.InvariantCulture));
+                    if (s.ProviderCosts != null && s.ProviderCosts.Count > 0)
+                    {
+                        sb.Append(",\"p\":{");
+                        bool firstP = true;
+                        List<string> pKeys = new List<string>(s.ProviderCosts.Keys);
+                        pKeys.Sort(StringComparer.Ordinal);
+                        for (int pi = 0; pi < pKeys.Count; pi++)
+                        {
+                            double pv = s.ProviderCosts[pKeys[pi]];
+                            if (pv <= 0) continue;
+                            if (!firstP) sb.Append(',');
+                            firstP = false;
+                            sb.Append(J.Ser.Serialize(pKeys[pi])).Append(':').Append(pv.ToString("0.####", CultureInfo.InvariantCulture));
+                        }
+                        sb.Append('}');
+                    }
+                    sb.Append('}');
                 }
                 sb.Append("]}");
                 string txt = sb.ToString();
                 if (txt == _lastSaved) return;
-                Paths.Ensure();
-                AtomicFile.Write(Path.Combine(Paths.AppDir, "history.json"), txt);
+                string dir = Path.GetDirectoryName(_filePath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                AtomicFile.Write(_filePath, txt);
                 _lastSaved = txt;
             }
             catch (Exception ex) { Log.Write("history.save", ex); }
@@ -155,6 +205,37 @@ namespace ClaudeUsageWidget
             }
         }
 
+        public string ToJson()
+        {
+            lock (_gate)
+            {
+                List<string> keys = new List<string>(_d.Keys);
+                keys.Sort(StringComparer.Ordinal);
+                List<object> rows = new List<object>();
+                foreach (string k in keys)
+                {
+                    DayStat s = _d[k];
+                    Dictionary<string, object> row = new Dictionary<string, object>();
+                    row["date"] = k;
+                    row["tokens"] = s.Tokens;
+                    row["estimated_cost_usd"] = Math.Round(s.Cost, 4);
+                    row["requests"] = s.Requests;
+                    if (s.ProviderCosts != null && s.ProviderCosts.Count > 0)
+                    {
+                        Dictionary<string, object> pMap = new Dictionary<string, object>();
+                        foreach (KeyValuePair<string, double> kv in s.ProviderCosts)
+                            pMap[kv.Key] = Math.Round(kv.Value, 4);
+                        row["providers"] = pMap;
+                    }
+                    rows.Add(row);
+                }
+                Dictionary<string, object> root = new Dictionary<string, object>();
+                root["exported_at"] = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+                root["days"] = rows;
+                return J.Ser.Serialize(root);
+            }
+        }
+
         /// <summary>n hari terakhir berakhir hari ini (terlama dulu); hari kosong bernilai nol.</summary>
         public DayStat[] Series(int n)
         {
@@ -179,27 +260,45 @@ namespace ClaudeUsageWidget
     internal static class WslRoots
     {
         private static List<string> _cache = new List<string>();
+        private static List<string> _codexCache = new List<string>();
         private static DateTime _at = DateTime.MinValue;
         private static readonly object Gate = new object();
 
         public static List<string> Get()
         {
+            EnsureRefreshed();
+            lock (Gate) return new List<string>(_cache);
+        }
+
+        public static List<string> GetCodex()
+        {
+            EnsureRefreshed();
+            lock (Gate) return new List<string>(_codexCache);
+        }
+
+        private static void EnsureRefreshed()
+        {
             lock (Gate)
             {
-                if ((DateTime.Now - _at).TotalMinutes < 10) return new List<string>(_cache);
+                if ((DateTime.Now - _at).TotalMinutes < 10) return;
                 _at = DateTime.Now;   // jangan ulangi terus saat gagal
             }
-            List<string> found = new List<string>();
+            List<string> foundClaude = new List<string>();
+            List<string> foundCodex = new List<string>();
             try
             {
-                Task t = Task.Run(delegate { Discover(found); });
+                Task t = Task.Run(delegate { Discover(foundClaude, foundCodex); });
                 if (!t.Wait(8000)) Log.Write("wsl: discovery timeout");
             }
             catch (Exception ex) { Log.Write("wsl", ex); }
-            lock (Gate) { _cache = new List<string>(found); return new List<string>(_cache); }
+            lock (Gate)
+            {
+                _cache = new List<string>(foundClaude);
+                _codexCache = new List<string>(foundCodex);
+            }
         }
 
-        private static void Discover(List<string> found)
+        private static void Discover(List<string> foundClaude, List<string> foundCodex)
         {
             string wsl = Path.Combine(Environment.SystemDirectory, "wsl.exe");
             if (!File.Exists(wsl)) return;
@@ -220,13 +319,17 @@ namespace ClaudeUsageWidget
                 try
                 {
                     string rootProjects = Path.Combine(root, @"root\.claude\projects");
-                    if (Directory.Exists(rootProjects)) found.Add(rootProjects);
+                    if (Directory.Exists(rootProjects)) foundClaude.Add(rootProjects);
+                    string rootCodex = Path.Combine(root, @"root\.codex\sessions");
+                    if (Directory.Exists(rootCodex)) foundCodex.Add(rootCodex);
                     string home = Path.Combine(root, "home");
                     if (Directory.Exists(home))
                         foreach (string user in Directory.GetDirectories(home))
                         {
                             string p2 = Path.Combine(user, @".claude\projects");
-                            if (Directory.Exists(p2)) found.Add(p2);
+                            if (Directory.Exists(p2)) foundClaude.Add(p2);
+                            string c2 = Path.Combine(user, @".codex\sessions");
+                            if (Directory.Exists(c2)) foundCodex.Add(c2);
                         }
                 }
                 catch (Exception ex) { Log.Write("wsl.distro", ex); }

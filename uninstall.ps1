@@ -47,6 +47,14 @@ if (Test-Path $legacyInstallDir) {
     Remove-Item $legacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+foreach ($extParent in @((Join-Path $env:USERPROFILE '.vscode\extensions'), (Join-Path $env:USERPROFILE '.cursor\extensions'))) {
+    $extDir = Join-Path $extParent 'ai-usage-watcher'
+    if (Test-Path $extDir) {
+        Remove-Item $extDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "Ekstensi editor dihapus: $extDir"
+    }
+}
+
 if ($RemoveData) {
     if (Test-Path $appDir) { Remove-Item $appDir -Recurse -Force; Write-Host "Data dihapus: $appDir" }
     if (Test-Path $legacyAppDir) { Remove-Item $legacyAppDir -Recurse -Force; Write-Host "Data legacy dihapus: $legacyAppDir" }
