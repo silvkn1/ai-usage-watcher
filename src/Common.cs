@@ -10,7 +10,7 @@ using System.Web.Script.Serialization;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("AI Usage Watcher")]
 [assembly: System.Reflection.AssemblyProduct("AI Usage Watcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.1.0")]
 
 namespace ClaudeUsageWidget
 {
