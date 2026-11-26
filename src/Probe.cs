@@ -27,8 +27,9 @@ namespace ClaudeUsageWidget
                 {
                     try
                     {
-                        if (dir.Trim().Length == 0) continue;
-                        string p = Path.Combine(dir.Trim(), name);
+                        string t = dir.Trim();
+                        if (!ProcessHelper.IsSafeSearchDir(t)) continue;
+                        string p = Path.Combine(t, name);
                         if (File.Exists(p)) return p;
                     }
                     catch { }
@@ -76,6 +77,19 @@ namespace ClaudeUsageWidget
             return f;
         }
 
+        public static bool IsValidModelName(string model)
+        {
+            if (string.IsNullOrEmpty(model) || model.Length > 80) return false;
+            for (int i = 0; i < model.Length; i++)
+            {
+                char c = model[i];
+                bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                          c == '-' || c == '_' || c == '.' || c == ':' || c == '/' || c == '[' || c == ']';
+                if (!ok) return false;
+            }
+            return true;
+        }
+
         /// <summary>Null bila sukses: ratelimits.json ditulis dan rateLimitsJson berisi objek rate_limits
         /// (format sama dengan statusline). Selain itu pesan error singkat yang menjelaskan penyebab.</summary>
         public static string Run(string model, out string rateLimitsJson)
@@ -83,9 +97,11 @@ namespace ClaudeUsageWidget
             rateLimitsJson = null;
             string exe = FindClaude();
             if (exe == null) return L.T("perr.notfound");
-            if (string.IsNullOrEmpty(model) || model.IndexOfAny(new[] { ' ', '"', '&', '|', '<', '>', '^', '%' }) >= 0) model = "claude-haiku-5-5";
+            if (!IsValidModelName(model)) model = "claude-haiku-5-5";
+            string settingsPath = SettingsFile();
+            if (settingsPath.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0) return L.T("perr.start", "InvalidPath");
 
-            string args = "-p ok --settings \"" + SettingsFile() + "\" --strict-mcp-config --tools \"\" --model " + model
+            string args = "-p ok --settings \"" + settingsPath + "\" --strict-mcp-config --tools \"\" --model " + model
                           + " --output-format stream-json --verbose --no-session-persistence";
             ProcessStartInfo psi;
             if (exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))

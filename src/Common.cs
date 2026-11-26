@@ -294,6 +294,24 @@ namespace ClaudeUsageWidget
 
     internal static class ProcessHelper
     {
+        public static string ExplorerExe
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"); }
+        }
+
+        public static string SystemExe(string name)
+        {
+            return Path.Combine(Environment.SystemDirectory, name);
+        }
+
+        public static bool IsSafeSearchDir(string dir)
+        {
+            if (string.IsNullOrWhiteSpace(dir)) return false;
+            string t = dir.Trim();
+            if (t.StartsWith("\\\\", StringComparison.Ordinal) || t.StartsWith(".", StringComparison.Ordinal)) return false;
+            return Path.IsPathRooted(t);
+        }
+
         public static string FindExecutableOnPath(params string[] names)
         {
             string localApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\WindowsApps");
@@ -305,6 +323,7 @@ namespace ClaudeUsageWidget
             {
                 string[] extraDirs = new[]
                 {
+                    Environment.SystemDirectory,
                     localApps,
                     Path.Combine(progFiles, @"Microsoft VS Code\bin"),
                     Path.Combine(localProg, @"Microsoft VS Code\bin"),
@@ -319,7 +338,7 @@ namespace ClaudeUsageWidget
                     try
                     {
                         string t = dir.Trim();
-                        if (t.Length == 0) continue;
+                        if (!IsSafeSearchDir(t)) continue;
                         string p = Path.Combine(t, name);
                         if (File.Exists(p)) return p;
                     }
@@ -332,7 +351,7 @@ namespace ClaudeUsageWidget
         public static void OpenFolder(string dir)
         {
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
-            System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
+            System.Diagnostics.Process.Start(ExplorerExe, "\"" + dir + "\"");
         }
 
         public static void OpenTerminal(string dir)
@@ -343,7 +362,7 @@ namespace ClaudeUsageWidget
             if (!string.IsNullOrEmpty(wt))
                 psi = new System.Diagnostics.ProcessStartInfo(wt, "-d \"" + dir + "\"");
             else
-                psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/K cd /d \"" + dir + "\"");
+                psi = new System.Diagnostics.ProcessStartInfo(SystemExe("cmd.exe"), "/K cd /d \"" + dir + "\"");
             psi.WorkingDirectory = dir;
             psi.UseShellExecute = true;
             System.Diagnostics.Process.Start(psi);

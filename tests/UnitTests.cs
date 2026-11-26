@@ -2402,6 +2402,107 @@ namespace Tests
                 Opts.ShowContextBar = prevCtx;
             }
         }
+
+        public static void Test_Security_AutoUpdater_FailClosed_And_PE()
+        {
+            Assert.False(AutoUpdater.IsTrustedUpdateUrl("http://github.com/a/b"), "HTTP must be rejected");
+            Assert.False(AutoUpdater.IsTrustedUpdateUrl("https://evil.com/AIUsageWatcher.exe"), "Untrusted host must be rejected");
+            Assert.False(AutoUpdater.IsTrustedUpdateUrl("https://github.com.evil.com/a"), "Suffix spoofing host must be rejected");
+            Assert.True(AutoUpdater.IsTrustedUpdateUrl("https://github.com/silvkn1/ai-usage-watcher/releases/latest"));
+            Assert.True(AutoUpdater.IsTrustedUpdateUrl("https://objects.githubusercontent.com/github-production-release-asset/123"));
+
+            string httpJson = "{\"tag_name\":\"v9.0.0\",\"html_url\":\"http://evil.com/h\",\"assets\":[{\"name\":\"AIUsageWatcher.exe\",\"browser_download_url\":\"http://evil.com/x.exe\",\"size\":100}]}";
+            ReleaseInfo ri = AutoUpdater.ParseReleaseJson(httpJson, new Version(1, 0, 0, 0));
+            Assert.NotNull(ri);
+            Assert.Equal("", ri.HtmlUrl, "Non-HTTPS html_url must be stripped");
+            Assert.Equal("", ri.AssetDownloadUrl, "Non-HTTPS download url must be stripped");
+
+            string fakeMz = Path.Combine(Path.GetTempPath(), "fake_mz_" + Guid.NewGuid().ToString("N") + ".exe");
+            byte[] mzOnly = new byte[12288];
+            mzOnly[0] = 0x4D; mzOnly[1] = 0x5A;
+            File.WriteAllBytes(fakeMz, mzOnly);
+            try
+            {
+                Assert.False(AutoUpdater.IsValidExecutable(fakeMz), "Dummy MZ bytes without valid PE signature must fail");
+            }
+            finally
+            {
+                try { File.Delete(fakeMz); } catch { }
+            }
+
+            bool threw = false;
+            try
+            {
+                AutoUpdater.DownloadAndApplyUpdate(new ReleaseInfo
+                {
+                    AssetName = "AIUsageWatcher.exe",
+                    AssetDownloadUrl = "https://github.com/silvkn1/ai-usage-watcher/releases/download/v9.9.9/AIUsageWatcher.exe",
+                    ExpectedSha256 = null
+                }, typeof(AutoUpdater).Assembly.Location);
+            }
+            catch (InvalidDataException) { threw = true; }
+            Assert.True(threw, "Fail-closed updater must reject update with missing SHA-256");
+        }
+
+        public static void Test_Security_Webhook_Host_And_SSRF()
+        {
+            Uri u; string err;
+            Assert.False(WebhookSender.IsSafeWebhookUrl("http://hooks.slack.com/services/a/b", out u, out err), "HTTP webhook must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://127.0.0.1/hook", out u, out err), "Loopback IP must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://169.254.169.254/latest", out u, out err), "IMDS link-local IP must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://10.0.0.5/hook", out u, out err), "RFC1918 IP must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://localhost:8443/hook", out u, out err), "Localhost must be rejected");
+            Assert.True(WebhookSender.IsSafeWebhookUrl("https://hooks.slack.com/services/T00/B00/XXX", out u, out err), "Public Slack HTTPS must pass");
+
+            string confused = WebhookSender.BuildPayload("https://evil.attacker/collect?ref=hooks.slack.com", "T", "M");
+            Assert.True(confused.Contains("\"username\"") && confused.Contains("\"content\""), "Query substring hooks.slack.com must NOT select Slack-only formatting");
+        }
+
+        public static void Test_Security_Companion_NoTrustedMarkdown()
+        {
+            using (Stream s = typeof(CompanionInstaller).Assembly.GetManifestResourceStream("companion-extension.js"))
+            {
+                Assert.NotNull(s, "Embedded companion-extension.js must exist");
+                using (StreamReader sr = new StreamReader(s))
+                {
+                    string js = sr.ReadToEnd();
+                    Assert.False(js.Contains("isTrusted = true"), "VS Code MarkdownString must not enable isTrusted = true");
+                    Assert.True(js.Contains("escapeMarkdown("), "VS Code extension must escape interpolated status fields");
+                }
+            }
+        }
+
+        public static void Test_Security_Config_Import_Allowlist_And_ProcessHelper()
+        {
+            AppConfig local = new AppConfig();
+            local.AutoUpdateCheck = true;
+            local.MirrorEnabled = false;
+            local.MirrorFilePath = "";
+            local.ExtraClaudeDirs = "";
+            local.ScanWsl = false;
+            local.OllamaPort = 11434;
+
+            string crafted = "{\"Theme\":\"light\",\"AutoUpdateCheck\":false,\"MirrorEnabled\":true,\"MirrorFilePath\":\"C:\\\\Windows\\\\hosts\",\"ExtraClaudeDirs\":\"\\\\\\\\evil\\\\share\",\"ScanWsl\":true,\"OllamaPort\":9999}";
+            AppConfig imp = AppConfig.ImportProfileJson(crafted, local);
+            local.ApplyProfileFrom(imp);
+
+            Assert.Equal("light", local.Theme);
+            Assert.True(local.AutoUpdateCheck, "Imported profile must not disable AutoUpdateCheck");
+            Assert.False(local.MirrorEnabled, "Imported profile must not enable MirrorEnabled");
+            Assert.Equal("", local.MirrorFilePath, "Imported profile must not overwrite MirrorFilePath");
+            Assert.Equal("", local.ExtraClaudeDirs, "Imported profile must not inject ExtraClaudeDirs");
+            Assert.False(local.ScanWsl, "Imported profile must not alter ScanWsl");
+            Assert.Equal(11434, local.OllamaPort, "Imported profile must not alter OllamaPort");
+
+            Assert.False(ProcessHelper.IsSafeSearchDir("."), "Relative PATH dir must be rejected");
+            Assert.False(ProcessHelper.IsSafeSearchDir("\\\\server\\share"), "UNC PATH dir must be rejected");
+            Assert.True(ProcessHelper.IsSafeSearchDir(Environment.SystemDirectory));
+            Assert.True(File.Exists(ProcessHelper.SystemExe("cmd.exe")));
+            Assert.True(File.Exists(ProcessHelper.ExplorerExe));
+            Assert.True(CliProbe.IsValidModelName("claude-haiku-4-5"));
+            Assert.False(CliProbe.IsValidModelName("claude\necho pwn"), "Newline injection in model name must be rejected");
+            Assert.False(CliProbe.IsValidModelName("claude&whoami"), "Shell metacharacter in model name must be rejected");
+        }
     }
 
     public static class TestRunner

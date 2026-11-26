@@ -1995,6 +1995,16 @@ namespace ClaudeUsageWidget
 
         private void ScanOpenCodeSqlite(string dbPath, DateTime cutoffUtc)
         {
+            if (string.IsNullOrWhiteSpace(dbPath) || dbPath.IndexOfAny(new[] { '"', '\r', '\n', '\0' }) >= 0)
+                return;
+            string fullDb;
+            try { fullDb = Path.GetFullPath(dbPath); } catch { return; }
+            if (fullDb.StartsWith("-", StringComparison.Ordinal) ||
+                (!fullDb.EndsWith(".db", StringComparison.OrdinalIgnoreCase) &&
+                 !fullDb.EndsWith(".sqlite", StringComparison.OrdinalIgnoreCase) &&
+                 !fullDb.EndsWith(".sqlite3", StringComparison.OrdinalIgnoreCase)))
+                return;
+
             string sqlite = ProcessHelper.FindExecutableOnPath("sqlite3.exe");
             if (string.IsNullOrEmpty(sqlite))
             {
@@ -2004,8 +2014,8 @@ namespace ClaudeUsageWidget
             _openCodeSqliteMissingCli = false;
             try
             {
-                DateTime stamp = File.GetLastWriteTimeUtc(dbPath);
-                string wal = dbPath + "-wal";
+                DateTime stamp = File.GetLastWriteTimeUtc(fullDb);
+                string wal = fullDb + "-wal";
                 if (File.Exists(wal))
                 {
                     DateTime w = File.GetLastWriteTimeUtc(wal);
@@ -2019,7 +2029,7 @@ namespace ClaudeUsageWidget
                     "SELECT id, session_id, time_created, data FROM message WHERE time_created >= {0} ORDER BY time_created DESC LIMIT 5000;",
                     cutoffMs);
                 System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo(
-                    sqlite, "-readonly -json \"" + dbPath + "\" \"" + sql + "\"");
+                    sqlite, "-readonly -json \"" + fullDb + "\" \"" + sql + "\"");
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;

@@ -79,6 +79,45 @@ namespace ClaudeUsageWidget
             return new Version(maj, min, build, rev);
         }
 
+        public static bool IsValidHttpsUrl(string url)
+        {
+            Uri uri;
+            return !string.IsNullOrWhiteSpace(url) &&
+                   Uri.TryCreate(url.Trim(), UriKind.Absolute, out uri) &&
+                   uri.Scheme == Uri.UriSchemeHttps &&
+                   string.IsNullOrEmpty(uri.UserInfo);
+        }
+
+        public static bool IsTrustedUpdateUrl(string url)
+        {
+            Uri uri;
+            if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url.Trim(), UriKind.Absolute, out uri))
+                return false;
+            if (uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo))
+                return false;
+            string host = uri.DnsSafeHost ?? "";
+            return HostEqualsOrSubdomain(host, "github.com") ||
+                   HostEqualsOrSubdomain(host, "githubusercontent.com");
+        }
+
+        private static bool HostEqualsOrSubdomain(string host, string domain)
+        {
+            return string.Equals(host, domain, StringComparison.OrdinalIgnoreCase) ||
+                   host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsValidSha256Hex(string sha)
+        {
+            if (string.IsNullOrEmpty(sha) || sha.Length != 64) return false;
+            for (int i = 0; i < sha.Length; i++)
+            {
+                char c = sha[i];
+                bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex) return false;
+            }
+            return true;
+        }
+
         public static ReleaseInfo ParseReleaseJson(string json, Version currentVersion = null)
         {
             if (string.IsNullOrEmpty(json)) return null;
@@ -92,7 +131,8 @@ namespace ClaudeUsageWidget
                 info.TagName = dict.ContainsKey("tag_name") && dict["tag_name"] != null ? dict["tag_name"].ToString() : "";
                 info.Title = dict.ContainsKey("name") && dict["name"] != null ? dict["name"].ToString() : info.TagName;
                 info.Body = dict.ContainsKey("body") && dict["body"] != null ? dict["body"].ToString() : "";
-                info.HtmlUrl = dict.ContainsKey("html_url") && dict["html_url"] != null ? dict["html_url"].ToString() : "";
+                string htmlUrl = dict.ContainsKey("html_url") && dict["html_url"] != null ? dict["html_url"].ToString() : "";
+                info.HtmlUrl = IsValidHttpsUrl(htmlUrl) ? htmlUrl.Trim() : "";
 
                 info.Version = ParseVersion(info.TagName);
                 if (info.Version == null) return null;
@@ -114,7 +154,8 @@ namespace ClaudeUsageWidget
                             if (string.Equals(name, "SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase) &&
                                 a.ContainsKey("browser_download_url") && a["browser_download_url"] != null)
                             {
-                                info.ChecksumsUrl = a["browser_download_url"].ToString();
+                                string cUrl = a["browser_download_url"].ToString();
+                                if (IsValidHttpsUrl(cUrl)) info.ChecksumsUrl = cUrl.Trim();
                                 continue;
                             }
                             if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
@@ -131,8 +172,9 @@ namespace ClaudeUsageWidget
                     if (chosenAsset != null)
                     {
                         info.AssetName = chosenAsset.ContainsKey("name") && chosenAsset["name"] != null ? chosenAsset["name"].ToString() : "";
-                        info.AssetDownloadUrl = chosenAsset.ContainsKey("browser_download_url") && chosenAsset["browser_download_url"] != null
+                        string dlUrl = chosenAsset.ContainsKey("browser_download_url") && chosenAsset["browser_download_url"] != null
                             ? chosenAsset["browser_download_url"].ToString() : "";
+                        info.AssetDownloadUrl = IsValidHttpsUrl(dlUrl) ? dlUrl.Trim() : "";
                         if (chosenAsset.ContainsKey("size"))
                         {
                             try { info.AssetSize = Convert.ToInt64(chosenAsset["size"]); } catch { }
@@ -148,8 +190,9 @@ namespace ClaudeUsageWidget
 
                 if (string.IsNullOrEmpty(info.AssetDownloadUrl))
                 {
-                    if (dict.ContainsKey("zipball_url") && dict["zipball_url"] != null)
-                        info.AssetDownloadUrl = dict["zipball_url"].ToString();
+                    string zipUrl = dict.ContainsKey("zipball_url") && dict["zipball_url"] != null ? dict["zipball_url"].ToString() : "";
+                    if (IsValidHttpsUrl(zipUrl))
+                        info.AssetDownloadUrl = zipUrl.Trim();
                     else
                         info.AssetDownloadUrl = info.HtmlUrl;
                 }
@@ -167,7 +210,10 @@ namespace ClaudeUsageWidget
         {
             try
             {
-                string url = "https://api.github.com/repos/" + (repo ?? DefaultRepo) + "/releases/latest";
+                string useRepo = (repo ?? DefaultRepo).Trim();
+                if (!Regex.IsMatch(useRepo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+                    return null;
+                string url = "https://api.github.com/repos/" + useRepo + "/releases/latest";
                 using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, url))
                 {
                     req.Headers.Add("Accept", "application/vnd.github.v3+json");
@@ -203,6 +249,18 @@ namespace ClaudeUsageWidget
         {
             if (release == null || string.IsNullOrEmpty(release.AssetDownloadUrl))
                 throw new ArgumentException("Release asset download URL is required.");
+            if (!IsTrustedUpdateUrl(release.AssetDownloadUrl))
+                throw new InvalidDataException("Untrusted update download host or non-HTTPS URL blocked.");
+
+            string expectedSha = release.ExpectedSha256;
+            if (string.IsNullOrEmpty(expectedSha) && !string.IsNullOrEmpty(release.ChecksumsUrl) && !string.IsNullOrEmpty(release.AssetName))
+            {
+                if (!IsTrustedUpdateUrl(release.ChecksumsUrl))
+                    throw new InvalidDataException("Untrusted checksums URL host or non-HTTPS URL blocked.");
+                expectedSha = FetchExpectedSha256(release.ChecksumsUrl, release.AssetName);
+            }
+            if (!IsValidSha256Hex(expectedSha))
+                throw new InvalidDataException("Update aborted: valid SHA-256 digest or SHA256SUMS.txt is required.");
 
             string target = targetExePath;
             if (string.IsNullOrEmpty(target))
@@ -232,6 +290,9 @@ namespace ClaudeUsageWidget
                 using (HttpResponseMessage resp = Http.GetAsync(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead).Result)
                 {
                     resp.EnsureSuccessStatusCode();
+                    if (resp.RequestMessage != null && resp.RequestMessage.RequestUri != null &&
+                        !IsTrustedUpdateUrl(resp.RequestMessage.RequestUri.AbsoluteUri))
+                        throw new InvalidDataException("Redirected update download URL is untrusted or non-HTTPS.");
                     long totalBytes = resp.Content.Headers.ContentLength ?? -1;
 
                     using (Stream input = resp.Content.ReadAsStreamAsync().Result)
@@ -253,18 +314,10 @@ namespace ClaudeUsageWidget
                     }
                 }
 
-                // Verify SHA-256 checksum if digest is present in release metadata or SHA256SUMS.txt
-                string expectedSha = release.ExpectedSha256;
-                if (string.IsNullOrEmpty(expectedSha) && !string.IsNullOrEmpty(release.ChecksumsUrl) && !string.IsNullOrEmpty(release.AssetName))
-                {
-                    expectedSha = FetchExpectedSha256(release.ChecksumsUrl, release.AssetName);
-                }
-                if (!string.IsNullOrEmpty(expectedSha))
-                {
-                    string actualSha = ComputeFileSha256(downloadFile);
-                    if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException("Downloaded update checksum mismatch (expected " + expectedSha + ", got " + actualSha + ").");
-                }
+                // Fail-closed SHA-256 checksum verification before extracting or launching
+                string actualSha = ComputeFileSha256(downloadFile);
+                if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Downloaded update checksum mismatch (expected " + expectedSha + ", got " + actualSha + ").");
 
                 exeToInstall = downloadFile;
                 if (release.AssetName != null && release.AssetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
@@ -279,23 +332,19 @@ namespace ClaudeUsageWidget
                         foreach (ZipArchiveEntry e in zip.Entries)
                         {
                             if (string.IsNullOrEmpty(e.Name)) continue; // directory entry
-                            if (e.Name.Equals("AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase) ||
-                                e.Name.Equals(targetExeName, StringComparison.OrdinalIgnoreCase))
+                            string relDest = e.FullName.Replace('/', Path.DirectorySeparatorChar);
+                            string destPath = Path.GetFullPath(Path.Combine(fullTargetDir, relDest));
+                            if (!destPath.StartsWith(fullTargetDir, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidDataException("Archive entry attempts path traversal: " + e.FullName);
+
+                            if (string.Equals(e.FullName.TrimStart('/', '\\'), "AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(e.FullName.TrimStart('/', '\\'), targetExeName, StringComparison.OrdinalIgnoreCase))
                             {
                                 exeEntry = e;
                                 continue;
                             }
-                            string relDest = e.FullName.Replace('/', Path.DirectorySeparatorChar);
-                            string destPath = Path.GetFullPath(Path.Combine(fullTargetDir, relDest));
-                            if (destPath.StartsWith(fullTargetDir, StringComparison.OrdinalIgnoreCase))
-                            {
-                                try
-                                {
-                                    Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                                    e.ExtractToFile(destPath, true);
-                                }
-                                catch { }
-                            }
+                            Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                            e.ExtractToFile(destPath, true);
                         }
                         if (exeEntry == null)
                             throw new Exception("ZIP archive does not contain target executable.");
@@ -383,18 +432,25 @@ namespace ClaudeUsageWidget
 
         private static string FetchExpectedSha256(string checksumsUrl, string assetName)
         {
+            if (!IsTrustedUpdateUrl(checksumsUrl)) return null;
             try
             {
                 using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
                 using (HttpResponseMessage resp = Http.GetAsync(checksumsUrl, cts.Token).Result)
                 {
                     if (!resp.IsSuccessStatusCode) return null;
+                    if (resp.RequestMessage != null && resp.RequestMessage.RequestUri != null &&
+                        !IsTrustedUpdateUrl(resp.RequestMessage.RequestUri.AbsoluteUri))
+                        return null;
                     string txt = resp.Content.ReadAsStringAsync().Result;
                     foreach (string rawLine in txt.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                     {
                         string[] parts = rawLine.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                         if (parts.Length >= 2 && string.Equals(parts[parts.Length - 1].TrimStart('*'), assetName, StringComparison.OrdinalIgnoreCase))
-                            return parts[0].ToLowerInvariant();
+                        {
+                            string cand = parts[0].ToLowerInvariant();
+                            if (IsValidSha256Hex(cand)) return cand;
+                        }
                     }
                 }
             }
@@ -404,15 +460,26 @@ namespace ClaudeUsageWidget
 
         public static bool IsValidExecutable(string path)
         {
-            if (!File.Exists(path)) return false;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
             try
             {
                 using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
                     if (fs.Length < 10240) return false;
-                    byte[] header = new byte[2];
-                    if (fs.Read(header, 0, 2) < 2) return false;
-                    return (header[0] == 0x4D && header[1] == 0x5A);
+                    byte[] dos = new byte[64];
+                    if (fs.Read(dos, 0, 64) < 64) return false;
+                    if (dos[0] != 0x4D || dos[1] != 0x5A) return false; // MZ
+
+                    uint peOffset = BitConverter.ToUInt32(dos, 0x3C);
+                    if (peOffset < 64 || (long)peOffset > fs.Length - 28) return false;
+
+                    fs.Seek((long)peOffset, SeekOrigin.Begin);
+                    byte[] pe = new byte[28];
+                    if (fs.Read(pe, 0, 28) < 28) return false;
+                    if (pe[0] != 0x50 || pe[1] != 0x45 || pe[2] != 0x00 || pe[3] != 0x00) return false; // PE\0\0
+
+                    ushort optMagic = BitConverter.ToUInt16(pe, 24);
+                    return optMagic == 0x010B || optMagic == 0x020B; // PE32 or PE32+
                 }
             }
             catch

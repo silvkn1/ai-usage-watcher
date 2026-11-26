@@ -189,7 +189,7 @@ namespace ClaudeUsageWidget
             Button folder = new Button(); folder.Text = L.T("set.lang.folder"); folder.AutoSize = true;
             folder.Click += delegate
             {
-                try { System.IO.Directory.CreateDirectory(Paths.LangDirAppData); Process.Start("explorer.exe", "\"" + Paths.LangDirAppData + "\""); } catch { }
+                try { System.IO.Directory.CreateDirectory(Paths.LangDirAppData); Process.Start(ProcessHelper.ExplorerExe, "\"" + Paths.LangDirAppData + "\""); } catch { }
             };
             FlowLayoutPanel lp = new FlowLayoutPanel(); lp.AutoSize = true; lp.WrapContents = false;
             lp.Controls.Add(exp); lp.Controls.Add(folder);
@@ -511,7 +511,7 @@ namespace ClaudeUsageWidget
             AddNote(t, L.T("set.h.pricing"), "head");
             FlowLayoutPanel pp = new FlowLayoutPanel(); pp.AutoSize = true; pp.WrapContents = false;
             Button pricing = new Button(); pricing.Text = L.T("set.pricing.open"); pricing.AutoSize = true;
-            pricing.Click += delegate { try { Process.Start("notepad.exe", "\"" + Paths.PricingFile + "\""); } catch { } };
+            pricing.Click += delegate { try { Process.Start(ProcessHelper.SystemExe("notepad.exe"), "\"" + Paths.PricingFile + "\""); } catch { } };
 
             Button btnFetchPricing = new Button(); btnFetchPricing.Text = L.T("set.pricing.fetch"); btnFetchPricing.AutoSize = true;
             btnFetchPricing.Click += async delegate
@@ -541,7 +541,7 @@ namespace ClaudeUsageWidget
                 }
             };
             Button customPricing = new Button(); customPricing.Text = L.T("set.pricing.custom"); customPricing.AutoSize = true;
-            customPricing.Click += delegate { Pricing.EnsureCustomTemplate(); try { Process.Start("notepad.exe", "\"" + Paths.CustomPricingFile + "\""); } catch { } };
+            customPricing.Click += delegate { Pricing.EnsureCustomTemplate(); try { Process.Start(ProcessHelper.SystemExe("notepad.exe"), "\"" + Paths.CustomPricingFile + "\""); } catch { } };
             pp.Controls.Add(pricing);
             pp.Controls.Add(customPricing);
             pp.Controls.Add(btnFetchPricing);
@@ -881,6 +881,18 @@ namespace ClaudeUsageWidget
                 SelectTab(1);
                 MessageBox.Show(this, L.T("msg.hotkey.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
+            }
+            string rawWebhook = _webhookUrl.Text.Trim();
+            if (_webhookOn.Checked || rawWebhook.Length > 0)
+            {
+                Uri dummyUri;
+                string wErr;
+                if (!WebhookSender.IsSafeWebhookUrl(rawWebhook, out dummyUri, out wErr))
+                {
+                    SelectTab(2);
+                    MessageBox.Show(this, string.Format(L.T("msg.webhook.fail"), wErr), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
             }
             try { Autostart.Set(_auto.Checked); } catch (Exception ex) { Log.Write("autostart", ex); }
 

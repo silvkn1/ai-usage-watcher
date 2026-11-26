@@ -772,7 +772,7 @@ namespace ClaudeUsageWidget
             _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
             _miJson = new ToolStripMenuItem(L.T("tray.exportjson"), null, delegate { ExportJson(); });
-            _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start("explorer.exe", "\"" + Paths.AppDir + "\""); });
+            _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start(ProcessHelper.ExplorerExe, "\"" + Paths.AppDir + "\""); });
             _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
 
             _miToolsGroup.DropDownItems.Add(_miProjects);
@@ -1830,7 +1830,7 @@ namespace ClaudeUsageWidget
                                 DialogResult dr = MessageBox.Show(
                                     L.T("update.failed", ex.Message),
                                     L.T("update.title"), MessageBoxButtons.YesNo, MessageBoxIcon.Error);
-                                if (dr == DialogResult.Yes && !string.IsNullOrEmpty(rel.HtmlUrl))
+                                if (dr == DialogResult.Yes && AutoUpdater.IsTrustedUpdateUrl(rel.HtmlUrl))
                                 {
                                     try { Process.Start(new ProcessStartInfo(rel.HtmlUrl) { UseShellExecute = true }); } catch { }
                                 }

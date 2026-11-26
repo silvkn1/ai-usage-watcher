@@ -58,6 +58,12 @@ function formatTokens(count) {
     return String(count);
 }
 
+function escapeMarkdown(value) {
+    return String(value == null ? '' : value)
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\\`*_{}[\]()#+\-!|~<>]/g, '\\$&');
+}
+
 function updateStatusBar() {
     if (!statusBarItem) return;
 
@@ -76,7 +82,7 @@ function updateStatusBar() {
 
         const parts = [];
         const md = new vscode.MarkdownString();
-        md.isTrusted = true;
+        md.isTrusted = false;
         md.appendMarkdown('### 📊 AI Usage Watcher Status\n\n');
 
         if (typeof data.claude_5h_percent === 'number') {
@@ -122,15 +128,8 @@ function updateStatusBar() {
             parts.push(formatTokens(data.today_tokens) + ' tok');
         }
 
-        if (data.gemini_cli_today_tokens > 0 || data.gemini_cli_today_cost_usd > 0) {
-            md.appendMarkdown(`- **Gemini CLI Today**: $${Number(data.gemini_cli_today_cost_usd || 0).toFixed(2)} (${formatTokens(data.gemini_cli_today_tokens || 0)} tokens)\n`);
-        }
-        if (data.opencode_today_tokens > 0 || data.opencode_today_cost_usd > 0) {
-            md.appendMarkdown(`- **OpenCode Today**: $${Number(data.opencode_today_cost_usd || 0).toFixed(2)} (${formatTokens(data.opencode_today_tokens || 0)} tokens)\n`);
-        }
-
         if (data.today_cost_formatted) {
-            md.appendMarkdown(`- **Today Cost**: ${data.today_cost_formatted} (${formatTokens(data.today_tokens)} tokens)\n`);
+            md.appendMarkdown(`- **Today Cost**: ${escapeMarkdown(data.today_cost_formatted)} (${formatTokens(data.today_tokens)} tokens)\n`);
         }
         if (typeof data.today_saved_usd === 'number' && data.today_saved_usd > 0) {
             md.appendMarkdown(`- **⚡ Cache Saved**: $${data.today_saved_usd.toFixed(2)} (${data.cache_hit_percent || 0}% hit)\n`);
@@ -139,7 +138,7 @@ function updateStatusBar() {
             md.appendMarkdown(`- **⏳ Estimated Runway**: ~${data.runway_minutes} min remaining\n`);
         }
         if (data.last_active_project) {
-            md.appendMarkdown(`- **📁 Active Project**: \`${data.last_active_project}\`\n`);
+            md.appendMarkdown(`- **📁 Active Project**: \`${escapeMarkdown(data.last_active_project)}\`\n`);
         }
         const runSess = data.running_sessions || 0;
         const confSess = data.confirm_sessions || 0;
@@ -154,8 +153,8 @@ function updateStatusBar() {
             const loaded = data.ollama_loaded_count || 0;
             const vramGb = data.ollama_vram_bytes > 0 ? (data.ollama_vram_bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB VRAM' : '';
             const loadedModels = Array.isArray(data.ollama_loaded_models) && data.ollama_loaded_models.length > 0
-                ? data.ollama_loaded_models.join(', ')
-                : (Array.isArray(data.ollama_models) ? data.ollama_models.join(', ') : '');
+                ? data.ollama_loaded_models.map(escapeMarkdown).join(', ')
+                : (Array.isArray(data.ollama_models) ? data.ollama_models.map(escapeMarkdown).join(', ') : '');
             const extra = [loaded > 0 ? `${loaded} loaded` : '', vramGb, loadedModels].filter(Boolean).join(' · ');
             md.appendMarkdown(`- **🦙 Ollama Local**: Online (${count} models${extra ? ' · ' + extra : ''})\n`);
         }

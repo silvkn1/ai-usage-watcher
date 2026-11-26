@@ -236,12 +236,41 @@ namespace ClaudeUsageWidget
             ShowInTaskbar = false;
         }
 
+        private static readonly System.Collections.Generic.HashSet<string> SafeProfileProperties =
+            new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
+        {
+            "FloatX", "FloatY", "HasPosition", "OpacityPercent", "Compact", "ClickThrough", "ShowFloating",
+            "DockTop", "AlwaysOnTop", "HideOnFullscreen", "Theme", "Language", "ShowRemaining",
+            "AlertsEnabled", "AlertThresholds", "ResetNotify", "HotkeyEnabled", "Hotkey",
+            "HistoryDays", "BudgetDaily", "BudgetMonthly", "ShowProjects",
+            "DockEdge", "DockMonitor", "DockCenterY", "HasDockY", "DockCenterX", "HasDockX",
+            "HookNotifyStop", "HookNotifyMinSeconds", "HookNotifyInput",
+            "ProbeEnabled", "ProbeMinMinutes", "ProbeModel",
+            "CurrencyCustomEnabled", "CurrencySymbol", "CurrencyRate", "CurrencyShowBoth",
+            "AudioAlertsEnabled", "ContextAlertEnabled", "BurnRateAlertEnabled", "BurnRateThresholdTokens",
+            "ScanClaude", "ScanGemini", "ScanCodex", "ScanGeminiCli", "ScanOpenCode",
+            "AntigravityQuota5hTokens", "AntigravityQuota7dTokens", "OllamaEnabled",
+            "Backdrop", "CardLayout", "MiniPillMode", "ShowContextBar",
+            "QuietHoursEnabled", "QuietStartHour", "QuietEndHour", "AlertCooldownMinutes",
+            "DigestSchedule", "DigestHour"
+        };
+
         public string ExportProfileJson()
         {
             AppConfig clone = J.Ser.Deserialize<AppConfig>(J.Ser.Serialize(this));
             clone.AdminKeyProtected = null;
             clone.WebhookUrlProtected = null;
             clone.WebhookUrl = null;
+            clone.AdminEnabled = false;
+            clone.AdminApiKeyIds = "";
+            clone.AdminWorkspaceIds = "";
+            clone.WebhookEnabled = false;
+            clone.MirrorEnabled = false;
+            clone.MirrorFilePath = "";
+            clone.ExtraClaudeDirs = "";
+            clone.ScanWsl = false;
+            clone.OllamaPort = 11434;
+            clone.AutoUpdateCheck = true;
             clone.LastDigestKey = "";
             return J.Ser.Serialize(clone);
         }
@@ -249,13 +278,13 @@ namespace ClaudeUsageWidget
         public static AppConfig ImportProfileJson(string json, AppConfig preserveSecretsFrom)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
-            AppConfig c = J.Ser.Deserialize<AppConfig>(json);
-            if (c == null) return null;
-            c.WebhookUrl = null;
-            c.AdminKeyProtected = preserveSecretsFrom != null ? preserveSecretsFrom.AdminKeyProtected : null;
-            c.WebhookUrlProtected = preserveSecretsFrom != null ? preserveSecretsFrom.WebhookUrlProtected : null;
-            c.Normalize();
-            return c;
+            AppConfig raw = J.Ser.Deserialize<AppConfig>(json);
+            if (raw == null) return null;
+            AppConfig dst = preserveSecretsFrom != null
+                ? J.Ser.Deserialize<AppConfig>(J.Ser.Serialize(preserveSecretsFrom))
+                : new AppConfig();
+            dst.ApplyProfileFrom(raw);
+            return dst;
         }
 
         public void ApplyProfileFrom(AppConfig src)
@@ -264,7 +293,7 @@ namespace ClaudeUsageWidget
             foreach (System.Reflection.PropertyInfo p in typeof(AppConfig).GetProperties())
             {
                 if (!p.CanRead || !p.CanWrite) continue;
-                if (p.Name == "AdminKeyProtected" || p.Name == "WebhookUrlProtected" || p.Name == "WebhookUrl") continue;
+                if (!SafeProfileProperties.Contains(p.Name)) continue;
                 p.SetValue(this, p.GetValue(src, null), null);
             }
             Normalize();
