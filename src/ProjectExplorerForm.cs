@@ -341,8 +341,9 @@ namespace ClaudeUsageWidget
             int legY = startY + 4 * (boxSize + gap) + 4;
             using (Font legFont = new Font("Segoe UI", 7.5f))
             using (SolidBrush legBrush = new SolidBrush(Palette.Dim))
+            using (StringFormat rightFmt = new StringFormat { Alignment = StringAlignment.Far })
             {
-                g.DrawString(L.T("proj.legend.less"), legFont, legBrush, legX - 28 * s, legY - 1);
+                g.DrawString(L.T("proj.legend.less"), legFont, legBrush, new RectangleF(legX - 80 * s, legY - 1, 76 * s, legendBox + 4), rightFmt);
                 using (SolidBrush eb = new SolidBrush(emptyColor))
                     g.FillRectangle(eb, legX, legY, legendBox, legendBox);
                 for (int l = 0; l < 4; l++)

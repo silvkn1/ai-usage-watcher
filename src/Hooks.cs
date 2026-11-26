@@ -328,31 +328,45 @@ namespace ClaudeUsageWidget
                     }
                     NotifyEvents.Write("stop", elapsed, now, sid);
                 }
-                else if (kind == "input") NotifyEvents.Write("input", -1, now, sid);
+                else if (kind == "input")
+                {
+                    if (sid != null)
+                    {
+                        string f = Path.Combine(Paths.HooksDir, sid + ".txt");
+                        if (File.Exists(f)) { try { File.Delete(f); } catch { } }
+                    }
+                    NotifyEvents.Write("input", -1, now, sid);
+                }
             }
             catch { }
             return 0;
         }
 
-        public static List<string> GetActiveHookSessionIds(int maxAgeMinutes = 15)
+        public static Dictionary<string, DateTime> GetActiveHookSessions(int maxAgeMinutes = 15)
         {
-            List<string> ids = new List<string>();
+            Dictionary<string, DateTime> map = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                if (!Directory.Exists(Paths.HooksDir)) return ids;
+                if (!Directory.Exists(Paths.HooksDir)) return map;
                 DateTime cutoffUtc = DateTime.UtcNow.AddMinutes(-maxAgeMinutes);
                 foreach (string f in Directory.GetFiles(Paths.HooksDir, "*.txt"))
                 {
                     try
                     {
-                        if (File.GetLastWriteTimeUtc(f) >= cutoffUtc)
-                            ids.Add(Path.GetFileNameWithoutExtension(f));
+                        DateTime utc = File.GetLastWriteTimeUtc(f);
+                        if (utc >= cutoffUtc)
+                            map[Path.GetFileNameWithoutExtension(f)] = utc.ToLocalTime();
                     }
                     catch { }
                 }
             }
             catch { }
-            return ids;
+            return map;
+        }
+
+        public static List<string> GetActiveHookSessionIds(int maxAgeMinutes = 15)
+        {
+            return new List<string>(GetActiveHookSessions(maxAgeMinutes).Keys);
         }
 
         private static string ReadStdin(int timeoutMs)

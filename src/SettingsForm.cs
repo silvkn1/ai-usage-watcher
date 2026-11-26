@@ -477,7 +477,7 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.ollama.port"), _ollamaPort);
 
             AddCheck(t, _wsl, L.T("set.wsl"), _cfg.ScanWsl);
-            _extraDirs.Width = 185; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
+            _extraDirs.Width = 160; _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
             _extraDirs.Margin = new Padding(0, 2, 0, 0);
             Button browseExtra = new Button(); browseExtra.Text = L.T("set.browse"); browseExtra.AutoSize = true;
             browseExtra.Margin = new Padding(6, 0, 0, 0);
@@ -618,20 +618,20 @@ namespace ClaudeUsageWidget
 
         private static void AddCheck(TableLayoutPanel t, CheckBox c, string text, bool value)
         {
-            c.Text = text; c.Checked = value; c.AutoSize = true; c.MaximumSize = new Size(620, 0); c.Margin = new Padding(3, 4, 3, 4);
+            c.Text = text; c.UseMnemonic = false; c.Checked = value; c.AutoSize = true; c.MaximumSize = new Size(620, 0); c.Margin = new Padding(3, 4, 3, 4);
             t.Controls.Add(c); t.SetColumnSpan(c, 2);
         }
 
         private static void AddRow(TableLayoutPanel t, string label, Control c)
         {
-            Label l = new Label(); l.Text = label; l.AutoSize = true; l.Anchor = AnchorStyles.Left; l.MaximumSize = new Size(330, 0);
+            Label l = new Label(); l.Text = label; l.UseMnemonic = false; l.AutoSize = true; l.Anchor = AnchorStyles.Left; l.MaximumSize = new Size(330, 0);
             t.Controls.Add(l); t.Controls.Add(c);
         }
 
         /// <summary>Teks penjelas lintas dua kolom. kind: "dim" (abu), "warn" (peringatan), "head" (judul bagian).</summary>
         private void AddNote(TableLayoutPanel t, string text, string kind)
         {
-            Label l = new Label(); l.Text = text; l.AutoSize = true; l.MaximumSize = new Size(620, 0); l.Tag = kind;
+            Label l = new Label(); l.Text = text; l.UseMnemonic = false; l.AutoSize = true; l.MaximumSize = new Size(620, 0); l.Tag = kind;
             l.Margin = kind == "head" ? new Padding(3, 14, 3, 4) : new Padding(3, 6, 3, 6);
             if (kind == "head")
             {

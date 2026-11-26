@@ -29,18 +29,20 @@ namespace ClaudeUsageWidget
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher, _codexWatcher, _hooksWatcher, _gemCliWatcher;
         private readonly SynchronizationContext _ui;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miData, _miExit, _miCsv, _miJson, _miReport, _miProjects, _miMarkSessions;
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miAbout, _miData, _miExit, _miCsv, _miJson, _miReport, _miProjects, _miMarkSessions;
         private ToolStripMenuItem _miViewGroup, _miToolsGroup, _miHelpGroup;
         private ToolStripSeparator _sepProject;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
+
+        private static string MenuText(string s) { return string.IsNullOrEmpty(s) ? s : s.Replace("&", "&&"); }
 
         /// <summary>Terapkan bahasa terpilih ke menu yang sudah dibuat, tooltip, dan widget.</summary>
         private void ApplyLanguage()
         {
             _miShow.Text = L.T("tray.show");
-            if (_miViewGroup != null) _miViewGroup.Text = L.T("tray.menu.view");
-            if (_miToolsGroup != null) _miToolsGroup.Text = L.T("tray.menu.tools");
-            if (_miHelpGroup != null) _miHelpGroup.Text = L.T("tray.menu.help");
+            if (_miViewGroup != null) _miViewGroup.Text = MenuText(L.T("tray.menu.view"));
+            if (_miToolsGroup != null) _miToolsGroup.Text = MenuText(L.T("tray.menu.tools"));
+            if (_miHelpGroup != null) _miHelpGroup.Text = MenuText(L.T("tray.menu.help"));
             _miDock.Text = L.T("tray.dock");
             if (_miSnap != null) { _miSnap.Text = L.T("tray.snap"); PopulateSnapMenu(_miSnap); }
             _miCompact.Text = L.T("tray.compact");
@@ -51,6 +53,7 @@ namespace ClaudeUsageWidget
             if (_miWizard != null) _miWizard.Text = L.T("tray.wizard");
             _miSettings.Text = L.T("tray.settings");
             if (_miUpdate != null) _miUpdate.Text = L.T("tray.update");
+            if (_miAbout != null) _miAbout.Text = L.T("tray.about");
             if (_miCompanion != null) _miCompanion.Text = L.T("tray.companion");
             _miData.Text = L.T("tray.datafolder");
             _miCsv.Text = L.T("tray.exportcsv");
@@ -183,7 +186,7 @@ namespace ClaudeUsageWidget
             ApplyHotkey(false);
 
             StartWatchers();
-            _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessionIds());
+            _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessions());
             HandleNotify();   // peristiwa hook yang tertinggal (yang basi diabaikan)
             ReloadLimits();
             RequestScan();
@@ -676,7 +679,7 @@ namespace ClaudeUsageWidget
 
         private void SyncHookSessionsAndRefresh()
         {
-            _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessionIds());
+            _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessions());
             _usage = _scanner.Snapshot();
             Refresh();
         }
@@ -743,7 +746,7 @@ namespace ClaudeUsageWidget
             _miCopy = new ToolStripMenuItem(L.T("tray.copystatus"), null, delegate { CopyStatus(); });
 
             // 1. Submenu: Tampilan & Posisi (View & Layout)
-            _miViewGroup = new ToolStripMenuItem(L.T("tray.menu.view"));
+            _miViewGroup = new ToolStripMenuItem(MenuText(L.T("tray.menu.view")));
             _miDock = new ToolStripMenuItem(L.T("tray.dock"), null, delegate { SetDockTop(!_float.DockTop); });
             _miDock.Checked = _cfg.DockTop;
             _miSnap = new ToolStripMenuItem(L.T("tray.snap"));
@@ -765,7 +768,7 @@ namespace ClaudeUsageWidget
             _miViewGroup.DropDownItems.Add(_miClickThrough);
 
             // 2. Submenu: Laporan & Alat (Reports & Tools)
-            _miToolsGroup = new ToolStripMenuItem(L.T("tray.menu.tools"));
+            _miToolsGroup = new ToolStripMenuItem(MenuText(L.T("tray.menu.tools")));
             _miProjects = new ToolStripMenuItem(L.T("tray.projects"), null, delegate { OpenProjectExplorer(); });
             _miMarkSessions = new ToolStripMenuItem(L.T("tray.marksessions", 0), null, delegate { AcknowledgeDoneSessions(); });
             _miMarkSessions.Visible = false;
@@ -784,13 +787,16 @@ namespace ClaudeUsageWidget
             _miToolsGroup.DropDownItems.Add(_miData);
             _miToolsGroup.DropDownItems.Add(_miCompanion);
 
-            // 3. Submenu: Bantuan & Pembaruan (Help & Updates)
-            _miHelpGroup = new ToolStripMenuItem(L.T("tray.menu.help"));
+            // 3. Submenu: Bantuan & Tentang (Help & About)
+            _miHelpGroup = new ToolStripMenuItem(MenuText(L.T("tray.menu.help")));
             _miUpdate = new ToolStripMenuItem(L.T("tray.update"), null, delegate { CheckForUpdates(true); });
             _miWizard = new ToolStripMenuItem(L.T("tray.wizard"), null, delegate { ShowWizard(); });
+            _miAbout = new ToolStripMenuItem(L.T("tray.about"), null, delegate { ShowAbout(); });
 
             _miHelpGroup.DropDownItems.Add(_miUpdate);
             _miHelpGroup.DropDownItems.Add(_miWizard);
+            _miHelpGroup.DropDownItems.Add(new ToolStripSeparator());
+            _miHelpGroup.DropDownItems.Add(_miAbout);
 
             // Pengaturan & Umum
             _miSettings = new ToolStripMenuItem(L.T("tray.settings"), null, delegate { OpenSettings(); });
@@ -1126,6 +1132,120 @@ namespace ClaudeUsageWidget
             ShowBalloon(L.T("wizard.done.tip"), ToolTipIcon.Info);
         }
 
+        private void ShowAbout()
+        {
+            try
+            {
+                string repoUrl = "https://github.com/" + AutoUpdater.DefaultRepo;
+                using (Form dlg = new Form())
+                {
+                    dlg.Text = L.T("about.title");
+                    try { Icon ic = AppIcon.Get(); if (ic != null) dlg.Icon = ic; } catch { }
+                    dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                    dlg.MaximizeBox = false;
+                    dlg.MinimizeBox = false;
+                    dlg.ShowInTaskbar = false;
+                    dlg.StartPosition = FormStartPosition.CenterScreen;
+                    dlg.AutoScaleMode = AutoScaleMode.Dpi;
+                    dlg.ClientSize = new Size(430, 235);
+                    dlg.BackColor = Palette.Bg;
+                    dlg.ForeColor = Palette.Text;
+                    dlg.Font = new Font("Segoe UI", 9f);
+                    DarkUi.TitleBar(dlg.Handle, !Palette.IsLight);
+
+                    PictureBox pic = new PictureBox();
+                    pic.Size = new Size(42, 42);
+                    pic.Location = new Point(20, 20);
+                    pic.SizeMode = PictureBoxSizeMode.StretchImage;
+                    try { Icon ic = AppIcon.Get(); if (ic != null) pic.Image = ic.ToBitmap(); } catch { }
+                    dlg.Controls.Add(pic);
+
+                    Label title = new Label();
+                    title.Text = L.AppFullName;
+                    title.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
+                    title.ForeColor = Palette.Text;
+                    title.AutoSize = true;
+                    title.Location = new Point(74, 18);
+                    dlg.Controls.Add(title);
+
+                    Label ver = new Label();
+                    ver.Text = L.T("about.version", AutoUpdater.CurrentVersionStr);
+                    ver.ForeColor = Palette.Accent;
+                    ver.AutoSize = true;
+                    ver.Location = new Point(74, 44);
+                    dlg.Controls.Add(ver);
+
+                    Label desc = new Label();
+                    desc.Text = L.T("about.desc");
+                    desc.UseMnemonic = false;
+                    desc.ForeColor = Palette.Dim;
+                    desc.Location = new Point(20, 76);
+                    desc.Size = new Size(390, 48);
+                    dlg.Controls.Add(desc);
+
+                    Label repoLbl = new Label();
+                    repoLbl.Text = L.T("about.repo");
+                    repoLbl.ForeColor = Palette.Dim;
+                    repoLbl.AutoSize = true;
+                    repoLbl.Location = new Point(20, 134);
+                    dlg.Controls.Add(repoLbl);
+
+                    LinkLabel link = new LinkLabel();
+                    link.Text = repoUrl;
+                    link.AutoSize = true;
+                    link.Location = new Point(20, 152);
+                    link.LinkColor = Palette.Accent;
+                    link.ActiveLinkColor = Palette.Text;
+                    link.VisitedLinkColor = Palette.Accent;
+                    link.LinkClicked += delegate
+                    {
+                        if (AutoUpdater.IsTrustedUpdateUrl(repoUrl))
+                        {
+                            try { Process.Start(new ProcessStartInfo(repoUrl) { UseShellExecute = true }); } catch { }
+                        }
+                    };
+                    dlg.Controls.Add(link);
+
+                    Button btnUpdate = new Button();
+                    btnUpdate.Text = L.T("tray.update").Replace("...", "");
+                    btnUpdate.AutoSize = true;
+                    btnUpdate.Location = new Point(20, 190);
+                    btnUpdate.Click += delegate { dlg.Close(); CheckForUpdates(true); };
+
+                    Button btnCopy = new Button();
+                    btnCopy.Text = L.T("about.copy");
+                    btnCopy.AutoSize = true;
+                    btnCopy.Location = new Point(170, 190);
+                    btnCopy.Click += delegate
+                    {
+                        try
+                        {
+                            Clipboard.SetText(L.AppFullName + " v" + AutoUpdater.CurrentVersionStr + " (" + repoUrl + ")");
+                            ShowBalloon(L.T("about.copied"), ToolTipIcon.Info);
+                        }
+                        catch { }
+                    };
+
+                    Button btnClose = new Button();
+                    btnClose.Text = L.T("about.close");
+                    btnClose.AutoSize = true;
+                    btnClose.DialogResult = DialogResult.OK;
+                    btnClose.Location = new Point(332, 190);
+
+                    dlg.Controls.Add(btnUpdate);
+                    dlg.Controls.Add(btnCopy);
+                    dlg.Controls.Add(btnClose);
+                    dlg.AcceptButton = btnClose;
+                    dlg.CancelButton = btnClose;
+                    dlg.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("about", ex);
+            }
+        }
+
         private void ApplyConfigChanges(string oldEdge, string oldMonitor)
         {
             bool scanTogglesChanged =
@@ -1233,6 +1353,7 @@ namespace ClaudeUsageWidget
                             _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);   // paling lambat 2 dtk sekali
                         };
                         _logWatcher.Changed += h; _logWatcher.Created += h;
+                        _logWatcher.Renamed += delegate(object s, RenamedEventArgs e) { h(s, e); };
                         _logWatcher.EnableRaisingEvents = true;
                     }
                 }
@@ -1272,6 +1393,7 @@ namespace ClaudeUsageWidget
                             _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
                         };
                         _geminiWatcher.Changed += hG; _geminiWatcher.Created += hG;
+                        _geminiWatcher.Renamed += delegate(object s, RenamedEventArgs e) { hG(s, e); };
                         _geminiWatcher.EnableRaisingEvents = true;
                     }
                 }
@@ -1293,6 +1415,7 @@ namespace ClaudeUsageWidget
                             _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
                         };
                         _codexWatcher.Changed += hC; _codexWatcher.Created += hC;
+                        _codexWatcher.Renamed += delegate(object s, RenamedEventArgs e) { hC(s, e); };
                         _codexWatcher.EnableRaisingEvents = true;
                     }
                 }
@@ -1314,6 +1437,7 @@ namespace ClaudeUsageWidget
                             _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
                         };
                         _gemCliWatcher.Changed += hGc; _gemCliWatcher.Created += hGc;
+                        _gemCliWatcher.Renamed += delegate(object s, RenamedEventArgs e) { hGc(s, e); };
                         _gemCliWatcher.EnableRaisingEvents = true;
                     }
                 }

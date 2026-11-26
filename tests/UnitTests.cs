@@ -2503,6 +2503,94 @@ namespace Tests
             Assert.False(CliProbe.IsValidModelName("claude\necho pwn"), "Newline injection in model name must be rejected");
             Assert.False(CliProbe.IsValidModelName("claude&whoami"), "Shell metacharacter in model name must be rejected");
         }
+
+        public static void Test_AboutMenu_And_ConfirmBadge_Fixes()
+        {
+            // 1. About menu wired inside Help submenu of shared right-click ContextMenuStrip
+            using (TrayApp app = new TrayApp())
+            {
+                FieldInfo fiHelp = typeof(TrayApp).GetField("_miHelpGroup", BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo fiAbout = typeof(TrayApp).GetField("_miAbout", BindingFlags.NonPublic | BindingFlags.Instance);
+                FieldInfo fiMenu = typeof(TrayApp).GetField("_menu", BindingFlags.NonPublic | BindingFlags.Instance);
+                ToolStripMenuItem miHelp = fiHelp.GetValue(app) as ToolStripMenuItem;
+                ToolStripMenuItem miAbout = fiAbout.GetValue(app) as ToolStripMenuItem;
+                ContextMenuStrip menu = fiMenu.GetValue(app) as ContextMenuStrip;
+                Assert.NotNull(miAbout, "_miAbout menu item must exist");
+                Assert.True(miHelp.DropDownItems.Contains(miAbout), "Help submenu must contain About item");
+                Assert.True(menu.Items.Count <= 15, "Top-level right-click menu count must stay <= 15");
+            }
+
+            // 2. Antigravity & Claude ? confirmation persistence fixes
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.CacheFilePath = null;
+            sc.ScanCodex = false; sc.ScanGeminiCli = false; sc.ScanOpenCode = false;
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_confirmfix_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string agDir = Path.Combine(tempDir, "brain", "conv-fix-1", ".system_generated", "logs");
+                string clDir = Path.Combine(tempDir, "claude", "proj");
+                Directory.CreateDirectory(agDir);
+                Directory.CreateDirectory(clDir);
+                sc.Roots = delegate { return new List<string> { Path.Combine(tempDir, "brain"), clDir }; };
+                sc.Scan(); // _ready = true
+
+                string t1 = DateTime.UtcNow.AddSeconds(-5).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string t2 = DateTime.UtcNow.AddSeconds(-3).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string t3 = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+                // Antigravity notify_user with stringified "BlockedOnUser":"true" followed by MODEL GENERIC step
+                string agNotifyLine = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":10,\"tool_calls\":[{{\"name\":\"default_api:notify_user\",\"args\":{{\"BlockedOnUser\":\"true\"}}}}],\"input_tokens\":200,\"output_tokens\":40,\"cache_read_tokens\":0}}",
+                    t1
+                );
+                string agModelGeneric = string.Format(
+                    "{{\"type\":\"GENERIC\",\"source\":\"MODEL\",\"status\":\"RUNNING\",\"created_at\":\"{0}\",\"content\":\"wait\"}}",
+                    t2
+                );
+                File.WriteAllLines(Path.Combine(agDir, "transcript.jsonl"), new[] { agNotifyLine, agModelGeneric });
+
+                // Claude multi-chunk same message.id|requestId: thinking block then AskUserQuestion block
+                string clThink = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"req_c1\",\"cwd\":\"d:\\\\demo\",\"message\":{{\"id\":\"msg_c1\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":null,\"content\":[{{\"type\":\"thinking\",\"thinking\":\"...\"}}],\"usage\":{{\"input_tokens\":500,\"output_tokens\":20,\"cache_read_input_tokens\":0}}}}}}",
+                    t1
+                );
+                string clAsk = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"req_c1\",\"cwd\":\"d:\\\\demo\",\"message\":{{\"id\":\"msg_c1\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"content\":[{{\"type\":\"tool_use\",\"name\":\"AskUserQuestion\",\"input\":{{}}}}],\"usage\":{{\"input_tokens\":500,\"output_tokens\":20,\"cache_read_input_tokens\":0}}}}}}",
+                    t2
+                );
+                File.WriteAllLines(Path.Combine(clDir, "sess-claude-1.jsonl"), new[] { clThink, clAsk });
+
+                sc.Scan();
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(2, snap.Sessions.ConfirmCount, "Both Antigravity BlockedOnUser:'true' and Claude multi-chunk AskUserQuestion must trigger ? badge");
+                Assert.True(snap.Sessions.AntigravityConfirm, "AntigravityConfirm must survive MODEL GENERIC step");
+                Assert.True(snap.Sessions.ClaudeConfirm, "ClaudeConfirm must trigger even when thinking block shared same id|requestId");
+                Assert.Equal(520L, snap.ClaudeToday.Total, "Claude tokens must NOT be double-counted across chunks sharing id|requestId");
+
+                // Stale SyncHookSessions timestamp must NOT clear Confirm (?)
+                sc.MarkHookNeedsConfirm("hook_sid_1");
+                sc.SyncHookSessions(new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase) {
+                    { "hook_sid_1", DateTime.Now.AddSeconds(-10) }
+                });
+                UsageSnapshot snapHook = sc.Snapshot();
+                Assert.Equal(3, snapHook.Sessions.ConfirmCount, "Older hook file timestamp must NOT overwrite NeedsConfirm (?) back to Running");
+
+                // Only a newer USER_INPUT clears Antigravity ? back to Running
+                string agReply = string.Format(
+                    "{{\"type\":\"USER_INPUT\",\"source\":\"USER_EXPLICIT\",\"created_at\":\"{0}\",\"content\":\"ok\"}}",
+                    DateTime.UtcNow.AddSeconds(2).ToString("yyyy-MM-ddTHH:mm:ssZ")
+                );
+                File.AppendAllLines(Path.Combine(agDir, "transcript.jsonl"), new[] { agReply });
+                sc.Scan();
+                UsageSnapshot afterReply = sc.Snapshot();
+                Assert.False(afterReply.Sessions.AntigravityConfirm, "USER_INPUT reply must clear AntigravityConfirm");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
     }
 
     public static class TestRunner

@@ -316,7 +316,7 @@ namespace ClaudeUsageWidget
     internal class UsageScanner
     {
         private const int KeepDays = 30;   // jendela pindai; "7 hari" dan "hari ini" dihitung dari subsetnya
-        private const int CacheFormatVersion = 1;
+        private const int CacheFormatVersion = 2;
         /// <summary>Folder 'projects' yang dipindai (default + folder tambahan + WSL). Diisi TrayApp.</summary>
         public Func<List<string>> Roots;
         public Func<List<string>> GeminiCliRoots;
@@ -739,7 +739,10 @@ namespace ClaudeUsageWidget
             }
 
             // Saring murah sebelum parse JSON.
-            if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0) return;
+            bool noUsageConfirm = line.IndexOf("\"assistant\"", StringComparison.Ordinal) >= 0 &&
+                                  line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0 &&
+                                  HasClaudeConfirmTool(line);
+            if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0 && !noUsageConfirm) return;
             if (line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return;
 
             Dictionary<string, object> o = null;
@@ -752,11 +755,6 @@ namespace ClaudeUsageWidget
             if (J.Str(o, "type") != "assistant") return;
 
             Dictionary<string, object> msg = J.Obj(o, "message");
-            Dictionary<string, object> u = J.Obj(msg, "usage");
-            if (u == null) return;
-            string model = J.Str(msg, "model");
-            if (string.IsNullOrEmpty(model) || model == "<synthetic>") return;
-
             DateTime ts;
             string tsRaw = J.Str(o, "timestamp");
             if (tsRaw == null || !DateTime.TryParse(tsRaw, System.Globalization.CultureInfo.InvariantCulture,
@@ -765,54 +763,61 @@ namespace ClaudeUsageWidget
             DateTime local = DateTime.SpecifyKind(ts, DateTimeKind.Utc).ToLocalTime();
             if (local.Date < DateTime.Today.AddDays(-(KeepDays - 1))) return;
 
-            string id = J.Str(msg, "id");
-            string req = J.Str(o, "requestId");
-            if (id != null || req != null)
-            {
-                string key = (id ?? "") + "|" + (req ?? "");
-                if (_seen.ContainsKey(key)) return;
-                _seen[key] = local;
-            }
-
-            Tally t = new Tally();
-            t.Requests = 1;
-            t.Input = J.Long(u, "input_tokens");
-            t.Output = J.Long(u, "output_tokens");
-            t.CacheRead = J.Long(u, "cache_read_input_tokens");
-            long cw = J.Long(u, "cache_creation_input_tokens");
-            Dictionary<string, object> cc = J.Obj(u, "cache_creation");
-            // Total cache_creation_input_tokens jadi acuan (rinciannya kadang tidak menjumlah ke total).
-            long cw1h = cc != null ? J.Long(cc, "ephemeral_1h_input_tokens") : 0;
-            if (cw == 0 && cc != null) cw = cw1h + J.Long(cc, "ephemeral_5m_input_tokens");
-            t.CacheWrite1h = Math.Min(cw1h, cw);
-            t.CacheWrite5m = cw - t.CacheWrite1h;
-            if (J.Str(u, "speed") == "fast") t.FastRequests = 1;
-
-            Price p = _pricing.Find(model);
-            if (p == null) t.UnpricedRequests = 1;
-            else
-            {
-                t.Cost = (t.Input * p.Input + t.Output * p.Output + t.CacheWrite5m * p.CacheWrite5m
-                          + t.CacheWrite1h * p.CacheWrite1h + t.CacheRead * p.CacheRead) / 1e6;
-                // Penghematan cache BERSIH (estimasi): hemat dari membaca cache dikurangi biaya tambahan menulis cache
-                // dibanding harga input biasa.
-                t.Saved = (t.CacheRead * (p.Input - p.CacheRead)
-                           - t.CacheWrite5m * (p.CacheWrite5m - p.Input)
-                           - t.CacheWrite1h * (p.CacheWrite1h - p.Input)) / 1e6;
-            }
-
             string rawCwd = J.Str(o, "cwd");
             string proj = ProjectName(rawCwd);
             string skey = SessionKey(filePath);
-            RecordUsage("Claude", _days, _proj, local, model, proj, rawCwd, t, skey, false);
-            UpdateContext(t.Input + t.CacheRead + cw, model, local, rawCwd);
-            RecordRecentToken(local, t.Total, false);
+
+            Dictionary<string, object> u = J.Obj(msg, "usage");
+            string model = J.Str(msg, "model");
+            if (u != null && !string.IsNullOrEmpty(model) && model != "<synthetic>")
+            {
+                string id = J.Str(msg, "id");
+                string req = J.Str(o, "requestId");
+                bool alreadyCounted = false;
+                if (id != null || req != null)
+                {
+                    string key = (id ?? "") + "|" + (req ?? "");
+                    if (_seen.ContainsKey(key)) alreadyCounted = true;
+                    else _seen[key] = local;
+                }
+
+                if (!alreadyCounted)
+                {
+                    Tally t = new Tally();
+                    t.Requests = 1;
+                    t.Input = J.Long(u, "input_tokens");
+                    t.Output = J.Long(u, "output_tokens");
+                    t.CacheRead = J.Long(u, "cache_read_input_tokens");
+                    long cw = J.Long(u, "cache_creation_input_tokens");
+                    Dictionary<string, object> cc = J.Obj(u, "cache_creation");
+                    // Total cache_creation_input_tokens jadi acuan (rinciannya kadang tidak menjumlah ke total).
+                    long cw1h = cc != null ? J.Long(cc, "ephemeral_1h_input_tokens") : 0;
+                    if (cw == 0 && cc != null) cw = cw1h + J.Long(cc, "ephemeral_5m_input_tokens");
+                    t.CacheWrite1h = Math.Min(cw1h, cw);
+                    t.CacheWrite5m = cw - t.CacheWrite1h;
+                    if (J.Str(u, "speed") == "fast") t.FastRequests = 1;
+
+                    Price p = _pricing.Find(model);
+                    if (p == null) t.UnpricedRequests = 1;
+                    else
+                    {
+                        t.Cost = (t.Input * p.Input + t.Output * p.Output + t.CacheWrite5m * p.CacheWrite5m
+                                  + t.CacheWrite1h * p.CacheWrite1h + t.CacheRead * p.CacheRead) / 1e6;
+                        t.Saved = (t.CacheRead * (p.Input - p.CacheRead)
+                                   - t.CacheWrite5m * (p.CacheWrite5m - p.Input)
+                                   - t.CacheWrite1h * (p.CacheWrite1h - p.Input)) / 1e6;
+                    }
+
+                    RecordUsage("Claude", _days, _proj, local, model, proj, rawCwd, t, skey, false);
+                    UpdateContext(t.Input + t.CacheRead + cw, model, local, rawCwd);
+                    RecordRecentToken(local, t.Total, false);
+                }
+            }
 
             if ((DateTime.Now - local).TotalMinutes <= 30 && !IsBackgroundHelperSession(filePath))
             {
                 string stopReason = J.Str(msg, "stop_reason");
-                bool asksUser = line.IndexOf("\"AskUserQuestion\"", StringComparison.Ordinal) >= 0 ||
-                                line.IndexOf("\"ExitPlanMode\"", StringComparison.Ordinal) >= 0;
+                bool asksUser = HasClaudeConfirmTool(line);
                 if (asksUser)
                     RecordSessionConfirm(skey, "Claude", proj, local, false, rawCwd);
                 else if (stopReason == "tool_use" || string.IsNullOrEmpty(stopReason))
@@ -820,6 +825,13 @@ namespace ClaudeUsageWidget
                 else
                     RecordSessionDone(skey, "Claude", proj, local, false, rawCwd);
             }
+        }
+
+        private static bool HasClaudeConfirmTool(string line)
+        {
+            if (string.IsNullOrEmpty(line)) return false;
+            return line.IndexOf("\"AskUserQuestion\"", StringComparison.Ordinal) >= 0 ||
+                   line.IndexOf("\"ExitPlanMode\"", StringComparison.Ordinal) >= 0;
         }
 
         private void ProcessClaudeUserLine(string line, string filePath)
@@ -846,6 +858,12 @@ namespace ClaudeUsageWidget
             if (o == null) return false;
             string t = J.Str(o, "type");
             if (t != "USER_INPUT" && t != "GENERIC") return false;
+            string source = J.Str(o, "source") ?? "";
+            bool isUser = (t == "USER_INPUT") || source.StartsWith("USER", StringComparison.OrdinalIgnoreCase);
+            string status = J.Str(o, "status") ?? "";
+            if (!isUser && !string.Equals(status, "RUNNING", StringComparison.OrdinalIgnoreCase))
+                return true;
+
             DateTime ts;
             string tsRaw = J.Str(o, "created_at");
             if (tsRaw != null && DateTime.TryParse(tsRaw, System.Globalization.CultureInfo.InvariantCulture,
@@ -853,20 +871,103 @@ namespace ClaudeUsageWidget
             {
                 DateTime local = DateTime.SpecifyKind(ts, DateTimeKind.Utc).ToLocalTime();
                 if ((DateTime.Now - local).TotalMinutes <= 30)
-                    RecordSessionRunning(SessionKey(filePath), "Antigravity", "Antigravity", local, false);
+                {
+                    string skey = SessionKey(filePath);
+                    if (!isUser)
+                    {
+                        SessionActivity cur;
+                        if (_sessions.TryGetValue(skey, out cur) && cur.NeedsConfirm && cur.ConfirmAt > cur.AckAt)
+                            return true; // tool status GENERIC dari MODEL tidak boleh menghapus badge ?
+                    }
+                    RecordSessionRunning(skey, "Antigravity", "Antigravity", local, false);
+                }
             }
             return true;
+        }
+
+        private static string ExtractFieldSlice(string line, string fieldName)
+        {
+            if (string.IsNullOrEmpty(line)) return null;
+            int idx = line.IndexOf(fieldName, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            int v = idx + fieldName.Length;
+            while (v < line.Length && char.IsWhiteSpace(line[v])) v++;
+            int end = SkipValue(line, v);
+            if (end <= v) return null;
+            return line.Substring(v, end - v);
+        }
+
+        private static bool ContainsToolName(string tcSlice, string toolName)
+        {
+            if (string.IsNullOrEmpty(tcSlice)) return false;
+            return tcSlice.IndexOf("\"" + toolName + "\"", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   tcSlice.IndexOf(":" + toolName + "\"", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool ContainsJsonBoolTrue(string slice, string key)
+        {
+            if (string.IsNullOrEmpty(slice)) return false;
+            int pos = 0;
+            string bare = "\"" + key + "\"";
+            string esc = "\\\"" + key + "\\\"";
+            while (pos < slice.Length)
+            {
+                int i1 = slice.IndexOf(bare, pos, StringComparison.OrdinalIgnoreCase);
+                int i2 = slice.IndexOf(esc, pos, StringComparison.OrdinalIgnoreCase);
+                int idx = (i1 >= 0 && i2 >= 0) ? Math.Min(i1, i2) : (i1 >= 0 ? i1 : i2);
+                if (idx < 0) return false;
+                int v = idx + (idx == i2 ? esc.Length : bare.Length);
+                while (v < slice.Length && char.IsWhiteSpace(slice[v])) v++;
+                if (v < slice.Length && slice[v] == ':')
+                {
+                    v++;
+                    while (v < slice.Length && char.IsWhiteSpace(slice[v])) v++;
+                    if (v < slice.Length && slice[v] == '\\') v++;
+                    if (v < slice.Length && slice[v] == '"') v++;
+                    if (v + 4 <= slice.Length && string.Compare(slice, v, "true", 0, 4, StringComparison.OrdinalIgnoreCase) == 0)
+                    {
+                        int after = v + 4;
+                        if (after >= slice.Length || (!char.IsLetterOrDigit(slice[after]) && slice[after] != '_'))
+                            return true;
+                    }
+                }
+                pos = idx + bare.Length;
+            }
+            return false;
+        }
+
+        private static string FindFullTranscriptStepLine(string compactPath, long stepIndex)
+        {
+            if (string.IsNullOrEmpty(compactPath) || stepIndex <= 0) return null;
+            try
+            {
+                string fullPath = Path.Combine(Path.GetDirectoryName(compactPath), "transcript_full.jsonl");
+                if (!File.Exists(fullPath)) return null;
+                string needle = "\"step_index\":" + stepIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                FileInfo fi = new FileInfo(fullPath);
+                long start = Math.Max(0, fi.Length - (2L << 20)); // periksa maks 2 MB terakhir
+                using (FileStream fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    if (start > 0) fs.Seek(start, SeekOrigin.Begin);
+                    using (StreamReader sr = new StreamReader(fs, Encoding.UTF8))
+                    {
+                        if (start > 0) sr.ReadLine(); // lewati baris terpotong
+                        string match = null;
+                        string l;
+                        while ((l = sr.ReadLine()) != null)
+                        {
+                            if (l.IndexOf(needle, StringComparison.Ordinal) >= 0) match = l;
+                        }
+                        return match;
+                    }
+                }
+            }
+            catch { return null; }
         }
 
         private bool ProcessAntigravityLine(string line, string filePath)
         {
             if (line.IndexOf("\"model\"", StringComparison.Ordinal) < 0) return false;
-            bool hasToolCalls = HasNonEmptyArrayField(line, "\"tool_calls\":");
-            bool asksConfirm = hasToolCalls && (
-                line.IndexOf("\"ask_question\"", StringComparison.Ordinal) >= 0 ||
-                line.IndexOf("\"request_user_input\"", StringComparison.Ordinal) >= 0 ||
-                (line.IndexOf("\"notify_user\"", StringComparison.Ordinal) >= 0 &&
-                 line.IndexOf("\"BlockedOnUser\":true", StringComparison.OrdinalIgnoreCase) >= 0));
 
             Dictionary<string, object> o = null;
             try { o = J.Parse(StripAntigravity(line)); }
@@ -913,6 +1014,23 @@ namespace ClaudeUsageWidget
             RecordRecentToken(local, t.Total, true);
             if ((DateTime.Now - local).TotalMinutes <= 30 && !IsBackgroundHelperSession(filePath))
             {
+                string tcSlice = ExtractFieldSlice(line, "\"tool_calls\":");
+                bool hasToolCalls = !string.IsNullOrEmpty(tcSlice) && HasNonEmptyArrayField(line, "\"tool_calls\":");
+                if (!hasToolCalls && line.IndexOf("\"truncated_fields\"", StringComparison.Ordinal) >= 0 &&
+                    line.IndexOf("\"tool_calls\"", StringComparison.Ordinal) >= 0)
+                {
+                    string fullLine = FindFullTranscriptStepLine(filePath, stepIndex);
+                    if (fullLine != null)
+                    {
+                        tcSlice = ExtractFieldSlice(fullLine, "\"tool_calls\":");
+                        hasToolCalls = !string.IsNullOrEmpty(tcSlice) && HasNonEmptyArrayField(fullLine, "\"tool_calls\":");
+                    }
+                }
+                bool asksConfirm = hasToolCalls && (
+                    ContainsToolName(tcSlice, "ask_question") ||
+                    ContainsToolName(tcSlice, "request_user_input") ||
+                    (ContainsToolName(tcSlice, "notify_user") && ContainsJsonBoolTrue(tcSlice, "BlockedOnUser")));
+
                 if (asksConfirm)
                     RecordSessionConfirm(agSkey, "Antigravity", "Antigravity", local, false, Paths.AntigravityDir);
                 else if (hasToolCalls)
@@ -1320,20 +1438,41 @@ namespace ClaudeUsageWidget
 
         public void SyncHookSessions(ICollection<string> activeHookSids)
         {
+            Dictionary<string, DateTime> map = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            if (activeHookSids != null)
+            {
+                DateTime now = DateTime.Now;
+                foreach (string sid in activeHookSids)
+                    if (!string.IsNullOrEmpty(sid)) map[sid] = now;
+            }
+            SyncHookSessions(map);
+        }
+
+        public void SyncHookSessions(IDictionary<string, DateTime> activeHooksLocal)
+        {
             lock (_gate)
             {
-                HashSet<string> active = activeHookSids != null
-                    ? new HashSet<string>(activeHookSids, StringComparer.OrdinalIgnoreCase)
+                HashSet<string> active = activeHooksLocal != null
+                    ? new HashSet<string>(activeHooksLocal.Keys, StringComparer.OrdinalIgnoreCase)
                     : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 DateTime now = DateTime.Now;
-                foreach (string sid in active)
+                if (activeHooksLocal != null)
                 {
-                    if (string.IsNullOrEmpty(sid)) continue;
-                    SessionActivity existing;
-                    string proj = (_sessions.TryGetValue(sid, out existing) && !string.IsNullOrEmpty(existing.Project))
-                        ? existing.Project
-                        : "Claude Code";
-                    RecordSessionRunning(sid, "Claude", proj, now, true);
+                    foreach (KeyValuePair<string, DateTime> kv in activeHooksLocal)
+                    {
+                        string sid = kv.Key;
+                        if (string.IsNullOrEmpty(sid)) continue;
+                        SessionActivity existing;
+                        if (_sessions.TryGetValue(sid, out existing) && existing.NeedsConfirm && existing.ConfirmAt > existing.AckAt)
+                        {
+                            // Pertahankan badge ? sampai ada UserPromptSubmit baru setelah event konfirmasi
+                            if (kv.Value <= existing.ConfirmAt.AddSeconds(1)) continue;
+                        }
+                        string proj = (existing != null && !string.IsNullOrEmpty(existing.Project))
+                            ? existing.Project
+                            : "Claude Code";
+                        RecordSessionRunning(sid, "Claude", proj, now, true);
+                    }
                 }
                 foreach (SessionActivity sa in _sessions.Values)
                 {
@@ -1480,6 +1619,14 @@ namespace ClaudeUsageWidget
                 sa.NeedsConfirm = false;
                 if (localTs > sa.UpdatedAt) sa.UpdatedAt = localTs;
                 if (fromHook) sa.UpdatedAt = now;
+                if (_activeCache != null)
+                {
+                    _activeCache.LastSessState = "running";
+                    _activeCache.LastSessTicks = sa.UpdatedAt.Ticks;
+                    _activeCache.LastSessProvider = sa.Provider;
+                    _activeCache.LastSessProj = sa.Project;
+                    _activeCache.LastSessCwd = sa.Cwd;
+                }
             }
         }
 
@@ -1491,14 +1638,22 @@ namespace ClaudeUsageWidget
 
             SessionActivity sa = GetOrCreateSession(key, provider, project, cwd);
             if (fromHook) sa.FromHook = false;
-            DateTime stamp = fromHook ? now : (localTs > sa.ConfirmAt ? localTs : sa.ConfirmAt);
+            DateTime stamp = (fromHook || _ready) ? now : (localTs > sa.ConfirmAt ? localTs : sa.ConfirmAt);
             if (stamp == DateTime.MinValue) stamp = now;
-            if (localTs >= sa.UpdatedAt || fromHook)
+            if (fromHook || sa.UpdatedAt <= DateTime.MinValue.AddSeconds(60) || localTs >= sa.UpdatedAt.AddSeconds(-60))
             {
                 sa.IsRunning = false;
                 sa.NeedsConfirm = true;
                 if (stamp > sa.ConfirmAt) sa.ConfirmAt = stamp;
                 if (stamp > sa.UpdatedAt) sa.UpdatedAt = stamp;
+                if (_activeCache != null)
+                {
+                    _activeCache.LastSessState = "confirm";
+                    _activeCache.LastSessTicks = stamp.Ticks;
+                    _activeCache.LastSessProvider = sa.Provider;
+                    _activeCache.LastSessProj = sa.Project;
+                    _activeCache.LastSessCwd = sa.Cwd;
+                }
             }
         }
 
@@ -1520,6 +1675,14 @@ namespace ClaudeUsageWidget
                 if (stamp > sa.DoneAt) sa.DoneAt = stamp;
                 // On startup historical backfill (before first Scan() finishes), don't surface old finished turns as unread checkmarks.
                 if (!_ready && !fromHook && stamp > sa.AckAt) sa.AckAt = stamp;
+                if (_activeCache != null)
+                {
+                    _activeCache.LastSessState = "done";
+                    _activeCache.LastSessTicks = stamp.Ticks;
+                    _activeCache.LastSessProvider = sa.Provider;
+                    _activeCache.LastSessProj = sa.Project;
+                    _activeCache.LastSessCwd = sa.Cwd;
+                }
             }
         }
 
@@ -2075,6 +2238,8 @@ namespace ClaudeUsageWidget
             public double Codex5hPct, Codex7dPct;
             public long Codex5hResetTicks, Codex7dResetTicks;
             public bool Codex5hAvail, Codex7dAvail;
+            public string LastSessState, LastSessProvider, LastSessProj, LastSessCwd;
+            public long LastSessTicks;
             public List<CachedTallyRow> Rows = new List<CachedTallyRow>();
             public List<long[]> RecentTokens = new List<long[]>();
             public List<long[]> RecentAgTokens = new List<long[]>();
@@ -2177,6 +2342,14 @@ namespace ClaudeUsageWidget
                         _lastActiveProject = ProjectName(ce.LastCtxCwd);
                     }
                 }
+            }
+            if (!string.IsNullOrEmpty(ce.LastSessState) && ce.LastSessTicks > 0 && !IsBackgroundHelperSession(filePath))
+            {
+                DateTime sdt = new DateTime(ce.LastSessTicks);
+                if (ce.LastSessState == "confirm")
+                    RecordSessionConfirm(skey, ce.LastSessProvider, ce.LastSessProj, sdt, false, ce.LastSessCwd);
+                else if (ce.LastSessState == "running")
+                    RecordSessionRunning(skey, ce.LastSessProvider, ce.LastSessProj, sdt, false, ce.LastSessCwd);
             }
             if (ce.CodexLimitTicks > 0)
             {

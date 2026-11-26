@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/icon.png" alt="AI Usage Watcher Logo" width="120" height="120" />
+  <img src="assets/icon.png" alt="Logo AI Usage Watcher" width="120" height="120" />
 </p>
 
 <h1 align="center">AI Usage Watcher</h1>
 
 <p align="center">
-  <em>Real-time Desktop Quota &amp; Token Monitor for Claude Code, Google Antigravity, OpenAI Codex CLI, &amp; Ollama</em>
+  <em>Pemantau Desktop Kuota, Sesi Aktif &amp; Token Real-Time untuk Claude Code, Google Antigravity, OpenAI Codex CLI, Gemini CLI, OpenCode &amp; Ollama</em>
 </p>
 
 <p align="center">
@@ -15,151 +15,140 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com"><img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg" alt="Platform" /></a>
-  <a href="https://github.com"><img src="https://img.shields.io/badge/.NET%20Framework-4.8%20(Native)-darkgreen.svg" alt="Framework" /></a>
-  <a href="https://github.com"><img src="https://img.shields.io/badge/dependencies-Zero%20(No%20NuGet%20%2F%20No%20Node)-brightgreen.svg" alt="Dependencies" /></a>
+  <a href="https://github.com/silvkn1/ai-usage-watcher/releases"><img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg" alt="Platform" /></a>
+  <a href="https://github.com/silvkn1/ai-usage-watcher"><img src="https://img.shields.io/badge/.NET%20Framework-4.8%20(Native)-darkgreen.svg" alt="Framework" /></a>
+  <a href="https://github.com/silvkn1/ai-usage-watcher"><img src="https://img.shields.io/badge/dependencies-Zero%20(No%20NuGet%20%2F%20No%20Node)-brightgreen.svg" alt="Dependencies" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
 </p>
 
-**AI Usage Watcher** adalah aplikasi widget desktop ringan (native Windows) dan monitor system tray untuk memantau konsumsi token, estimasi biaya API, serta batas kuota (*rate limits*) dari **Claude Code**, **Google Antigravity (Gemini)**, **OpenAI Codex CLI**, dan **Ollama** secara *real-time*.
+**AI Usage Watcher** adalah widget desktop native Windows yang ringan beserta monitor system tray untuk memantau konsumsi token, estimasi biaya API, status sesi AI aktif, serta batas kuota berjalan (*rate limits*) dari **Claude Code**, **Google Antigravity (Gemini)**, **OpenAI Codex CLI**, **Gemini CLI**, **OpenCode**, dan **Ollama** lokal secara *real-time*.
 
-Dibuat menggunakan C# Windows Forms murni pada **.NET Framework 4.8** bawaan Windows: berukuran sangat kecil (~385 KB), tanpa instalasi runtime tambahan, tanpa dependensi Visual Studio atau paket NuGet eksternal, dan **tanpa pernah memakan taskbar** (*zero taskbar clutter*).
+Dibangun menggunakan C# Windows Forms murni di atas **.NET Framework 4.8** bawaan Windows: satu berkas `.exe` portabel berukuran ringan (~514 KB), tanpa instalasi runtime tambahan, tanpa dependensi Visual Studio/NuGet/Node, dan **tanpa pernah memakan taskbar** (`WS_EX_TOOLWINDOW`).
 
 ---
 
 ## 📸 Tampilan Antarmuka (UI Showcase)
 
-### 1. Dual-Column Cards Dashboard (Mode Lengkap)
-Tampilan dashboard paralel yang menampilkan metrik Claude Code dan Antigravity secara simetris, memangkas tinggi widget hingga lebih dari 50% agar tetap nyaman di layar.
+### 1. Dashboard Multi-Provider & Pemantau Sesi Aktif (Mode Lengkap)
+Dashboard paralel yang mendukung **kartu 2 kolom berpindah halaman (`1/2 ▸`)** maupun **grid 3 kolom** (`Claude Code`, `Antigravity`, `Codex CLI`, `Gemini CLI`, `OpenCode`) dengan ukuran kartu simetris dan telemetri sesi langsung.
 
 <p align="center">
-  <img src="docs/img/id/widget_full.png" alt="AI Usage Watcher Dual-Column Dashboard" width="420" />
+  <img src="docs/img/id/widget_full.png" alt="Dashboard Multi-Provider AI Usage Watcher" width="560" />
 </p>
 
-*Menampilkan bar kuota 5 jam & 7 hari untuk Claude Code dan Google Antigravity, penanda laju (*pacing marker*), jadwal sinkronisasi & jam reset pasti, estimasi biaya dalam USD dan konversi Rupiah langsung, metrik burn rate & estimasi runway kuota, breakdown 2 model teratas, serta riwayat pengeluaran 7 hari. Klik ganda pada kartu Claude membuka terminal proyek langsung, sedangkan kartu Antigravity membuka foldernya.*
+- **Bar Kuota 5 Jam & 7 Hari + Pacing Marker**: Hitung mundur waktu reset, jam reset lokal pasti, serta garis penanda laju (*pacing marker*) untuk memperingatkan jika kecepatan pemakaian berisiko menghabiskan kuota sebelum waktu reset.
+- **Lencana Status Sesi Langsung**: Indikator status tiap sesi AI aktif — `?` (**Perlu konfirmasi** / input pengguna), `●` (**Sedang berjalan**), dan `✓` (**Selesai siap dicek**), lengkap dengan menu jump cepat (buka terminal, folder, VS Code, atau tandai selesai).
+- **Bar Konteks Sesi Interaktif**: Mendeteksi batas konteks per model secara otomatis (`200k` / `400k` / `1M`), menampilkan persen pemakaian plus tombol salin **`/compact`** dan buka terminal aktif **`>_`**.
+- **Penghematan Cache, VRAM Ollama & Sparkline**: Rincian penghematan *prompt cache* di tiap kartu, status `/api/ps` model + VRAM (`GB`) Ollama lokal, anggaran harian/bulanan, proyek teratas, dan grafik pengeluaran 14/30 hari.
 
 ---
 
 ### 2. Mini HUD Pill & Instant Hover-Expand (Mode Ringkas)
-Mode minimalis untuk produktivitas tanpa gangguan: hanya berupa bilah kapsul ramping setinggi 26px di sudut layar Anda.
+Bilah kapsul mengambang ramping setinggi 26px yang menempel di tepi layar dengan pilihan metrik Pill (`Semua penyedia aktif`, `Persen tertinggi`, atau `Biaya + Sisa waktu`) serta titik status sesi langsung (`●` / `?` / `✓`).
 
 <p align="center">
-  <img src="docs/img/id/widget_compact.png" alt="AI Usage Watcher Mini HUD Pill" width="400" />
+  <img src="docs/img/id/widget_compact.png" alt="AI Usage Watcher Mini HUD Pill" width="440" />
 </p>
 
-- **Instant Hover-Expand**: Arahkan kursor ke atas Pill, widget otomatis membesar menjadi kartu lengkap. Jauhkan kursor 400ms, widget kembali menyusut menjadi Pill.
-- **Double-Click Lock**: Klik ganda pada widget untuk mengunci permanen antara mode Pill atau kartu lengkap.
+- **Instant Hover-Expand**: Arahkan kursor ke atas Pill untuk langsung memekarkan dashboard penuh; jauhkan kursor 400ms agar menyusut kembali secara halus.
+- **Double-Click Lock**: Klik ganda di luar tombol aksi untuk mengunci pergantian mode Pill maupun mode kartu lengkap.
 
 ---
 
-### 3. Dialog Pengaturan Lengkap (Settings GUI)
+### 3. Eksplorasi Biaya Proyek, Tren Penyedia 30 Hari & Detektor Sesi Terboros
+Jendela analitik bertab lengkap (`Eksplorasi Biaya Proyek...` di menu tray/klik kanan) untuk mengaudit pengeluaran di seluruh penyedia AI, proyek, dan sesi.
 
 <p align="center">
-  <img src="docs/img/id/settings_display.png" alt="Pengaturan Tampilan & Kurs Mata Uang" width="31%" />
-  <img src="docs/img/id/settings_alerts.png" alt="Pengaturan Peringatan & Webhook" width="31%" />
-  <img src="docs/img/id/settings_data.png" alt="Pengaturan Sumber Data & Harga Resmi" width="31%" />
+  <img src="docs/img/id/project_explorer.png" alt="Heatmap dan Tabel Eksplorasi Biaya Proyek" width="32%" />
+  <img src="docs/img/id/project_trends.png" alt="Grafik Tren Biaya Penyedia 30 Hari" width="32%" />
+  <img src="docs/img/id/project_sessions.png" alt="Detektor Anomali Sesi Terboros" width="32%" />
 </p>
 
-| Tampilan & Kurs Mata Uang | Peringatan & Webhook | Sumber Data & Harga Resmi |
+| Proyek & Heatmap 35 Hari | Tren Penyedia Bertumpuk (Stacked) | Detektor Sesi Terboros |
 |---|---|---|
-| Tema Gelap/Terang/Ikuti Windows, Transparansi, Mode Sisa, serta Konversi Rupiah dengan kurs otomatis dari Google Finance. | Ambang batas limit (80%, 95%), peringatan konteks `/compact`, lonjakan token *burn rate*, efek audio, dan webhook Discord/Slack. | Pemindaian Claude & Google Antigravity, WSL, dan penarik harga resmi API dari dokumentasi Anthropic & Google. |
+| Heatmap aktivitas 35 hari bergaya GitHub, kotak filter cepat, kolom tabel dapat diurutkan (*sort*), kolom Penyedia, footer Grand Total, serta aksi klik kanan (Buka Folder / Terminal / VS Code / Salin Markdown). | Grafik batang bertumpuk untuk membandingkan biaya harian **Claude**, **Antigravity**, **Codex**, **Gemini CLI**, dan **OpenCode** pada rentang **7d / 30d / 90d**. | Mengurutkan sesi berbiaya tertinggi dan menandai anomali seperti **Cache hit rendah (<25%)** atau **Biaya tinggi** agar alur prompting lebih hemat. |
 
 ---
 
-### 4. Menu Cepat System Tray
+### 4. Dialog Pengaturan Lengkap (Live Apply)
 
 <p align="center">
-  <img src="docs/img/id/tray_menu.png" alt="Menu Tray AI Usage Watcher" width="300" />
+  <img src="docs/img/id/settings_display.png" alt="Pengaturan Tampilan dan Posisi" width="32%" />
+  <img src="docs/img/id/settings_alerts.png" alt="Pengaturan Notifikasi, Webhook, dan Jam Hening" width="32%" />
+  <img src="docs/img/id/settings_data.png" alt="Pengaturan Sumber Data, Ollama, dan Harga" width="32%" />
 </p>
 
-*Akses instan untuk menampilkan/menyembunyikan widget, toggle mode ringkas, tempel di tepi atas, salin ringkasan status ke clipboard, segarkan data, ekspor riwayat CSV & laporan bulanan Markdown (.md), hingga navigasi langsung ke folder proyek Claude aktif.*
+| Tampilan & Tata Letak | Notifikasi, Webhook & Jam Hening | Sumber Data, Ollama & Harga |
+|---|---|---|
+| Tema Gelap/Terang/Ikuti Windows, efek kaca buram Win11 Acrylic/Mica, slider transparansi, Mode Sisa, layout kartu 3+ penyedia, mode Mini Pill, konversi Rupiah otomatis Google Finance, dan tombol **Terapkan** langsung. | Ambang kuota (`80,95`), alert reset, peringatan konteks `>75%`, jeda cooldown lonjakan token, webhook Discord/Slack/Telegram terenkripsi DPAPI + tombol **Uji**, **Jam Hening**, **Ringkasan Terjadwal**, anggaran, dan hook Claude Code. | Aktif/nonaktif Claude Code, Antigravity, Codex CLI, Gemini CLI, OpenCode, deteksi Ollama (`port`), log WSL, ekspor CSV/JSON/Markdown, override `custom_pricing.json`, penarik harga resmi, dan ekspor/impor profil bebas rahasia. |
+
+---
+
+### 5. Panduan Penyiapan Awal, Menu Klik Kanan & Dialog Tentang
+
+<p align="center">
+  <img src="docs/img/id/setup_wizard.png" alt="Panduan Penyiapan Awal 3 Langkah" width="34%" />
+  <img src="docs/img/id/tray_menu.png" alt="Menu Konteks Klik Kanan Terkelompok" width="32%" />
+  <img src="docs/img/id/about_dialog.png" alt="Dialog Tentang AI Usage Watcher" width="30%" />
+</p>
+
+| Panduan Penyiapan (3 Langkah) | Menu Klik Kanan Terkelompok | Dialog Tentang (About) |
+|---|---|---|
+| Otomatis mendeteksi tool AI terpasang, mengatur bahasa, tema/efek kaca/posisi sudut layar, serta opsi memasang ekstensi status bar VS Code / Cursor. | Submenu rapi (**Tampilan & Posisi**, **Laporan & Alat**, **Bantuan & Tentang**) di ikon tray maupun klik kanan widget, ditambah pintasan cepat folder/terminal proyek aktif. | Diakses lewat **Bantuan & Tentang -> Tentang...** — menampilkan versi aplikasi, runtime `.NET 4.8`, tautan repositori GitHub resmi, tombol periksa pembaruan, dan salin info. |
 
 ---
 
 ## 🏆 Mengapa AI Usage Watcher? (Perbandingan dengan Solusi Lain)
 
-Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statusline CLI) hanya berupa utilitas terminal interaktif, terbatas pada satu penyedia AI, atau aplikasi berbasis Electron yang berat. **AI Usage Watcher** dirancang khusus untuk pengguna desktop Windows yang membutuhkan pemantauan kuota instan, pasif, dan tanpa beban sistem.
+Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statusline CLI) hanya berupa utilitas terminal manual, terbatas pada satu penyedia AI, atau dibangun di atas runtime Electron yang berat. **AI Usage Watcher** dirancang khusus untuk developer Windows yang menginginkan visibilitas instan, pasif, dan hemat memori.
 
 | Fitur / Parameter | **AI Usage Watcher** (Aplikasi Ini) | **CLI Tools** (mis. `ccusage`) | **Statusline Bawaan** | **Aplikasi GUI Electron** |
 | :--- | :---: | :---: | :---: | :---: |
-| **Dukungan Provider** | **Claude Code + Antigravity (Gemini)** | Hanya Claude Code | Hanya Claude Code | Umumnya hanya 1 provider |
-| **Bentuk Antarmuka (UI)** | **Mini HUD Pill (26px) + Dual Cards** | Teks terminal (harus diketik) | Bar status terminal | Jendela berat / webview |
-| **System Tray Dinamis** | **Ada** (angka badge & warna dinamis) | Tidak ada | Tidak ada | Jarang / ikon statis |
-| **Ukuran Biner / Distro** | **~385 KB** (Single Standalone .exe) | ~5 - 50 MB (Node.js/npm) | Berkas skrip bash/ps1 | 150 MB - 300 MB+ |
-| **Konsumsi Memori (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Menumpang runtime CLI | 0 MB (hanya saat print) | 200 MB - 600 MB+ |
+| **Dukungan Provider** | **Claude + Antigravity + Codex + Gemini CLI + OpenCode + Ollama** | Hanya Claude Code | Hanya Claude Code | Umumnya 1 provider |
+| **Antarmuka (UI)** | **Mini HUD Pill (26px) + Kartu 3-Kolom + Explorer** | Teks terminal (harus diketik) | Bar status terminal | Jendela berat / webview |
+| **Lencana Sesi Langsung** | **Ada** (`?` konfirmasi, `●` berjalan, `✓` selesai + menu jump) | Tidak ada | Tidak ada | Tidak ada |
+| **System Tray Dinamis** | **Ada** (badge % kuota 5 jam, warna dinamis & popup klik kiri) | Tidak ada | Tidak ada | Jarang / ikon statis |
+| **Ukuran Biner** | **~514 KB** (Satu Berkas `.exe` Mandiri) | ~5 - 50 MB (Node.js/npm) | Skrip bash/ps1 | 150 MB - 300 MB+ |
+| **Konsumsi Memori (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Menumpang runtime CLI | 0 MB (saat print saja) | 200 MB - 600 MB+ |
 | **Dependensi Eksternal** | **Nol** (Bawaan Windows 10/11) | Perlu Node.js / Python | Perlu wrapper CLI | Perlu Node / Chromium |
-| **Prediksi Habis Kuota (Runway)**| **Ada** (`Runway: ~45m` + pacing marker) | Tidak ada | Tidak ada | Tidak ada |
-| **Konversi Mata Uang Otomatis** | **Ada** (Kurs live Google Finance ke IDR) | Tidak ada (hanya USD) | Tidak ada | Terbatas / Manual |
-| **Integrasi Resmi Antigravity** | **Ada** (Connect-RPC ke Language Server) | Tidak ada | Tidak ada | Tidak ada |
-| **Klik-Tembus & Zero Taskbar** | **Ada** (`WS_EX_TOOLWINDOW` & transparent) | Tidak relevan | Tidak relevan | Mengotori taskbar & Alt+Tab |
-| **Aksi Produktivitas Cepat** | **Double-click terminal launch & copy status** | Ketik perintah manual | Tidak ada | Terbatas |
-| **Laporan & Ekspor** | **Markdown (.md) bulanan & CSV** | Ekspor JSON/teks terbatas | Tidak ada | CSV dasar |
-| **Peringatan & Webhook** | **Audio chimes, toast reset, Discord/Slack** | Tidak ada | Tidak ada | Tergantung plugin |
+| **Prediksi Habis Kuota (Runway)**| **Ada** (`Sisa waktu: ~3j 43m` + *pacing marker*) | Tidak ada | Tidak ada | Tidak ada |
+| **Konversi Mata Uang Otomatis** | **Ada** (Kurs live Google Finance ke Rupiah / lokal) | Tidak ada (USD saja) | Tidak ada | Terbatas / Manual |
+| **Integrasi Resmi Antigravity** | **Ada** (Connect-RPC ke Language Server lokal) | Tidak ada | Tidak ada | Tidak ada |
+| **Klik-Tembus & Zero Taskbar** | **Ada** (`WS_EX_TOOLWINDOW` & tembus klik) | N/A | N/A | Memenuhi taskbar & `Alt+Tab` |
+| **Laporan & Ekspor** | **Tren 30h, Detektor Anomali, `.md`, CSV & JSON** | JSON/teks terbatas | Tidak ada | CSV dasar |
+| **Notifikasi & Webhook** | **Audio, Jam Hening, Digest Terjadwal, Discord/Slack/Telegram** | Tidak ada | Tidak ada | Tergantung plugin |
 | **Privasi Kode & Prompt** | **100% Lokal** (konten dibuang sebelum parse) | 100% Lokal | 100% Lokal | Bervariasi / Telemetri |
-
-### 💡 Keunggulan Utama yang Membedakan:
-1. **Dukungan Simultan Claude Code & Google Antigravity**: Satu-satunya monitor yang menampilkan metrik penggunaan token, biaya, dan kuota 5h/7d dari dua ekosistem AI coding terdepan secara berdampingan dalam satu dashboard terpadu.
-2. **Koneksi Resmi Connect-RPC ke Antigravity**: Membaca kuota resmi Antigravity langsung dari Language Server lokal (`127.0.0.1`) melalui daemon socket `hub_*.json` tanpa scraping web atau risiko token expired.
-3. **Mini HUD Pill & Zero Taskbar Clutter**: Widget mengambang setinggi 26 piksel yang menempel di tepi layar, tembus klik (*click-through*), dan otomatis membesar saat disentuh kursor (*instant hover-expand*) tanpa pernah memakan ruang taskbar Windows atau mengganggu jendela kerja `Alt+Tab`.
-4. **Analitik Cerdas & Runway Forecast**: Tidak hanya menampilkan persentase pasif, aplikasi memprediksi kapan kuota Anda habis berdasarkan laju konsumsi 10 menit terakhir, lengkap dengan penanda *pacing marker* untuk mencegah limit terputus di tengah sesi coding.
-5. **Kompak, Mandiri, dan Portabel**: Tanpa installer rumit, tanpa dependensi Node.js/npm/Python, dan cukup satu berkas `.exe` portabel berukuran ~385 KB yang langsung jalan di setiap PC Windows 10 dan 11.
 
 ---
 
 ## ✨ Fitur Utama
 
-### 📊 Pemantauan Multi-Provider AI (Claude Code + Antigravity + Codex CLI + Ollama)
-- **Log Lokal Claude Code (`~/.claude/projects/**/*.jsonl`)**: Pindai token prompt, output, serta cache secara inkremental dan dedup lintas file dengan waktu lokal.
-- **Log Lokal Antigravity (`~/.gemini/antigravity/brain/**/transcript.jsonl`)**: Pemantau *real-time* transkrip Google Antigravity untuk menghitung token model Gemini 2.5/3.0 Pro & Flash serta model pihak ketiga (Claude Opus/Sonnet di Antigravity).
-- **Log Lokal OpenAI Codex CLI (`~/.codex/sessions/**/rollout-*.jsonl`)**: Memindai metadata sesi Codex, `turn_context`, `last_token_usage` inkremental, dan `rate_limits` 5-jam / mingguan, termasuk pemindaian sesi di WSL2.
-- **Pemindai Gemini CLI & OpenCode**: Memantau sesi Gemini CLI (`~/.gemini/tmp/**/chats/session-*.json`) dan OpenCode (`~/.local/share/opencode/storage/message/**/*.json`, plus fallback query read-only `sqlite3` CLI bila tersedia di PATH) lengkap dengan cache offset file inkremental (`scan_cache.json`).
-- **Kartu 3+ Provider & Bar Konteks Sesi Interaktif**: Pilihan layout grid 3 kolom atau pengalih halaman 2 kolom (`1/2 ▸`), bar **Konteks Sesi** dinamis per-model (`200k` / `400k` / `1M`) dengan tombol cepat `/compact`, buka terminal aktif, menu jump per-sesi di badge sesi, serta kustomisasi metrik Mini HUD Pill (`All`, `Highest %`, `Cost + Runway`).
-- **Rate Limits Resmi via Connect-RPC**: Mengambil persentase sisa kuota resmi Antigravity langsung dari background Language Server (`RetrieveUserQuotaSummary`) melalui deteksi otomatis berkas daemon `hub_*.json` pada loopback `127.0.0.1`.
-- **Rate Limits 5 Jam & 7 Hari**: Menghitung konsumsi kuota berjalan 5 jam (*rolling 5-hour window*) dan mingguan untuk Claude, Antigravity, dan Codex CLI, lengkap dengan countdown waktu dan jam reset pasti e.g. `17h 59m (24 Nov 02:00)`.
-- **Prediksi Habis Kuota (Runway Forecast)**: Memperkirakan sisa menit/jam sampai kuota habis (`Runway: ~45m`) secara dinamis saat laju konsumsi aktif (`TokensLast10m > 5.000`).
-- **Breakdown Model Teratas pada Kartu**: Memperlihatkan 2 model paling banyak digunakan beserta total tokennya (mis. `Sonnet 3.5 1.8M`, `Haiku 3.5 600K`) langsung di kartu provider.
-- **Penanda Laju (Pacing Marker)**: Garis putih pada bar menunjukkan rasio waktu yang telah berlalu dibanding persentase kuota yang terpakai. Peringatan otomatis jika laju pemakaian diprediksi menghabiskan kuota sebelum waktu reset.
-- **Jadwal Sinkronisasi & Info Pembaruan**: Menampilkan statusline pembaruan data `Diperbarui [jam] · Sinkronisasi [jam berikutnya] (atau saat chat)` agar pengguna selalu tahu kapan kuota disegarkan.
-- **Seleksi Provider Fleksibel**: Pengguna dapat mengaktifkan atau menonaktifkan pemantauan Claude, Gemini/Antigravity, Codex CLI, Ollama, atau Admin API melalui Pengaturan maupun Setup Wizard (termasuk pergantian bahasa UI langsung saat klik Apply).
+### 📊 Pemantauan Multi-Provider AI
+- **Log Lokal Claude Code (`~/.claude/projects/**/*.jsonl`)**: Memindai token prompt, output, dan cache secara inkremental dengan deduplikasi lintas file `message.id | requestId`, deteksi konfirmasi tool (`AskUserQuestion` / `ExitPlanMode`), dan hook prompt izin tool.
+- **Log Lokal Antigravity (`~/.gemini/antigravity/brain/**/transcript.jsonl`)**: Pemantau *real-time* transkrip Gemini & Claude di Antigravity (termasuk fallback `transcript_full.jsonl` saat record terpotong dan deteksi `BlockedOnUser`).
+- **Log Lokal OpenAI Codex CLI (`~/.codex/sessions/**/rollout-*.jsonl`)**: Membaca metadata sesi Codex, `turn_context`, `last_token_usage` inkremental, dan `rate_limits` 5-jam / mingguan, termasuk pemindaian sesi di WSL2.
+- **Pemindai Gemini CLI & OpenCode**: Memantau sesi Gemini CLI (`~/.gemini/tmp/**/chats/session-*.json`) dan OpenCode (`~/.local/share/opencode/storage/message/**/*.json`, plus fallback query read-only `sqlite3` CLI bila tersedia di PATH) dengan cache offset file persisten (`scan_cache.json`).
+- **Detektor LLM Lokal Ollama & VRAM (`/api/tags` & `/api/ps`)**: Port dapat diatur (default `11434`), menampilkan indikator hijau live, jumlah model, model yang dimuat di memori beserta ukuran VRAM (`GB`).
+- **Rate Limits Resmi via Connect-RPC Antigravity**: Mengambil persentase kuota langsung dari Language Server latar belakang (`RetrieveUserQuotaSummary`) melalui deteksi socket `hub_*.json`.
+- **Layout Kartu Fleksibel & Kustomisasi**: Pilih tata letak otomatis, pengalih halaman 2 kolom (`1/2 ▸`), atau grid 3 kolom; kustomisasi mode Mini HUD Pill (`Semua penyedia`, `Persen tertinggi`, `Biaya + Sisa`); aktif/nonaktifkan provider secara mandiri di Pengaturan maupun Panduan Penyiapan.
 
-### ⚡ Produktivitas & Laporan (Aksi Cepat)
-- **Panduan Penyiapan Awal (Setup Wizard)**: Menyambut pengguna saat pertama kali menjalankan aplikasi dengan panduan 3 langkah interaktif: otomatis mendeteksi tool AI yang terpasang (Claude Code, Google Antigravity, Ollama), mengatur tema visual & efek kaca buram Windows 11, menentukan posisi tempel layar, dan memasang ekstensi status bar VS Code/Cursor. Dapat dijalankan ulang kapan saja lewat menu tray (**"Panduan Penyiapan..."**).
-- **Status Bar Pendamping VS Code & Cursor**: Pantau metrik langsung di footer status bar VS Code dan Cursor! Pasang sekali klik dari menu tray (**"Pasang Status Bar VS Code / Cursor..."**) yang langsung menyalin ekstensi ke `%USERPROFILE%\.vscode\extensions` dan `%USERPROFILE%\.cursor\extensions`. Menampilkan persen kuota, biaya hari ini, dan penghematan cache (`$(dashboard) C: 42% | AG: 20% | $0.85`) di status bar dengan tooltip Markdown lengkap.
-- **Efek Kaca Buram Windows 11 (Mica & Acrylic)**: Efek blur transparan asli Windows menggunakan API Desktop Window Manager (DWM). Pilih antara **Kaca Buram Akrilik (Acrylic)**, **Mica**, **Mica Alt**, atau **Solid / Polos** di tab Pengaturan Tampilan.
-- **Snap Multi-Monitor & Tempel 4 Sudut Layar**: Pilihan layar monitor (Display 1, Display 2, dst.) dan snap otomatis dengan presisi magnetik ke 4 sudut layar (**Kiri-Atas**, **Kanan-Atas**, **Kiri-Bawah**, **Kanan-Bawah**) atau tepi tengah langsung dari menu tray atau dialog Pengaturan.
-- **Eksplorasi Biaya Proyek, Tren Penyedia 30 Hari & Sesi Terboros**: Dialog GUI bertab (`Eksplorasi Biaya Proyek...` di tray) dengan Heatmap 35 hari, kotak filter, kolom Penyedia (Provider), Grand Total, grafik tren biaya 30 hari per penyedia, detektor anomali **Sesi Terboros** (cache hit rendah / biaya tinggi), tombol "Buka Folder", "Buka Terminal" (`wt.exe`), "Buka di VS Code", dan "Salin Markdown".
-- **Menu Aksi Cepat Status Bar VS Code / Cursor**: Klik status bar membuka Quick Pick menu untuk refresh paksa widget, buka Eksplorasi Biaya Proyek, toggle mode ringkas/lengkap, salin ringkasan atau `/compact`, maupun buka file JSON mentah.
-- **Penghematan Prompt Cache & Hit Rate**: Indikator hijau langsung di kartu provider: `⚡ Hemat ≈$X.XX (Cache YY%)` untuk mengetahui seberapa besar efisiensi biaya dari caching prompt.
-- **Global Hotkey Bawaan**: Tekan `Win+Alt+U` (dengan fallback otomatis ke `Ctrl+Alt+U`) di mana saja untuk menampilkan/menyembunyikan widget secara instan.
-- **Ekspor Status JSON Pendamping**: Mengekspor ringkasan status real-time ke `~/.ai-usage-status.json` dan `<AppData>\status.json` untuk integrasi status bar terminal, tmux, shell prompt, atau skrip eksternal.
-- **Detektor Otomatis LLM Lokal Ollama & VRAM**: Memantau `/api/tags` dan `/api/ps` pada Ollama lokal (port default `11434`), menampilkan indikator hijau live, model yang dimuat di VRAM beserta ukurannya (`GB`) di widget, serta ekspor ke status JSON.
-- **Harga Kustom, Jam Hening, Digest Terjadwal & Cadangan Profil**: Mendukung override harga `custom_pricing.json`, ekspor riwayat JSON, cooldown alert fleksibel, Jam Hening untuk membisukan suara & webhook, ringkasan Webhook Harian/Mingguan terjadwal, serta ekspor/impor profil pengaturan tanpa rahasia DPAPI.
-- **Quick Launch via Double-Click**:
-  - *Klik ganda kartu Claude*: Membuka terminal CMD baru langsung di folder direktori kerja proyek terakhir (`LastActiveCwd`).
-  - *Klik ganda kartu Antigravity*: Membuka folder Antigravity langsung di Windows Explorer.
-  - *Klik ganda area luar*: Beralih cepat antara mode ringkas (Pill) dan mode kartu lengkap.
-- **Salin Ringkasan Status Sekali Klik**: Opsi `Salin ringkasan status` di menu klik-kanan widget & tray menyalin ringkasan format Markdown siap pakai untuk ditempel ke tim atau catatan.
-- **Ekspor Laporan Bulanan Markdown (.md)**: Fitur ekspor `AI_Usage_Report_YYYY_MM.md` yang merangkum total request, token, estimasi biaya (USD & IDR), tabel model aktif, dan rincian pemakaian harian.
-- **Ekspor Riwayat CSV**: Ekspor seluruh riwayat harian agregat ke format CSV standar atau Excel regional (pemisah titik koma).
+### ⚡ Produktivitas, Ekstensi IDE & Pelaporan
+- **Status Bar Pendamping VS Code & Cursor**: Pasang sekali klik dari menu tray untuk menyalin ekstensi ke `%USERPROFILE%\.vscode\extensions` dan `%USERPROFILE%\.cursor\extensions`. Menampilkan persentase kuota, biaya, dan penghematan cache di footer editor dengan menu Quick Pick untuk refresh paksa, buka Eksplorasi Biaya Proyek, toggle mode ringkas, atau salin `/compact` dan ringkasan status.
+- **Efek Kaca Buram Windows 11 (Mica & Acrylic)**: Efek transparan Desktop Window Manager (DWM) asli (**Acrylic Blur**, **Mica**, **Mica Alt**, atau **Solid**) dengan sudut membulat Win11 dan Per-Monitor DPI.
+- **Snap Multi-Monitor & Tempel 4 Sudut Layar**: Pilih monitor tujuan dan tempel widget dengan presisi ke 4 sudut (**Kiri-Atas**, **Kanan-Atas**, **Kiri-Bawah**, **Kanan-Bawah**) atau tepi tengah layar.
+- **Konteks Sesi Interaktif & Aksi Cepat**:
+  - Klik **`/compact`** di Bar Konteks untuk menyalin perintah `/compact`; klik **`>_`** untuk membuka terminal di folder proyek aktif terakhir (`LastActiveCwd`).
+  - Klik ganda kartu Claude untuk membuka terminal (`wt.exe` diprioritaskan), kartu Antigravity untuk membuka foldernya, atau area luar untuk toggle mode Pill/Lengkap.
+- **Override Harga Kustom (`custom_pricing.json`)**: Atur tarif per 1 juta token untuk OpenRouter, Bedrock, Vertex AI, API proxy, atau model khusus — prioritas lebih tinggi dari `pricing.json` dan penarik harga resmi.
+- **Ekspor Lengkap & Companion JSON**: Ekspor riwayat CSV (koma atau titik koma Excel regional), JSON riwayat harian, laporan bulanan `AI_Usage_Report_YYYY_MM.md`, dan ekspor live `~/.ai-usage-status.json` untuk shell prompt / tmux / skrip kustom.
+- **Cadangan Profil Portabel**: Ekspor dan impor profil pengaturan JSON tanpa menyertakan kredensial sensitif (kunci API Admin & URL webhook otomatis dikeluarkan).
+- **Global Hotkey**: Tekan `Win+Alt+U` (otomatis fallback ke `Ctrl+Alt+U`) di mana saja untuk menampilkan/menyembunyikan widget.
 
-### 🌐 Pengambilan Harga Resmi & Kurs Otomatis
-- **Official Pricing Auto-Fetcher**: Mengambil harga list resmi per juta token langsung dari dokumentasi [Anthropic Pricing Docs](https://platform.claude.com/docs/en/about-claude/pricing) dan [Google AI Studio Pricing Docs](https://ai.google.dev/gemini-api/docs/pricing).
-- **Google Finance Currency Converter**: Kurs konversi mata uang (mis. USD ke IDR) diambil otomatis dari pencarian Google Finance secara berkala, menampilkan nominal setara Rupiah secara akurat.
-
-### 🔔 Notifikasi Cerdas & Integrasi Webhook
-- **Smart Quota Reset Toast Notification**: Pemberitahuan toast balon dan nada audio saat jendela kuota 5 jam atau 7 hari selesai me-reset ke 0%.
-- **Threshold Alerts**: Notifikasi saat pemakaian mencapai ambang batas (default: 80% dan 95%).
-- **Session Context Alert**: Memantau ukuran konteks sesi aktif terhadap batas 200k token; memberi peringatan jika mencapai >75% (150k token) agar Anda tahu kapan waktu yang tepat menjalankan `/compact`.
-- **Burn Rate Spike Detector**: Mendeteksi lonjakan token tidak wajar dalam jendela 10 menit terakhir (default: >100k token / 10 menit).
-- **Audio Chimes**: Efek suara notifikasi sistem Windows untuk setiap peristiwa penting.
-- **Discord / Slack / Telegram Webhook**: Memformat payload otomatis sesuai target (Discord/Slack/Telegram/Generic), memverifikasi status HTTP, melaporkan kegagalan ke Diagnostik, dan dilengkapi tombol **Uji** di Pengaturan > Notifikasi.
-
-### 🪟 Desain Khusus Windows (Zero Distraction)
-- **Zero Taskbar Footprint**: Jendela floating menggunakan `WS_EX_TOOLWINDOW` dan `ShowInTaskbar = false`, tidak pernah mengotori taskbar maupun menu `Alt+Tab`.
-- **Ikon Tray Dinamis**: Menampilkan lencana angka persen limit 5 jam dengan pewarnaan dinamis (Hijau <50%, Kuning 50-79%, Merah ≥80%).
-- **Sembunyi Otomatis Saat Layar Penuh**: Widget otomatis bersembunyi saat Anda menonton video layar penuh, presentasi, atau bermain game, lalu kembali saat selesai.
-- **Klik-Tembus (*Click-Through*)**: Widget bisa dibuat tembus klik mouse agar tidak menghalangi interaksi kode di IDE.
-- **DPI-Aware & Sudut Membulat**: Teks tajam di resolusi 100%, 125%, 150%, 200%, dan mendukung sudut membulat modern Windows 11.
+### 🔔 Notifikasi Cerdas & Otomasi
+- **Notifikasi Aktivitas & Konfirmasi Sesi**: Mendeteksi saat Claude Code atau Antigravity menunggu konfirmasi pengguna (`?`) atau selesai berjalan (`✓`), memunculkan lencana `?` beserta opsi toast/suara/webhook.
+- **Alert Ambang Kuota & Reset**: Ambang kustom (default `80,95`), notifikasi saat limit me-reset, peringatan konteks `>75%`, serta deteksi lonjakan pemakaian 10 menit dengan jeda *cooldown*.
+- **Discord / Slack / Telegram Webhooks**: Format payload otomatis per platform, tombol **Uji** di Pengaturan, menghormati jadwal **Jam Hening**, dan mendukung **Ringkasan Harian / Mingguan Terjadwal**.
+- **Auto-Updater Terverifikasi**: Memeriksa GitHub Releases dengan pembatasan host HTTPS resmi, verifikasi checksum SHA-256, dan validasi tanda tangan Authenticode PE.
 
 ---
 
@@ -168,38 +157,40 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 ### Prasyarat
 - Windows 10 (versi 1903+) atau Windows 11.
 - .NET Framework 4.8 (sudah terpasang bawaan di Windows).
-- Claude Code CLI / Google Antigravity.
+- Salah satu tool yang didukung: Claude Code CLI, Google Antigravity, OpenAI Codex CLI, Gemini CLI, OpenCode, atau Ollama.
 
 ### Instalasi Otomatis
-1. Unduh rilis terbaru `AIUsageWatcher-<versi>.zip` atau build sendiri dari repositori ini.
-2. Ekstrak file zip, lalu buka PowerShell di folder tersebut dan jalankan:
+1. Unduh rilis terbaru `AIUsageWatcher-<versi>.zip` dari [Releases](https://github.com/silvkn1/ai-usage-watcher/releases) atau build dari kode sumber.
+2. Ekstrak arsip zip, buka PowerShell di folder tersebut, dan jalankan:
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Statusline -Autostart
    ```
    *Parameter opsional:*
-   - `-Autostart`: Menjalankan aplikasi secara otomatis saat Windows dinyalakan.
-   - `-Statusline`: Memasang wrapper statusline Claude Code CLI agar sisa kuota terbaca otomatis.
+   - `-Autostart`: Menjalankan widget otomatis saat Windows mulai.
+   - `-Statusline`: Memasang pembungkus statusline Claude Code CLI agar sisa kuota 5j/7h terbaca otomatis.
    - `-InstallDir <path>`: Menentukan lokasi instalasi kustom (default: `%LOCALAPPDATA%\Programs\AIUsageWatcher`).
 
-3. Selesai! Aplikasi akan langsung berjalan di system tray Anda.
+3. Selesai! Aplikasi langsung berjalan di system tray dan membuka Panduan Penyiapan 3 langkah pada pemakaian pertama.
+
+> **Tips untuk alert `?` izin tool Claude Code**: Di **Pengaturan -> Notifikasi** (atau Panduan Penyiapan), klik **Pasang hook** agar event `Notification` dari Claude Code mengirim sinyal konfirmasi (`Bash`/`Edit`/`Write`) secara instan.
 
 ### Mode Portabel (Tanpa Instalasi)
-Cukup buat berkas kosong bernama `portable.flag` di samping file `AIUsageWatcher.exe`. Aplikasi akan menyimpan semua konfigurasi, riwayat, dan log di dalam folder lokal `.\data` tanpa menyentuh registry Windows.
+Buat berkas kosong bernama `portable.flag` di sebelah `AIUsageWatcher.exe`. Seluruh konfigurasi, riwayat, cache, dan log disimpan di folder lokal `.\data` tanpa menulis Registry Windows.
 
 ---
 
 ## 🛠️ Build dari Kode Sumber
 
-Aplikasi ini dapat di-build secara mandiri menggunakan kompiler bawaan Windows tanpa perlu menginstal Visual Studio atau dependensi pihak ketiga:
+Aplikasi dapat dikompilasi menggunakan kompiler bawaan Windows `.NET Framework 4.8` (`csc.exe`) tanpa Visual Studio maupun paket pihak ketiga:
 
 ```powershell
-# Kompilasi aplikasi (menghasilkan dist\AIUsageWatcher.exe)
+# Kompilasi biner (menghasilkan dist\AIUsageWatcher.exe)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-# Kompilasi paket distribusi rilis lengkap (.zip + SHA256)
+# Kompilasi paket distribusi lengkap (.zip + SHA256SUMS.txt)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Menjalankan 84 automated unit test suite
+# Menjalankan 89 automated unit tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -210,52 +201,53 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 ai-usage-watcher/
 ├── src/
-│   ├── AudioAlert.cs         # Pengelola audio chime peringatan ambang batas
-│   ├── AutoUpdater.cs        # Pembaruan otomatis GitHub Releases & verifikasi SHA-256
-│   ├── Common.cs             # Path sistem, formatting token/mata uang, dan minimal JSON parser
-│   ├── CompanionInstaller.cs # Pemasang ekstensi status bar VS Code / Cursor
-│   ├── Config.cs             # Model konfigurasi aplikasi & penyimpanan terenkripsi DPAPI
-│   ├── Diag.cs               # Pembuat ringkasan diagnostik bebas data rahasia
-│   ├── FloatingForm.cs       # Jendela mengambang (Dual-Column Cards, Mini HUD Pill, GDI+ paint)
-│   ├── History.cs            # Penyimpanan riwayat harian mandiri (120 hari), ekspor CSV & Markdown
-│   ├── Hooks.cs              # Global keyboard shortcut / hotkey listener & hook Claude Code
-│   ├── LangPacks.cs          # Pemuat paket bahasa JSON eksternal
-│   ├── Logic.cs              # Mesin evaluasi ambang limit, pacing, runway, status, & eksportir laporan
-│   ├── Probe.cs              # Eksekutor probe CLI untuk pembacaan limit Claude desktop
-│   ├── Program.cs            # Entry point aplikasi Windows Forms & single-instance mutex
-│   ├── ProjectExplorerForm.cs# Dialog eksplorasi biaya proyek & heatmap aktivitas 35 hari
-│   ├── SettingsForm.cs       # Dialog antarmuka pengaturan bertab dengan tombol Apply langsung
-│   ├── SetupWizardForm.cs    # Panduan penyiapan awal 3 langkah
-│   ├── Sources.cs            # Rate limit reader, Official Pricing fetcher, dan Connect-RPC client
-│   ├── Strings.cs            # Sistem lokalisasi dwibahasa (English & Bahasa Indonesia)
-│   ├── Theming.cs            # Palette warna, efek blur Win11 Mica/Acrylic, dan ekstraksi app icon
-│   ├── TrayApp.cs            # Pengelola tray icon dinamis, file watcher, menu konteks, dan timer
-│   ├── Usage.cs              # Pemindai log lokal inkremental Claude Code, Antigravity, & Codex CLI
-│   └── Webhook.cs            # Pengirim payload alert ke Discord, Slack, Telegram, & Generic webhook
-├── companion/                # Ekstensi status bar VS Code & Cursor
-├── statusline/               # Pembungkus statusline untuk Claude Code CLI (PowerShell & Bash)
+│   ├── AudioAlert.cs          # Pengelola audio chime peringatan ambang batas
+│   ├── AutoUpdater.cs         # Pembaruan otomatis GitHub Releases, SHA-256 & validasi PE
+│   ├── Common.cs              # Path sistem, formatting, minimal JSON parser, dan ProcessHelper
+│   ├── CompanionInstaller.cs  # Pemasang & sinkronisasi ekstensi status bar VS Code / Cursor
+│   ├── Config.cs              # Model konfigurasi, enkripsi DPAPI & ekspor/impor profil aman
+│   ├── Diag.cs                # Pembuat laporan diagnostik bebas data rahasia
+│   ├── FloatingForm.cs        # Jendela mengambang HUD (kartu 3-kol/paged, Pill, Bar Konteks, GDI+)
+│   ├── History.cs             # Buku riwayat harian mandiri (120 hari), ekspor CSV & JSON
+│   ├── Hooks.cs               # Global hotkey listener & listener hook Claude Code
+│   ├── LangPacks.cs           # Pemuat paket bahasa JSON eksternal
+│   ├── Logic.cs               # Evaluasi limit, pacing, runway, Jam Hening, Digest & laporan Markdown
+│   ├── Probe.cs               # Eksekutor probe CLI headless untuk limit Claude Code
+│   ├── Program.cs             # Entry point Windows Forms & single-instance mutex
+│   ├── ProjectExplorerForm.cs # Eksplorasi Proyek: heatmap 35h, Tren Penyedia 30h & Sesi Terboros
+│   ├── SettingsForm.cs        # Dialog pengaturan bertab dengan pratinjau Apply langsung
+│   ├── SetupWizardForm.cs     # Panduan penyiapan awal 3 langkah
+│   ├── Sources.cs             # Pembaca rate limit, penarik harga resmi, Ollama & klien Connect-RPC
+│   ├── Strings.cs             # Mesin lokalisasi dwibahasa (English & Bahasa Indonesia)
+│   ├── Theming.cs             # Palet warna, efek Win11 DWM Mica/Acrylic & ekstraksi ikon aplikasi
+│   ├── TrayApp.cs             # Ikon tray dinamis, pemantau berkas, menu terkelompok & dialog Tentang
+│   ├── Usage.cs               # Pemindai log & status sesi (Claude/AG/Codex/GeminiCLI/OpenCode)
+│   └── Webhook.cs             # Pengirim webhook tahan SSRF (Discord, Slack, Telegram & Generic)
+├── companion/                 # Ekstensi status bar VS Code & Cursor
+├── statusline/                # Skrip wrapper statusline Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs          # 84 automated unit tests (.NET 4.8 test runner mandiri)
-├── assets/                # Aset ikon aplikasi (vektor minimalis 2-warna & icon format .ico)
-├── docs/img/              # Tangkapan layar fitur untuk dokumentasi
-│   ├── id/                # Tangkapan layar antarmuka Bahasa Indonesia
-│   └── en/                # Tangkapan layar antarmuka English
-├── app.ico                # Ikon aplikasi bawaan Windows executable
-├── app.manifest           # Manifest DPI awareness dan hak eksekusi Windows
-├── pricing.json           # Tabel harga token resmi bawaan aplikasi
-├── build.ps1              # Skrip kompilasi otomatis menggunakan csc.exe native
-├── test.ps1               # Skrip eksekusi unit test runner
-├── install.ps1            # Skrip instalasi per-user dan registrasi statusline
-└── uninstall.ps1          # Skrip uninstalasi bersih (opsional hapus data pengguna)
+│   └── UnitTests.cs           # 89 automated unit tests (.NET 4.8 test runner mandiri)
+├── assets/                    # Aset logo aplikasi (PNG vektor & .ico)
+├── docs/img/                  # Tangkapan layar fitur untuk dokumentasi
+│   ├── en/                    # Tangkapan layar antarmuka English
+│   └── id/                    # Tangkapan layar antarmuka Bahasa Indonesia
+├── app.ico                    # Ikon executable bawaan Windows
+├── app.manifest               # Manifest DPI awareness dan izin eksekusi Windows
+├── pricing.json               # Tabel harga token resmi bawaan
+├── build.ps1                  # Skrip kompilasi otomatis dengan csc.exe native
+├── test.ps1                   # Skrip eksekusi unit test
+├── install.ps1                # Skrip instalasi per-user dan registrasi statusline
+└── uninstall.ps1              # Skrip uninstalasi bersih (opsi hapus data pengguna)
 ```
 
 ---
 
 ## 🔒 Privasi & Keamanan Data
 
-- **100% Pemrosesan Lokal**: Seluruh log percakapan diproses di PC Anda. Tidak ada server analitik, telemetri, atau data percakapan yang dikirim ke internet.
-- **Pembersihan Konten Percakapan**: Pemindai log hanya mengambil field `usage`, `model`, dan `timestamp`. Konten percakapan dibuang dari memori sebelum parsing JSON dan tidak pernah disimpan ke disk.
-- **Enkripsi Kredensial DPAPI**: Kunci API Admin atau token webhook disimpan dengan enkripsi Windows DPAPI (*Data Protection API*) terikat pada akun Windows pengguna saat ini.
+- **100% Pemrosesan Lokal**: Seluruh log percakapan diproses secara lokal di PC Anda. Tidak ada server analitik, telemetri, atau isi percakapan yang dikirim ke internet.
+- **Pembersihan Konten Percakapan**: Pemindai log hanya mengekstrak metadata (`usage`, `model`, `timestamp`, penanda konfirmasi tool, `cwd`). Konten prompt dan jawaban dibuang dari memori serta tidak pernah ditulis ke disk.
+- **Enkripsi Kredensial DPAPI**: Kunci API Admin dan URL webhook dienkripsi memakai Windows DPAPI (*Data Protection API*) terikat akun Windows pengguna aktif.
+- **Pembatasan Jaringan & Pembaruan Ketat**: Auto-updater membatasi koneksi HTTPS ke host resmi `github.com` / `api.github.com` disertai verifikasi SHA-256 dan Authenticode; webhook & koneksi lokal menegakkan validasi SSRF dan allowlist host ketat.
 
 ---
 
