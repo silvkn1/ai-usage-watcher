@@ -248,9 +248,10 @@ ai-usage-watcher/
 - **Prompt Sanitization**: The log scanner extracts only metadata (`usage`, `model`, `timestamp`, tool confirmation flags, `cwd`). Prompt and response bodies are discarded in memory and never written to disk.
 - **DPAPI Credential Encryption**: Admin API keys and webhook URLs are encrypted using Windows DPAPI (*Data Protection API*), scoped to your current Windows user profile.
 - **Hardened Update & Network Boundaries**: Auto-updater enforces HTTPS `github.com` / `api.github.com` hosts, SHA-256 verification, and Authenticode signature checks; webhook & localhost clients enforce strict SSRF and host-allowlist validation.
+- **Release Integrity & Code Signing Policy**: Tagged CI builds publish GitHub Build Provenance Attestations and support free OSS Authenticode signing via [SignPath.io](https://signpath.io/) / [SignPath Foundation](https://signpath.org/) — see [`CODE_SIGNING_POLICY.md`](CODE_SIGNING_POLICY.md).
 
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. Free to use, modify, and distribute.
+Distributed under the [MIT License](LICENSE). Free to use, modify, and distribute.

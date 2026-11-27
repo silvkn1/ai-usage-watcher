@@ -248,9 +248,10 @@ ai-usage-watcher/
 - **Pembersihan Konten Percakapan**: Pemindai log hanya mengekstrak metadata (`usage`, `model`, `timestamp`, penanda konfirmasi tool, `cwd`). Konten prompt dan jawaban dibuang dari memori serta tidak pernah ditulis ke disk.
 - **Enkripsi Kredensial DPAPI**: Kunci API Admin dan URL webhook dienkripsi memakai Windows DPAPI (*Data Protection API*) terikat akun Windows pengguna aktif.
 - **Pembatasan Jaringan & Pembaruan Ketat**: Auto-updater membatasi koneksi HTTPS ke host resmi `github.com` / `api.github.com` disertai verifikasi SHA-256 dan Authenticode; webhook & koneksi lokal menegakkan validasi SSRF dan allowlist host ketat.
+- **Integritas Rilis & Kebijakan Code Signing**: Build CI berbasis tag menerbitkan GitHub Build Provenance Attestations dan mendukung Authenticode signing gratis melalui [SignPath.io](https://signpath.io/) / [SignPath Foundation](https://signpath.org/) — lihat [`CODE_SIGNING_POLICY.md`](CODE_SIGNING_POLICY.md).
 
 ---
 
 ## 📄 Lisensi
 
-Didistribusikan di bawah lisensi MIT. Silakan gunakan, modifikasi, dan distribusikan secara bebas.
+Didistribusikan di bawah [Lisensi MIT](LICENSE). Silakan gunakan, modifikasi, dan distribusikan secara bebas.

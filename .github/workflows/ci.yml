@@ -8,11 +8,13 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-test:
     runs-on: windows-latest
+    outputs:
+      unsigned_artifact_id: ${{ steps.upload-unsigned.outputs.artifact-id }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,6 +27,14 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
+      - name: Upload Unsigned Executable for Code Signing
+        id: upload-unsigned
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: dist/AIUsageWatcher.exe
+
       - name: Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -34,8 +44,63 @@ jobs:
             dist/AIUsageWatcher-*.zip
             dist/SHA256SUMS.txt
 
+  release:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download Unsigned Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: AIUsageWatcher-dist
+          path: dist
+
+      - name: Sign Executable via SignPath Foundation
+        if: vars.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID || vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'ai-usage-watcher' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
+          github-artifact-id: ${{ needs.build-test.outputs.unsigned_artifact_id }}
+          wait-for-completion: true
+          output-artifact-directory: ./signed-bin
+
+      - name: Replace Signed Binary and Recompute Checksums
+        if: vars.SIGNPATH_ENABLED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          find ./signed-bin -maxdepth 2 -name '*.zip' -type f -exec unzip -oq {} -d ./signed-bin \;
+          signed_exe=$(find ./signed-bin -name 'AIUsageWatcher.exe' -type f | head -n 1)
+          if [ -z "$signed_exe" ]; then
+            echo "Signed AIUsageWatcher.exe not found in ./signed-bin" >&2
+            exit 1
+          fi
+          cp -f "$signed_exe" dist/AIUsageWatcher.exe
+          (
+            cd dist
+            for z in AIUsageWatcher-*.zip; do
+              zip -u "$z" AIUsageWatcher.exe
+            done
+            sha256sum AIUsageWatcher-*.zip AIUsageWatcher.exe > SHA256SUMS.txt
+          )
+
+      - name: Attest Build Provenance (SLSA)
+        if: github.event.repository.private == false
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/AIUsageWatcher.exe
+            dist/AIUsageWatcher-*.zip
+
       - name: Publish GitHub Release on Tag
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
