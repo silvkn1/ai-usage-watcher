@@ -28,7 +28,7 @@ $Refs = "System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.F
 $RefArgs = $Refs -join ","
 
 Write-Host "Compiling unit tests..." -ForegroundColor Cyan
-& $Csc /nologo /target:exe /main:Tests.TestRunner /out:$TestExe "/resource:$Pricing,pricing.json" "/resource:$CompPkg,companion-package.json" "/resource:$CompExt,companion-extension.js" /r:$RefArgs $TestFiles $SrcFiles
+& $Csc /nologo /warn:4 /langversion:5 /target:exe /main:Tests.TestRunner /out:$TestExe "/resource:$Pricing,pricing.json" "/resource:$CompPkg,companion-package.json" "/resource:$CompExt,companion-extension.js" /r:$RefArgs $TestFiles $SrcFiles
 
 if ($LASTEXITCODE -ne 0) {
     throw "Kompilasi unit test gagal (exit $LASTEXITCODE)."

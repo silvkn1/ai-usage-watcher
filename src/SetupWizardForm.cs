@@ -12,7 +12,28 @@ namespace ClaudeUsageWidget
         private static readonly string[] Backdrops = { "acrylic", "mica", "mica-alt", "solid" };
 
         private readonly AppConfig _cfg;
+        private readonly List<Font> _fonts = new List<Font>();
+        private Font _btnFont;
         private int _step = 0;
+
+        private Font MakeFont(string family, float size, FontStyle style = FontStyle.Regular)
+        {
+            Font f = new Font(family, size, style);
+            _fonts.Add(f);
+            return f;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                for (int i = 0; i < _fonts.Count; i++)
+                    try { _fonts[i].Dispose(); } catch { }
+                _fonts.Clear();
+                _btnFont = null;
+            }
+        }
 
         // Root layout
         private readonly TableLayoutPanel _rootTable = new TableLayoutPanel();
@@ -108,11 +129,12 @@ namespace ClaudeUsageWidget
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
-            Font = new Font("Segoe UI", 9f);
+            Font = MakeFont("Segoe UI", 9f);
             ClientSize = new Size(620, 590);
             MinimumSize = new Size(580, 540);
             DoubleBuffered = true;
 
+            SuspendLayout();
             _rootTable.Dock = DockStyle.Fill;
             _rootTable.ColumnCount = 1;
             _rootTable.RowCount = 3;
@@ -138,6 +160,7 @@ namespace ClaudeUsageWidget
 
             AcceptButton = _btnNext;
             CancelButton = _btnSkip;
+            ResumeLayout(true);
             ApplyTheme();
             GoToStep(0);
         }
@@ -165,13 +188,13 @@ namespace ClaudeUsageWidget
             tHeader.Padding = new Padding(0);
 
             _titleLabel.Text = L.T("wizard.welcome");
-            _titleLabel.Font = new Font("Segoe UI Semibold", 13f, FontStyle.Bold);
+            _titleLabel.Font = MakeFont("Segoe UI Semibold", 13f, FontStyle.Bold);
             _titleLabel.AutoSize = true;
             _titleLabel.UseMnemonic = false;
             _titleLabel.Margin = new Padding(0, 0, 0, 4);
 
             _subtitleLabel.Text = L.T("wizard.welcome.sub");
-            _subtitleLabel.Font = new Font("Segoe UI", 8.5f);
+            _subtitleLabel.Font = MakeFont("Segoe UI", 8.5f);
             _subtitleLabel.AutoSize = true;
             _subtitleLabel.UseMnemonic = false;
             _subtitleLabel.MaximumSize = new Size(560, 0);
@@ -200,7 +223,7 @@ namespace ClaudeUsageWidget
         private void InitPill(Label lbl, string text)
         {
             lbl.Text = text;
-            lbl.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            lbl.Font = MakeFont("Segoe UI", 8.5f, FontStyle.Bold);
             lbl.Padding = new Padding(8, 3, 8, 3);
             lbl.Margin = new Padding(0, 0, 8, 0);
             lbl.AutoSize = true;
@@ -292,7 +315,7 @@ namespace ClaudeUsageWidget
             langRow.Margin = new Padding(0, 0, 0, 12);
 
             _lblLang.Text = L.T("set.language");
-            _lblLang.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            _lblLang.Font = MakeFont("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             _lblLang.AutoSize = true;
             _lblLang.UseMnemonic = false;
             _lblLang.Margin = new Padding(0, 4, 12, 0);
@@ -379,7 +402,7 @@ namespace ClaudeUsageWidget
             portRow.WrapContents = false;
             portRow.Margin = new Padding(22, 6, 0, 0);
             _lblOllamaPort.Text = "Port:";
-            _lblOllamaPort.Font = new Font("Segoe UI", 8.5f);
+            _lblOllamaPort.Font = MakeFont("Segoe UI", 8.5f);
             _lblOllamaPort.ForeColor = Palette.Dim;
             _lblOllamaPort.AutoSize = true;
             _lblOllamaPort.UseMnemonic = false;
@@ -416,7 +439,7 @@ namespace ClaudeUsageWidget
             topRow.Dock = DockStyle.Top;
 
             chk.Text = title;
-            chk.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            chk.Font = MakeFont("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             chk.AutoSize = true;
             chk.Checked = isChecked;
             chk.UseMnemonic = false;
@@ -424,7 +447,7 @@ namespace ClaudeUsageWidget
             topRow.Controls.Add(chk);
 
             lblStatus.Text = statusText;
-            lblStatus.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+            lblStatus.Font = MakeFont("Segoe UI", 8.5f, FontStyle.Regular);
             lblStatus.ForeColor = isDetected ? Palette.Green : Palette.Dim;
             lblStatus.AutoSize = true;
             lblStatus.UseMnemonic = false;
@@ -433,7 +456,7 @@ namespace ClaudeUsageWidget
 
             lblDesc.Text = descText;
             lblDesc.ForeColor = Palette.Dim;
-            lblDesc.Font = new Font("Segoe UI", 8.5f);
+            lblDesc.Font = MakeFont("Segoe UI", 8.5f);
             lblDesc.AutoSize = true;
             lblDesc.UseMnemonic = false;
             lblDesc.MaximumSize = new Size(540, 0);
@@ -458,7 +481,7 @@ namespace ClaudeUsageWidget
 
             // Theme row
             _lblTheme.Text = L.T("wizard.theme");
-            _lblTheme.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblTheme.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _lblTheme.AutoSize = true;
             _lblTheme.UseMnemonic = false;
             _lblTheme.Anchor = AnchorStyles.Left;
@@ -475,7 +498,7 @@ namespace ClaudeUsageWidget
 
             // Backdrop row
             _lblBackdrop.Text = L.T("wizard.backdrop");
-            _lblBackdrop.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblBackdrop.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _lblBackdrop.AutoSize = true;
             _lblBackdrop.UseMnemonic = false;
             _lblBackdrop.Anchor = AnchorStyles.Left;
@@ -503,7 +526,7 @@ namespace ClaudeUsageWidget
 
             // Dock Checkbox row
             _chkDock.Text = L.T("wizard.dock.enable");
-            _chkDock.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _chkDock.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _chkDock.AutoSize = true;
             _chkDock.UseMnemonic = false;
             _chkDock.Checked = _cfg.DockTop;
@@ -536,7 +559,7 @@ namespace ClaudeUsageWidget
 
             // View Mode row
             _lblMode.Text = L.T("wizard.view.mode");
-            _lblMode.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblMode.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _lblMode.AutoSize = true;
             _lblMode.UseMnemonic = false;
             _lblMode.Margin = new Padding(0, 0, 0, 6);
@@ -560,7 +583,7 @@ namespace ClaudeUsageWidget
             t.SetColumnSpan(_rbPill, 2);
 
             _lblCardLayout.Text = L.T("wizard.cardlayout");
-            _lblCardLayout.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblCardLayout.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _lblCardLayout.AutoSize = true;
             _lblCardLayout.UseMnemonic = false;
             _lblCardLayout.Anchor = AnchorStyles.Left;
@@ -589,7 +612,7 @@ namespace ClaudeUsageWidget
 
             // Autostart
             _chkAutostart.Text = L.T("wizard.autostart");
-            _chkAutostart.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            _chkAutostart.Font = MakeFont("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             _chkAutostart.AutoSize = true;
             _chkAutostart.UseMnemonic = false;
             _chkAutostart.Checked = true;
@@ -599,18 +622,21 @@ namespace ClaudeUsageWidget
 
             // Companion
             _chkCompanion.Text = L.T("wizard.companion");
-            _chkCompanion.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            _chkCompanion.Font = MakeFont("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             _chkCompanion.AutoSize = true;
             _chkCompanion.UseMnemonic = false;
             string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            bool hasIde = Directory.Exists(Path.Combine(userProfile, ".vscode")) || Directory.Exists(Path.Combine(userProfile, ".cursor"));
+            bool hasIde = Directory.Exists(Path.Combine(userProfile, ".vscode")) ||
+                Directory.Exists(Path.Combine(userProfile, ".cursor")) ||
+                Directory.Exists(Path.Combine(userProfile, ".antigravity")) ||
+                Directory.Exists(Path.Combine(userProfile, ".windsurf"));
             _chkCompanion.Checked = hasIde;
             _chkCompanion.Margin = new Padding(0, 0, 0, 2);
             t.Controls.Add(_chkCompanion);
 
             _lblCompanionDesc.Text = L.T("wizard.companion.desc");
             _lblCompanionDesc.ForeColor = Palette.Dim;
-            _lblCompanionDesc.Font = new Font("Segoe UI", 8.5f);
+            _lblCompanionDesc.Font = MakeFont("Segoe UI", 8.5f);
             _lblCompanionDesc.AutoSize = true;
             _lblCompanionDesc.UseMnemonic = false;
             _lblCompanionDesc.MaximumSize = new Size(540, 0);
@@ -619,7 +645,7 @@ namespace ClaudeUsageWidget
 
             // Currency
             _chkCurrency.Text = L.T("wizard.currency");
-            _chkCurrency.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _chkCurrency.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _chkCurrency.AutoSize = true;
             _chkCurrency.UseMnemonic = false;
             _chkCurrency.Checked = _cfg.CurrencyCustomEnabled || string.Equals(_cfg.Language, "id", StringComparison.OrdinalIgnoreCase);
@@ -645,7 +671,7 @@ namespace ClaudeUsageWidget
             tTips.Dock = DockStyle.Top;
 
             _lblTipsTitle.Text = L.T("wizard.tips.title");
-            _lblTipsTitle.Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold);
+            _lblTipsTitle.Font = MakeFont("Segoe UI Semibold", 9f, FontStyle.Bold);
             _lblTipsTitle.AutoSize = true;
             _lblTipsTitle.UseMnemonic = false;
             _lblTipsTitle.Margin = new Padding(0, 0, 0, 6);
@@ -670,7 +696,7 @@ namespace ClaudeUsageWidget
         private void InitTipLabel(Label lbl, string text)
         {
             lbl.Text = text;
-            lbl.Font = new Font("Segoe UI", 8.5f);
+            lbl.Font = MakeFont("Segoe UI", 8.5f);
             lbl.ForeColor = Palette.Dim;
             lbl.AutoSize = true;
             lbl.UseMnemonic = false;
@@ -796,7 +822,7 @@ namespace ClaudeUsageWidget
         {
             b.FlatStyle = FlatStyle.Flat;
             b.FlatAppearance.BorderColor = Palette.Border;
-            b.Font = new Font("Segoe UI", 9f);
+            b.Font = _btnFont ?? (_btnFont = MakeFont("Segoe UI", 9f));
             b.Padding = new Padding(14, 5, 14, 5);
             b.Height = 32;
             if (accent)

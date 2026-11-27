@@ -631,6 +631,55 @@ namespace ClaudeUsageWidget
         }
     }
 
+    internal static class BudgetForecast
+    {
+        public static double EstimateMonthEnd(double monthToDateCost, DayStat[] recentDays, DateTime now)
+        {
+            if (monthToDateCost < 0) monthToDateCost = 0;
+            int daysInMonth = DateTime.DaysInMonth(now.Year, now.Month);
+            int remainingDays = Math.Max(0, daysInMonth - now.Day);
+            if (remainingDays == 0) return monthToDateCost;
+
+            double sum7 = 0;
+            int cnt7 = 0;
+            if (recentDays != null && recentDays.Length > 0)
+            {
+                int start = Math.Max(0, recentDays.Length - 7);
+                for (int i = start; i < recentDays.Length; i++)
+                {
+                    if (recentDays[i] != null)
+                    {
+                        sum7 += Math.Max(0, recentDays[i].Cost);
+                        cnt7++;
+                    }
+                }
+            }
+            double dailyPace = (cnt7 > 0 && sum7 > 0)
+                ? (sum7 / cnt7)
+                : (now.Day > 0 ? monthToDateCost / now.Day : 0);
+            return monthToDateCost + dailyPace * remainingDays;
+        }
+    }
+
+    internal static class CacheEfficiencyAdvisor
+    {
+        public static SessionCostRecord FindCacheDrop(UsageSnapshot usage, int minHitPercent)
+        {
+            if (usage == null || usage.ExpensiveSessions == null || usage.ExpensiveSessions.Count == 0) return null;
+            DateTime recentCutoff = DateTime.Now.AddHours(-6);
+            SessionCostRecord worst = null;
+            foreach (SessionCostRecord sr in usage.ExpensiveSessions)
+            {
+                if (sr == null || sr.LastActivity < recentCutoff) continue;
+                if (sr.InputSide < 50000) continue;
+                int hitPct = (int)Math.Round(sr.CacheHit * 100);
+                if (hitPct < minHitPercent && (worst == null || sr.Cost > worst.Cost))
+                    worst = sr;
+            }
+            return worst;
+        }
+    }
+
     internal static class StatusFormatter
     {
         public static string Format(RateLimitSnapshot limits, UsageSnapshot usage, bool scanClaude, bool scanGemini)
@@ -696,6 +745,16 @@ namespace ClaudeUsageWidget
             {
                 sb.AppendLine(string.Format("• OpenCode: Today {0} (≈{1}) · 7d {2}",
                     Fmt.Tokens(usage.OpenCodeToday.Total), Fmt.Usd(usage.OpenCodeToday.Cost), Fmt.Tokens(usage.OpenCodeWeek.Total)));
+            }
+            if (usage != null && usage.ClineWeek.Total > 0)
+            {
+                sb.AppendLine(string.Format("• Cline: Today {0} (≈{1}) · 7d {2}",
+                    Fmt.Tokens(usage.ClineToday.Total), Fmt.Usd(usage.ClineToday.Cost), Fmt.Tokens(usage.ClineWeek.Total)));
+            }
+            if (usage != null && usage.CopilotWeek.Total > 0)
+            {
+                sb.AppendLine(string.Format("• Copilot: Today {0} (≈{1}) · 7d {2}",
+                    Fmt.Tokens(usage.CopilotToday.Total), Fmt.Usd(usage.CopilotToday.Cost), Fmt.Tokens(usage.CopilotWeek.Total)));
             }
             if (usage != null)
             {
@@ -846,6 +905,16 @@ namespace ClaudeUsageWidget
                 {
                     d["opencode_today_tokens"] = u.OpenCodeToday.Total;
                     d["opencode_today_cost_usd"] = Math.Round(u.OpenCodeToday.Cost, 4);
+                }
+                if (u.ClineWeek.Total > 0)
+                {
+                    d["cline_today_tokens"] = u.ClineToday.Total;
+                    d["cline_today_cost_usd"] = Math.Round(u.ClineToday.Cost, 4);
+                }
+                if (u.CopilotWeek.Total > 0)
+                {
+                    d["copilot_today_tokens"] = u.CopilotToday.Total;
+                    d["copilot_today_cost_usd"] = Math.Round(u.CopilotToday.Cost, 4);
                 }
                 if (u.Sessions != null)
                 {

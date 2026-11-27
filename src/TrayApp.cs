@@ -28,8 +28,23 @@ namespace ClaudeUsageWidget
         private readonly System.Windows.Forms.Timer _tick, _debounce, _fsTimer;
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher, _codexWatcher, _hooksWatcher, _gemCliWatcher;
         private readonly SynchronizationContext _ui;
+        private volatile bool _disposed;
 
-        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miAbout, _miData, _miExit, _miCsv, _miJson, _miReport, _miProjects, _miMarkSessions;
+        private void PostUi(Action action)
+        {
+            if (_disposed || _ui == null || action == null) return;
+            try
+            {
+                _ui.Post(delegate
+                {
+                    if (_disposed) return;
+                    action();
+                }, null);
+            }
+            catch { }
+        }
+
+        private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miProfiles, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miAbout, _miData, _miExit, _miCsv, _miJson, _miReport, _miProjects, _miMarkSessions;
         private ToolStripMenuItem _miViewGroup, _miToolsGroup, _miHelpGroup, _miZen;
         private ToolStripSeparator _sepProject;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
@@ -45,6 +60,7 @@ namespace ClaudeUsageWidget
             if (_miHelpGroup != null) _miHelpGroup.Text = MenuText(L.T("tray.menu.help"));
             _miDock.Text = L.T("tray.dock");
             if (_miSnap != null) { _miSnap.Text = L.T("tray.snap"); PopulateSnapMenu(_miSnap); }
+            if (_miProfiles != null) { _miProfiles.Text = L.T("tray.profiles"); PopulateProfilesMenu(); }
             _miCompact.Text = L.T("tray.compact");
             if (_miZen != null) _miZen.Text = L.T("tray.zen");
             _miClickThrough.Text = L.T("tray.clickthrough");
@@ -91,6 +107,7 @@ namespace ClaudeUsageWidget
             CompanionInstaller.SyncIfInstalled();
             _cfg = AppConfig.Load();
             L.Set(_cfg.Language);   // sebelum menu dan layout pertama
+            AudioAlert.CustomWavPath = _cfg.CustomSoundPath;
             ApplyCurrencyOpts();
             _pricing = Pricing.Load();
             _scanner = new UsageScanner(_pricing);
@@ -99,6 +116,9 @@ namespace ClaudeUsageWidget
             _scanner.ScanCodex = _cfg.ScanCodex;
             _scanner.ScanGeminiCli = _cfg.ScanGeminiCli;
             _scanner.ScanOpenCode = _cfg.ScanOpenCode;
+            _scanner.ScanCline = _cfg.ScanCline;
+            _scanner.ScanCopilot = _cfg.ScanCopilot;
+            _scanner.CustomJsonlDirs = _cfg.CustomJsonlDirs;
             _scanner.Roots = ProjectRoots;
             _scanner.SetTrackProjects(true);   // statistik proyek disimpan di memori untuk Project Explorer; _cfg.ShowProjects hanya kontrol tampilan widget
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
@@ -140,7 +160,15 @@ namespace ClaudeUsageWidget
                 {
                     _lastBalloonIsUpdate = false;
                     HandleUpdateResult(_pendingUpdate, true);
+                    return;
                 }
+                if (!string.IsNullOrEmpty(_lastBalloonHint) || !string.IsNullOrEmpty(_lastBalloonCwd))
+                {
+                    FocusOrOpenSession(_lastBalloonHint, _lastBalloonCwd, _lastBalloonProvider);
+                    return;
+                }
+                if (!_cfg.ShowFloating) ToggleFloating();
+                else _float.Activate();
             };
             UpdateTrayIcon();
             _tray.Visible = true;
@@ -219,7 +247,7 @@ namespace ClaudeUsageWidget
             MaybeCheckOllama(false);
             if (!_cfg.FirstRunCompleted)
             {
-                _ui.Post(delegate { ShowWizard(); }, null);
+                PostUi(delegate { ShowWizard(); });
             }
         }
 
@@ -253,6 +281,7 @@ namespace ClaudeUsageWidget
                 _popup.SessionMenuRequested += delegate(object s, MouseEventArgs me) { ShowSessionJumpMenu(_popup, me.Location); };
                 _popup.CopyCompactRequested += delegate { CopyCompactCommand(); };
                 _popup.OpenActiveTerminalRequested += delegate { OpenProjectTerminal(); };
+                _popup.CardDoubleClicked += delegate(object s, string prov) { OpenProviderCard(prov); };
                 IntPtr force = _popup.Handle;   // buat handle agar ukuran/DPI benar
             }
             _popupAnchor = TrayIconRect();
@@ -377,9 +406,21 @@ namespace ClaudeUsageWidget
             }
         }
 
-        private void ShowBalloon(string text, ToolTipIcon icon)
+        private string _lastBalloonHint, _lastBalloonCwd, _lastBalloonProvider;
+
+        private void FocusOrOpenSession(string hint, string cwd, string provider)
+        {
+            if (ProcessHelper.FocusWindow(hint, cwd, provider)) return;
+            if (!string.IsNullOrEmpty(cwd) && Directory.Exists(cwd))
+                ProcessHelper.OpenTerminal(cwd);
+        }
+
+        private void ShowBalloon(string text, ToolTipIcon icon, string focusHint = null, string cwd = null, string provider = null)
         {
             _lastBalloonIsUpdate = false;
+            _lastBalloonHint = focusHint;
+            _lastBalloonCwd = cwd;
+            _lastBalloonProvider = provider;
             try { _tray.ShowBalloonTip(8000, L.AppName, text, icon); }
             catch (Exception ex) { Log.Write("balloon", ex); }
         }
@@ -469,7 +510,21 @@ namespace ClaudeUsageWidget
             else return;
             _lastNotifyAt = DateTime.Now; _lastNotifyKind = kind;
             Log.Write("notify " + kind + (elapsed >= 0 ? " " + elapsed + "s" : ""));
-            ShowBalloon(text, ToolTipIcon.Info);
+            string nHint = _usage != null ? _usage.LastActiveProject : null;
+            string nCwd = _usage != null ? _usage.LastActiveCwd : null;
+            if (!string.IsNullOrEmpty(sid) && _usage != null && _usage.Sessions != null && _usage.Sessions.Items != null)
+            {
+                foreach (SessionActivity sa in _usage.Sessions.Items)
+                {
+                    if (sa != null && string.Equals(sa.Id, sid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.IsNullOrEmpty(sa.Project)) nHint = sa.Project;
+                        if (!string.IsNullOrEmpty(sa.Cwd)) nCwd = sa.Cwd;
+                        break;
+                    }
+                }
+            }
+            ShowBalloon(text, ToolTipIcon.Info, nHint, nCwd, "Claude");
             bool quiet = IsQuietNow();
             if (_cfg.AudioAlertsEnabled && !quiet)
             {
@@ -582,6 +637,7 @@ namespace ClaudeUsageWidget
 
         private DateTime _lastBurnRateAlert = DateTime.MinValue;
         private DateTime _lastContextAlert = DateTime.MinValue;
+        private DateTime _lastCacheDropAlert = DateTime.MinValue;
 
         private void CheckBurnRate()
         {
@@ -610,12 +666,34 @@ namespace ClaudeUsageWidget
                 _lastContextAlert = DateTime.Now;
                 int pct = (int)Math.Round(pctExact);
                 string text = L.T("alert.context", Fmt.Tokens(_usage.LastContextTokens), pct);
-                ShowBalloon(text, ToolTipIcon.Warning);
+                ShowBalloon(text, ToolTipIcon.Warning, _usage.LastActiveProject, _usage.LastActiveCwd, null);
                 bool quiet = IsQuietNow();
                 if (_cfg.AudioAlertsEnabled && !quiet) AudioAlert.PlayWarning();
                 if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "Session Context Alert", text);
                 Log.Write("alert context " + _usage.LastContextTokens);
             }
+        }
+
+        private void CheckCacheEfficiencyAlert()
+        {
+            if (!_cfg.CacheDropAlertEnabled || _usage == null || !_usage.Ready) return;
+            int cd = Math.Max(1, _cfg.AlertCooldownMinutes);
+            if ((DateTime.Now - _lastCacheDropAlert).TotalMinutes < cd) return;
+            SessionCostRecord drop = CacheEfficiencyAdvisor.FindCacheDrop(_usage, _cfg.CacheDropMinPercent);
+            if (drop == null) return;
+
+            _lastCacheDropAlert = DateTime.Now;
+            int hitPct = (int)Math.Round(drop.CacheHit * 100);
+            string proj = string.IsNullOrEmpty(drop.Project) ? drop.Provider : drop.Project;
+            string cwd = null;
+            if (_usage.ProjectPaths != null && !string.IsNullOrEmpty(drop.Project))
+                _usage.ProjectPaths.TryGetValue(drop.Project, out cwd);
+            string text = L.T("alert.cachedrop", proj, hitPct, Fmt.Tokens(drop.InputSide));
+            ShowBalloon(text, ToolTipIcon.Warning, proj, cwd, drop.Provider);
+            bool quiet = IsQuietNow();
+            if (_cfg.AudioAlertsEnabled && !quiet) AudioAlert.PlayWarning();
+            if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "Cache Efficiency Alert", text);
+            Log.Write("alert cachedrop " + proj + " " + hitPct + "%");
         }
 
         private void ApplyCurrencyOpts()
@@ -670,11 +748,12 @@ namespace ClaudeUsageWidget
                     ToolStripMenuItem mi = new ToolStripMenuItem(icon + lbl);
                     bool dirOk = !string.IsNullOrEmpty(item.Cwd) && Directory.Exists(item.Cwd);
                     string focusHint = !string.IsNullOrEmpty(item.Project) ? item.Project : item.Provider;
+                    mi.Click += delegate { FocusOrOpenSession(focusHint, item.Cwd, item.Provider); };
                     if (!string.IsNullOrEmpty(focusHint))
                     {
                         mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.focus", focusHint), null, delegate
                         {
-                            if (!ProcessHelper.FocusWindow(focusHint) && dirOk) ProcessHelper.OpenTerminal(item.Cwd);
+                            FocusOrOpenSession(focusHint, item.Cwd, item.Provider);
                         }));
                     }
                     if (dirOk)
@@ -778,7 +857,9 @@ namespace ClaudeUsageWidget
             }
             string provKey = title.IndexOf("Codex", StringComparison.OrdinalIgnoreCase) >= 0 ? "Codex"
                 : (title.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0 ? "Gemini CLI"
-                : (title.IndexOf("OpenCode", StringComparison.OrdinalIgnoreCase) >= 0 ? "OpenCode" : "Claude"));
+                : (title.IndexOf("OpenCode", StringComparison.OrdinalIgnoreCase) >= 0 ? "OpenCode"
+                : (title.IndexOf("Cline", StringComparison.OrdinalIgnoreCase) >= 0 ? "Cline"
+                : (title.IndexOf("Copilot", StringComparison.OrdinalIgnoreCase) >= 0 ? "Copilot" : "Claude"))));
             string dir = null;
             if (_usage != null)
             {
@@ -835,6 +916,9 @@ namespace ClaudeUsageWidget
             _miDock.Checked = _cfg.DockTop;
             _miSnap = new ToolStripMenuItem(L.T("tray.snap"));
             PopulateSnapMenu(_miSnap);
+            _miProfiles = new ToolStripMenuItem(MenuText(L.T("tray.profiles")));
+            _miProfiles.DropDownOpening += delegate { PopulateProfilesMenu(); };
+            PopulateProfilesMenu();
             _miCompact = new ToolStripMenuItem(L.T("tray.compact"), null, delegate { SetCompact(!_float.Compact); });
             _miCompact.Checked = _cfg.Compact;
             _miCompact.Enabled = !_cfg.DockTop;
@@ -848,6 +932,7 @@ namespace ClaudeUsageWidget
 
             _miViewGroup.DropDownItems.Add(_miDock);
             _miViewGroup.DropDownItems.Add(_miSnap);
+            _miViewGroup.DropDownItems.Add(_miProfiles);
             _miViewGroup.DropDownItems.Add(new ToolStripSeparator());
             _miViewGroup.DropDownItems.Add(_miCompact);
             _miViewGroup.DropDownItems.Add(_miZen);
@@ -960,6 +1045,100 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private void PopulateProfilesMenu()
+        {
+            if (_miProfiles == null) return;
+            _miProfiles.DropDownItems.Clear();
+
+            ToolStripMenuItem presets = new ToolStripMenuItem(L.T("tray.profiles.presets"));
+            presets.DropDownItems.Add(new ToolStripMenuItem(L.T("tray.profiles.preset.work"), null, delegate { ApplyLoadedProfile("Work", AppConfig.BuildPresetProfile("work", _cfg)); }));
+            presets.DropDownItems.Add(new ToolStripMenuItem(L.T("tray.profiles.preset.focus"), null, delegate { ApplyLoadedProfile("Focus", AppConfig.BuildPresetProfile("focus", _cfg)); }));
+            presets.DropDownItems.Add(new ToolStripMenuItem(L.T("tray.profiles.preset.all"), null, delegate { ApplyLoadedProfile("Default", AppConfig.BuildPresetProfile("all", _cfg)); }));
+            _miProfiles.DropDownItems.Add(presets);
+
+            List<string> saved = AppConfig.ListProfileNames();
+            if (saved.Count > 0)
+            {
+                _miProfiles.DropDownItems.Add(new ToolStripSeparator());
+                foreach (string name in saved)
+                {
+                    string profName = name;
+                    _miProfiles.DropDownItems.Add(new ToolStripMenuItem(profName, null, delegate
+                    {
+                        AppConfig loaded = _cfg.LoadNamedProfile(profName);
+                        if (loaded != null) ApplyLoadedProfile(profName, loaded);
+                    }));
+                }
+            }
+
+            _miProfiles.DropDownItems.Add(new ToolStripSeparator());
+            _miProfiles.DropDownItems.Add(new ToolStripMenuItem(L.T("tray.profiles.save"), null, delegate { PromptSaveProfile(); }));
+
+            if (saved.Count > 0)
+            {
+                ToolStripMenuItem delMenu = new ToolStripMenuItem(L.T("tray.profiles.delete"));
+                foreach (string name in saved)
+                {
+                    string profName = name;
+                    delMenu.DropDownItems.Add(new ToolStripMenuItem(profName, null, delegate
+                    {
+                        AppConfig.DeleteNamedProfileInDir(profName, Paths.ProfilesDir);
+                        PopulateProfilesMenu();
+                    }));
+                }
+                _miProfiles.DropDownItems.Add(delMenu);
+            }
+            MenuTheme.ApplyItems(_miProfiles.DropDownItems);
+        }
+
+        private void ApplyLoadedProfile(string displayName, AppConfig imported)
+        {
+            if (imported == null) return;
+            string oldEdge = _cfg.DockEdge, oldMonitor = _cfg.DockMonitor;
+            _cfg.ApplyProfileFrom(imported);
+            ApplyConfigChanges(oldEdge, oldMonitor);
+            if (_settingsForm != null && !_settingsForm.IsDisposed) _settingsForm.PrepareForOpen();
+            ShowBalloon(L.T("tray.profiles.applied", displayName), ToolTipIcon.Info);
+        }
+
+        private void PromptSaveProfile()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = L.T("tray.profiles.prompt.title");
+                try { Icon ic = AppIcon.Get(); if (ic != null) dlg.Icon = ic; } catch { }
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false; dlg.MinimizeBox = false; dlg.ShowInTaskbar = false;
+                dlg.StartPosition = FormStartPosition.CenterScreen;
+                dlg.AutoScaleMode = AutoScaleMode.Dpi;
+                dlg.ClientSize = new Size(340, 125);
+                dlg.BackColor = Palette.Bg; dlg.ForeColor = Palette.Text;
+                DarkUi.TitleBar(dlg.Handle, !Palette.IsLight);
+
+                Label lbl = new Label { Text = L.T("tray.profiles.prompt.label"), AutoSize = true, Left = 14, Top = 14, ForeColor = Palette.Text };
+                TextBox tb = new TextBox { Left = 14, Top = 38, Width = 310, BackColor = Palette.Surface, ForeColor = Palette.Text, BorderStyle = BorderStyle.FixedSingle };
+                Button ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 80, Left = 158, Top = 78, FlatStyle = FlatStyle.Flat, BackColor = Palette.Accent, ForeColor = Color.White };
+                ok.FlatAppearance.BorderSize = 0;
+                Button cancel = new Button { Text = L.T("set.cancel"), DialogResult = DialogResult.Cancel, Width = 80, Left = 244, Top = 78, FlatStyle = FlatStyle.Flat, BackColor = Palette.Surface, ForeColor = Palette.Text };
+                cancel.FlatAppearance.BorderColor = Palette.Border;
+                dlg.Controls.AddRange(new Control[] { lbl, tb, ok, cancel });
+                dlg.AcceptButton = ok; dlg.CancelButton = cancel;
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+
+                string safe = AppConfig.SanitizeProfileName(tb.Text);
+                if (safe == null)
+                {
+                    MessageBox.Show(L.T("tray.profiles.invalid"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (_cfg.SaveNamedProfile(safe))
+                {
+                    PopulateProfilesMenu();
+                    ShowBalloon(L.T("tray.profiles.saved", safe), ToolTipIcon.Info);
+                }
+            }
+        }
+
         private void AddSnapItem(ToolStripMenuItem parent, string label, string edge, string monitorDevice, bool isCurrentScreen)
         {
             ToolStripMenuItem item = new ToolStripMenuItem(label, null, delegate
@@ -985,6 +1164,8 @@ namespace ClaudeUsageWidget
             _cfg.HasDockY = true;
             _cfg.Save();
             _miDock.Checked = true;
+            _miClickThrough.Enabled = false;
+            _miCompact.Enabled = false;
             if (_miSnap != null) PopulateSnapMenu(_miSnap);
         }
 
@@ -1168,7 +1349,6 @@ namespace ClaudeUsageWidget
             ApplyOpacity();
             _float.ClickThrough = on;
             _miClickThrough.Checked = on;
-            _cfg.ClickThrough = on;
             _cfg.Save();
         }
 
@@ -1215,7 +1395,7 @@ namespace ClaudeUsageWidget
         {
             try
             {
-                using (ProjectExplorerForm dlg = new ProjectExplorerForm(_usage, _history))
+                using (ProjectExplorerForm dlg = new ProjectExplorerForm(_usage, _history, _cfg.BudgetDaily, _cfg.BudgetMonthly, _history.MonthToDateCost(DateTime.Now)))
                 {
                     dlg.ShowDialog();
                 }
@@ -1404,17 +1584,24 @@ namespace ClaudeUsageWidget
                 _scanner.ScanGemini != _cfg.ScanGemini ||
                 _scanner.ScanCodex != _cfg.ScanCodex ||
                 _scanner.ScanGeminiCli != _cfg.ScanGeminiCli ||
-                _scanner.ScanOpenCode != _cfg.ScanOpenCode;
+                _scanner.ScanOpenCode != _cfg.ScanOpenCode ||
+                _scanner.ScanCline != _cfg.ScanCline ||
+                _scanner.ScanCopilot != _cfg.ScanCopilot ||
+                !string.Equals(_scanner.CustomJsonlDirs ?? "", _cfg.CustomJsonlDirs ?? "", StringComparison.OrdinalIgnoreCase);
             _scanner.ScanClaude = _cfg.ScanClaude;
             _scanner.ScanGemini = _cfg.ScanGemini;
             _scanner.ScanCodex = _cfg.ScanCodex;
             _scanner.ScanGeminiCli = _cfg.ScanGeminiCli;
             _scanner.ScanOpenCode = _cfg.ScanOpenCode;
+            _scanner.ScanCline = _cfg.ScanCline;
+            _scanner.ScanCopilot = _cfg.ScanCopilot;
+            _scanner.CustomJsonlDirs = _cfg.CustomJsonlDirs;
             if (scanTogglesChanged) _scanner.ResetWithPricing(_pricing);
             _scanner.AntigravityQuota5hTokens = _cfg.AntigravityQuota5hTokens;
             _scanner.AntigravityQuota7dTokens = _cfg.AntigravityQuota7dTokens;
             StartWatchers();
             L.Set(_cfg.Language);
+            AudioAlert.CustomWavPath = _cfg.CustomSoundPath;
             ApplyCurrencyOpts();
             ApplyLanguage();
             _scanner.SetTrackProjects(true);
@@ -1502,7 +1689,7 @@ namespace ClaudeUsageWidget
                         FileSystemEventHandler h = delegate(object s, FileSystemEventArgs e)
                         {
                             lock (_dirty) _dirty.Add(e.FullPath);
-                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);   // paling lambat 2 dtk sekali
+                            PostUi(delegate { if (!_debounce.Enabled) _debounce.Start(); });   // paling lambat 2 dtk sekali
                         };
                         _logWatcher.Changed += h; _logWatcher.Created += h;
                         _logWatcher.Renamed += delegate(object s, RenamedEventArgs e) { h(s, e); };
@@ -1518,11 +1705,11 @@ namespace ClaudeUsageWidget
                 FileSystemEventHandler h2 = delegate(object s, FileSystemEventArgs e)
                 {
                     if (string.Equals(e.Name, "ratelimits.json", StringComparison.OrdinalIgnoreCase))
-                        _ui.Post(delegate { ReloadLimits(); }, null);
+                        PostUi(delegate { ReloadLimits(); });
                     else if (string.Equals(e.Name, "notify.json", StringComparison.OrdinalIgnoreCase))
-                        _ui.Post(delegate { HandleNotify(); }, null);
+                        PostUi(delegate { HandleNotify(); });
                     else if (string.Equals(e.Name, "command.json", StringComparison.OrdinalIgnoreCase))
-                        _ui.Post(delegate { HandleExternalCommand(); }, null);
+                        PostUi(delegate { HandleExternalCommand(); });
                 };
                 _appWatcher.Changed += h2; _appWatcher.Created += h2;
                 _appWatcher.Renamed += delegate(object s, RenamedEventArgs e) { h2(s, e); };
@@ -1542,7 +1729,7 @@ namespace ClaudeUsageWidget
                         FileSystemEventHandler hG = delegate(object s, FileSystemEventArgs e)
                         {
                             lock (_dirty) _dirty.Add(e.FullPath);
-                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                            PostUi(delegate { if (!_debounce.Enabled) _debounce.Start(); });
                         };
                         _geminiWatcher.Changed += hG; _geminiWatcher.Created += hG;
                         _geminiWatcher.Renamed += delegate(object s, RenamedEventArgs e) { hG(s, e); };
@@ -1564,7 +1751,7 @@ namespace ClaudeUsageWidget
                         FileSystemEventHandler hC = delegate(object s, FileSystemEventArgs e)
                         {
                             lock (_dirty) _dirty.Add(e.FullPath);
-                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                            PostUi(delegate { if (!_debounce.Enabled) _debounce.Start(); });
                         };
                         _codexWatcher.Changed += hC; _codexWatcher.Created += hC;
                         _codexWatcher.Renamed += delegate(object s, RenamedEventArgs e) { hC(s, e); };
@@ -1586,7 +1773,7 @@ namespace ClaudeUsageWidget
                         FileSystemEventHandler hGc = delegate(object s, FileSystemEventArgs e)
                         {
                             lock (_dirty) _dirty.Add(e.FullPath);
-                            _ui.Post(delegate { if (!_debounce.Enabled) _debounce.Start(); }, null);
+                            PostUi(delegate { if (!_debounce.Enabled) _debounce.Start(); });
                         };
                         _gemCliWatcher.Changed += hGc; _gemCliWatcher.Created += hGc;
                         _gemCliWatcher.Renamed += delegate(object s, RenamedEventArgs e) { hGc(s, e); };
@@ -1600,9 +1787,9 @@ namespace ClaudeUsageWidget
                 Directory.CreateDirectory(Paths.HooksDir);
                 _hooksWatcher = new FileSystemWatcher(Paths.HooksDir, "*.txt");
                 _hooksWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
-                FileSystemEventHandler hHooks = delegate { _ui.Post(delegate { SyncHookSessionsAndRefresh(); }, null); };
+                FileSystemEventHandler hHooks = delegate { PostUi(delegate { SyncHookSessionsAndRefresh(); }); };
                 _hooksWatcher.Created += hHooks; _hooksWatcher.Changed += hHooks; _hooksWatcher.Deleted += hHooks;
-                _hooksWatcher.Renamed += delegate(object s, RenamedEventArgs e) { SyncHookSessionsAndRefresh(); };
+                _hooksWatcher.Renamed += delegate(object s, RenamedEventArgs e) { PostUi(delegate { SyncHookSessionsAndRefresh(); }); };
                 _hooksWatcher.EnableRaisingEvents = true;
             }
             catch (Exception ex) { Log.Write("watch.hooks", ex); }
@@ -1736,14 +1923,14 @@ namespace ClaudeUsageWidget
                     }
                 }
                 catch (Exception ex) { err = ex.GetType().Name; }
-                _ui.Post(delegate
+                PostUi(delegate
                 {
                     _probeBusy = false;
                     _probeStatus = err == null ? null : L.T("probe.failed", err);
                     _probeFailed = err;
                     if (err != null) Log.Write("probe: " + err);
                     ReloadLimits();
-                }, null);
+                });
             });
         }
 
@@ -1781,7 +1968,7 @@ namespace ClaudeUsageWidget
                 bool ok = await AntigravityRateFetcher.FetchAndSaveAsync().ConfigureAwait(false);
                 if (ok)
                 {
-                    _ui.Post(delegate { ReloadLimits(); }, null);
+                    PostUi(delegate { ReloadLimits(); });
                 }
             });
         }
@@ -1809,7 +1996,7 @@ namespace ClaudeUsageWidget
                     catch (Exception ex) { Log.Write("scan", ex); }
                     UsageSnapshot snap = _scanner.Snapshot();
                     if (snap.Ready) _history.Merge(snap.Days);   // hanya setelah pindai lengkap (bukan saat hitung ulang)
-                    _ui.Post(delegate
+                    PostUi(delegate
                     {
                         _usage = snap;
                         SyncUsageDerivedLimits(snap);
@@ -1818,9 +2005,10 @@ namespace ClaudeUsageWidget
                         RunBudget();
                         CheckBurnRate();
                         CheckContextAlert();
+                        CheckCacheEfficiencyAlert();
                         CheckConfirmNotifications(snap);
                         RunAlerts();
-                    }, null);
+                    });
                 } while (_scanAgain);
                 Interlocked.Exchange(ref _scanBusy, 0);
                 // Sekali saja setelah scan awal (yang membaca ratusan MB): bersihkan buffer besar & kembalikan memori ke OS.
@@ -1921,6 +2109,8 @@ namespace ClaudeUsageWidget
             vm.ScanCodex = _cfg.ScanCodex;
             vm.ScanGeminiCli = _cfg.ScanGeminiCli;
             vm.ScanOpenCode = _cfg.ScanOpenCode;
+            vm.ScanCline = _cfg.ScanCline;
+            vm.ScanCopilot = _cfg.ScanCopilot;
             vm.Ollama = OllamaProbe.Current;
             vm.ProbeStatus = _probeStatus;
             vm.History = _history.Series(_cfg.HistoryDays);
@@ -1969,7 +2159,7 @@ namespace ClaudeUsageWidget
             string proj = string.IsNullOrEmpty(newlyConfirmed.Project) ? newlyConfirmed.Provider : newlyConfirmed.Project;
             string text = L.T("notify.confirm.sess", newlyConfirmed.Provider, proj);
             Log.Write("notify confirm " + newlyConfirmed.Provider + " " + proj);
-            ShowBalloon(text, ToolTipIcon.Info);
+            ShowBalloon(text, ToolTipIcon.Info, proj, newlyConfirmed.Cwd, newlyConfirmed.Provider);
             bool quiet = IsQuietNow();
             if (_cfg.AudioAlertsEnabled && !quiet) AudioAlert.PlayPrompt();
             if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "AI Confirmation Required", text);
@@ -2172,10 +2362,12 @@ namespace ClaudeUsageWidget
         {
             try
             {
+                _disposed = true;
                 if (_float.Visible) SavePosition();
                 _tick.Stop(); _debounce.Stop(); _fsTimer.Stop();
                 if (_prewarmTimer != null) { _prewarmTimer.Stop(); _prewarmTimer.Dispose(); _prewarmTimer = null; }
                 if (_settingsForm != null && !_settingsForm.IsDisposed) { _settingsForm.Dispose(); _settingsForm = null; }
+                if (_popup != null && !_popup.IsDisposed) { _popup.Dispose(); _popup = null; }
                 if (_hotkey != null) _hotkey.Dispose();
                 if (_logWatcher != null) _logWatcher.Dispose();
                 if (_appWatcher != null) _appWatcher.Dispose();

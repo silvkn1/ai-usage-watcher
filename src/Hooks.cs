@@ -364,11 +364,6 @@ namespace ClaudeUsageWidget
             return map;
         }
 
-        public static List<string> GetActiveHookSessionIds(int maxAgeMinutes = 15)
-        {
-            return new List<string>(GetActiveHookSessions(maxAgeMinutes).Keys);
-        }
-
         private static string ReadStdin(int timeoutMs)
         {
             try

@@ -123,9 +123,23 @@ namespace ClaudeUsageWidget
         public bool ZenMode { get; set; }
         public long ContextWindowOverride { get; set; } // 0 = auto, 200000, 400000, 1000000
 
+        // Cache-efficiency drop alert, Custom WAV, Ekspansi Scanner (Cline/Copilot/Custom JSONL)
+        public bool CacheDropAlertEnabled { get; set; }
+        public int CacheDropMinPercent { get; set; }
+        public string CustomSoundPath { get; set; }
+        public bool ScanCline { get; set; }
+        public bool ScanCopilot { get; set; }
+        public string CustomJsonlDirs { get; set; }
+
         public AppConfig()
         {
             WidgetScale = 1.0;
+            CacheDropAlertEnabled = true;
+            CacheDropMinPercent = 30;
+            CustomSoundPath = "";
+            ScanCline = true;
+            ScanCopilot = true;
+            CustomJsonlDirs = "";
             AutoUpdateCheck = true;
             CardLayout = "auto";
             MiniPillMode = "all";
@@ -244,6 +258,9 @@ namespace ClaudeUsageWidget
             else WidgetScale = 1.30;
             if (ContextWindowOverride != 200000L && ContextWindowOverride != 400000L && ContextWindowOverride != 1000000L)
                 ContextWindowOverride = 0;
+            if (CacheDropMinPercent < 5 || CacheDropMinPercent > 95) CacheDropMinPercent = 30;
+            if (CustomSoundPath == null) CustomSoundPath = "";
+            if (CustomJsonlDirs == null) CustomJsonlDirs = "";
             ShowInTaskbar = false;
         }
 
@@ -259,7 +276,8 @@ namespace ClaudeUsageWidget
             "ProbeEnabled", "ProbeMinMinutes", "ProbeModel",
             "CurrencyCustomEnabled", "CurrencySymbol", "CurrencyRate", "CurrencyShowBoth",
             "AudioAlertsEnabled", "ContextAlertEnabled", "BurnRateAlertEnabled", "BurnRateThresholdTokens",
-            "ScanClaude", "ScanGemini", "ScanCodex", "ScanGeminiCli", "ScanOpenCode",
+            "CacheDropAlertEnabled", "CacheDropMinPercent",
+            "ScanClaude", "ScanGemini", "ScanCodex", "ScanGeminiCli", "ScanOpenCode", "ScanCline", "ScanCopilot",
             "AntigravityQuota5hTokens", "AntigravityQuota7dTokens", "OllamaEnabled",
             "Backdrop", "CardLayout", "MiniPillMode", "ShowContextBar",
             "QuietHoursEnabled", "QuietStartHour", "QuietEndHour", "AlertCooldownMinutes",
@@ -279,11 +297,124 @@ namespace ClaudeUsageWidget
             clone.MirrorEnabled = false;
             clone.MirrorFilePath = "";
             clone.ExtraClaudeDirs = "";
+            clone.CustomSoundPath = "";
+            clone.CustomJsonlDirs = "";
             clone.ScanWsl = false;
             clone.OllamaPort = 11434;
             clone.AutoUpdateCheck = true;
             clone.LastDigestKey = "";
             return J.Ser.Serialize(clone);
+        }
+
+        internal static string SanitizeProfileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            string t = name.Trim();
+            if (t == "." || t == ".." || t.Length > 40) return null;
+            for (int i = 0; i < t.Length; i++)
+            {
+                char c = t[i];
+                if (!(char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == ' ')) return null;
+            }
+            return t;
+        }
+
+        internal static System.Collections.Generic.List<string> ListProfileNames()
+        {
+            return ListProfileNamesInDir(Paths.ProfilesDir);
+        }
+
+        internal static System.Collections.Generic.List<string> ListProfileNamesInDir(string dir)
+        {
+            System.Collections.Generic.List<string> list = new System.Collections.Generic.List<string>();
+            try
+            {
+                if (!Directory.Exists(dir)) return list;
+                foreach (string f in Directory.GetFiles(dir, "*.json"))
+                {
+                    string name = SanitizeProfileName(Path.GetFileNameWithoutExtension(f));
+                    if (name != null) list.Add(name);
+                }
+                list.Sort(StringComparer.OrdinalIgnoreCase);
+            }
+            catch { }
+            return list;
+        }
+
+        internal bool SaveNamedProfile(string name)
+        {
+            return SaveNamedProfileInDir(name, Paths.ProfilesDir);
+        }
+
+        internal bool SaveNamedProfileInDir(string name, string dir)
+        {
+            string safe = SanitizeProfileName(name);
+            if (safe == null) return false;
+            try
+            {
+                Directory.CreateDirectory(dir);
+                AtomicFile.Write(Path.Combine(dir, safe + ".json"), ExportProfileJson());
+                return true;
+            }
+            catch (Exception ex) { Log.Write("profile.save", ex); return false; }
+        }
+
+        internal AppConfig LoadNamedProfile(string name)
+        {
+            return LoadNamedProfileInDir(name, Paths.ProfilesDir);
+        }
+
+        internal AppConfig LoadNamedProfileInDir(string name, string dir)
+        {
+            string safe = SanitizeProfileName(name);
+            if (safe == null) return null;
+            string p = Path.Combine(dir, safe + ".json");
+            if (!File.Exists(p)) return null;
+            return ImportProfileJson(File.ReadAllText(p, Encoding.UTF8), this);
+        }
+
+        internal static bool DeleteNamedProfileInDir(string name, string dir)
+        {
+            string safe = SanitizeProfileName(name);
+            if (safe == null) return false;
+            string p = Path.Combine(dir, safe + ".json");
+            if (!File.Exists(p)) return false;
+            try { File.Delete(p); return true; } catch { return false; }
+        }
+
+        internal static AppConfig BuildPresetProfile(string presetKey, AppConfig current)
+        {
+            string baseJson = current != null ? J.Ser.Serialize(current) : J.Ser.Serialize(new AppConfig());
+            AppConfig c = J.Ser.Deserialize<AppConfig>(baseJson);
+            if (c == null) c = new AppConfig();
+            if (string.Equals(presetKey, "focus", StringComparison.OrdinalIgnoreCase))
+            {
+                c.Compact = true;
+                c.ZenMode = true;
+                c.MiniPillMode = "highest";
+                c.ShowContextBar = true;
+            }
+            else if (string.Equals(presetKey, "work", StringComparison.OrdinalIgnoreCase))
+            {
+                c.Compact = false;
+                c.ZenMode = false;
+                c.CardLayout = "3col";
+                c.ScanClaude = true; c.ScanGemini = true; c.ScanCodex = true;
+                c.ScanGeminiCli = true; c.ScanOpenCode = true; c.ScanCline = true; c.ScanCopilot = true;
+                c.ShowContextBar = true;
+                c.ShowProjects = true;
+            }
+            else if (string.Equals(presetKey, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                c.Compact = false;
+                c.ZenMode = false;
+                c.CardLayout = "auto";
+                c.MiniPillMode = "all";
+                c.ScanClaude = true; c.ScanGemini = true; c.ScanCodex = true;
+                c.ScanGeminiCli = true; c.ScanOpenCode = true; c.ScanCline = true; c.ScanCopilot = true;
+            }
+            c.Normalize();
+            return c;
         }
 
         public static AppConfig ImportProfileJson(string json, AppConfig preserveSecretsFrom)

@@ -117,6 +117,35 @@ namespace ClaudeUsageWidget
         public static string CommandFile { get { return Path.Combine(AppDir, "command.json"); } }
         public static string GeminiCliTmpDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".gemini", "tmp"); } }
         public static string OpenCodeDataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "opencode"); } }
+        public static string ProfilesDir { get { return Path.Combine(AppDir, "profiles"); } }
+
+        public static List<string> ClineTaskRoots()
+        {
+            List<string> r = new List<string>();
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string[] candidates = new[]
+            {
+                Path.Combine(appData, @"Code\User\globalStorage\saoudrizwan.claude-dev\tasks"),
+                Path.Combine(appData, @"Code\User\globalStorage\rooveterinaryinc.roo-cline\tasks"),
+                Path.Combine(appData, @"Cursor\User\globalStorage\saoudrizwan.claude-dev\tasks"),
+                Path.Combine(appData, @"Cursor\User\globalStorage\rooveterinaryinc.roo-cline\tasks")
+            };
+            for (int i = 0; i < candidates.Length; i++)
+                if (Directory.Exists(candidates[i])) r.Add(candidates[i]);
+            return r;
+        }
+
+        public static List<string> CopilotDataDirs()
+        {
+            List<string> r = new List<string>();
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string copilotCli = Path.Combine(home, ".copilot");
+            if (Directory.Exists(copilotCli)) r.Add(copilotCli);
+            string vsWs = Path.Combine(appData, @"Code\User\workspaceStorage");
+            if (Directory.Exists(vsWs)) r.Add(vsWs);
+            return r;
+        }
         public static string LogFile { get { return Path.Combine(AppDir, "widget.log"); } }
         public static string StatusExportJson { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ai-usage-status.json"); } }
         public static string AppStatusJson { get { return Path.Combine(AppDir, "status.json"); } }
@@ -154,6 +183,8 @@ namespace ClaudeUsageWidget
     /// <summary>Akses aman ke hasil JavaScriptSerializer (Dictionary/ArrayList) - toleran terhadap field hilang/berubah.</summary>
     internal static class J
     {
+        // JavaScriptSerializer is not thread-safe across concurrent threads; keep one instance per thread.
+        [ThreadStatic]
         private static JavaScriptSerializer _ser;
         public static JavaScriptSerializer Ser
         {
@@ -392,6 +423,10 @@ namespace ClaudeUsageWidget
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hWnd);
         [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
@@ -403,9 +438,60 @@ namespace ClaudeUsageWidget
             return null;
         }
 
+        internal static int ScoreWindowMatch(string title, string hint, string cwd, string provider)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return 0;
+            bool matched = !string.IsNullOrWhiteSpace(hint) && title.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!matched && !string.IsNullOrWhiteSpace(cwd))
+            {
+                string leaf = Path.GetFileName(cwd.TrimEnd('\\', '/'));
+                if (!string.IsNullOrWhiteSpace(leaf) && title.IndexOf(leaf, StringComparison.OrdinalIgnoreCase) >= 0)
+                    matched = true;
+                else
+                {
+                    // Also check worktree grandparent name (e.g. proj/.worktrees/branch -> proj)
+                    string parent = Path.GetDirectoryName(cwd.TrimEnd('\\', '/'));
+                    string gparent = !string.IsNullOrEmpty(parent) ? Path.GetDirectoryName(parent) : null;
+                    string gname = !string.IsNullOrEmpty(gparent) ? Path.GetFileName(gparent) : null;
+                    if (!string.IsNullOrWhiteSpace(gname) && title.IndexOf(gname, StringComparison.OrdinalIgnoreCase) >= 0)
+                        matched = true;
+                }
+            }
+            if (!matched) return 0;
+
+            int score = 1;
+            bool isIdeWin = title.IndexOf("Visual Studio Code", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("Cursor", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("Windsurf", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isTermWin = title.IndexOf("Terminal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("PowerShell", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("pwsh", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                title.IndexOf("cmd.exe", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (isIdeWin || isTermWin) score = 2;
+            if (!string.IsNullOrEmpty(provider))
+            {
+                if (provider.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0)
+                    score = 4;
+                else if ((provider.IndexOf("Cline", StringComparison.OrdinalIgnoreCase) >= 0 || provider.IndexOf("Copilot", StringComparison.OrdinalIgnoreCase) >= 0) &&
+                    isIdeWin)
+                    score = 4;
+                else if (isTermWin)
+                    score = 3;
+            }
+            return score;
+        }
+
         public static bool FocusWindow(string hint)
         {
-            if (string.IsNullOrWhiteSpace(hint)) return false;
+            return FocusWindow(hint, null, null);
+        }
+
+        public static bool FocusWindow(string hint, string cwd, string provider)
+        {
+            if (string.IsNullOrWhiteSpace(hint) && string.IsNullOrWhiteSpace(cwd)) return false;
             try
             {
                 uint selfPid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
@@ -421,21 +507,29 @@ namespace ClaudeUsageWidget
                     if (len <= 0 || len > 512) return true;
                     StringBuilder sb = new StringBuilder(len + 1);
                     if (GetWindowText(hWnd, sb, sb.Capacity) <= 0) return true;
-                    string title = sb.ToString();
-                    if (MatchWindowTitleScore(title, hint) == null) return true;
-                    int sc = 1;
-                    if (title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        title.IndexOf("Visual Studio Code", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        title.IndexOf("Cursor", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        title.IndexOf("Terminal", StringComparison.OrdinalIgnoreCase) >= 0)
-                        sc = 2;
+                    int sc = ScoreWindowMatch(sb.ToString(), hint, cwd, provider);
                     if (sc > bestScore) { bestScore = sc; best = hWnd; }
-                    return sc < 2;
+                    return sc < 4;
                 }, IntPtr.Zero);
                 if (best != IntPtr.Zero)
                 {
                     if (IsIconic(best)) ShowWindow(best, 9); // SW_RESTORE
-                    return SetForegroundWindow(best);
+                    IntPtr fg = GetForegroundWindow();
+                    uint dummy;
+                    uint fgTid = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, out dummy) : 0;
+                    uint curTid = GetCurrentThreadId();
+                    bool attached = false;
+                    try
+                    {
+                        if (fgTid != 0 && fgTid != curTid)
+                            attached = AttachThreadInput(curTid, fgTid, true);
+                        BringWindowToTop(best);
+                        return SetForegroundWindow(best);
+                    }
+                    finally
+                    {
+                        if (attached) AttachThreadInput(curTid, fgTid, false);
+                    }
                 }
             }
             catch (Exception ex) { Log.Write("focus.window", ex); }

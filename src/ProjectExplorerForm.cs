@@ -26,7 +26,22 @@ namespace ClaudeUsageWidget
         private DayStat[] _days = new DayStat[0];
         private readonly ToolTip _tip = new ToolTip();
         private int _hoverIdx = -1;
-        private static readonly string[] Providers = { "Claude", "Antigravity", "Codex", "Gemini CLI", "OpenCode" };
+        private float _dpiScale;
+        private double _dailyTarget, _monthlyBudget, _monthCost;
+        private string _providerFilter = "";
+        private static readonly string[] Providers = { "Claude", "Antigravity", "Codex", "Gemini CLI", "OpenCode", "Cline", "Copilot" };
+
+        private float GetDpiScale()
+        {
+            if (_dpiScale <= 0f) { using (Graphics g = CreateGraphics()) _dpiScale = g.DpiX / 96f; }
+            return _dpiScale;
+        }
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            _dpiScale = 0f;
+        }
 
         public ProviderTrendsControl()
         {
@@ -40,12 +55,28 @@ namespace ClaudeUsageWidget
             Invalidate();
         }
 
+        public void SetBudgetForecast(double dailyTarget, double monthlyBudget, double monthCost)
+        {
+            _dailyTarget = dailyTarget;
+            _monthlyBudget = monthlyBudget;
+            _monthCost = monthCost;
+            Invalidate();
+        }
+
+        public void SetProviderFilter(string provider)
+        {
+            _providerFilter = provider ?? "";
+            Invalidate();
+        }
+
         private static Color ColorForProvider(string prov)
         {
             if (prov == "Antigravity") return Palette.AntigravityColor;
             if (prov == "Codex") return Palette.CodexColor;
             if (prov == "Gemini CLI") return Palette.GeminiCliColor;
             if (prov == "OpenCode") return Palette.OpenCodeColor;
+            if (prov == "Cline") return Palette.ClineColor;
+            if (prov == "Copilot") return Palette.CopilotColor;
             return Palette.ClaudeColor;
         }
 
@@ -53,7 +84,7 @@ namespace ClaudeUsageWidget
         {
             base.OnMouseMove(e);
             if (_days.Length == 0) return;
-            float s; using (Graphics g = CreateGraphics()) { s = g.DpiX / 96f; }
+            float s = GetDpiScale();
             int padL = (int)(16 * s), padR = (int)(16 * s);
             int avail = Width - padL - padR;
             int idx = -1;
@@ -69,12 +100,17 @@ namespace ClaudeUsageWidget
                 {
                     DayStat d = _days[idx];
                     List<string> parts = new List<string>();
+                    bool hasFilter = !string.IsNullOrEmpty(_providerFilter);
+                    double filteredSum = 0;
                     foreach (string p in Providers)
                     {
+                        if (hasFilter && !string.Equals(p, _providerFilter, StringComparison.OrdinalIgnoreCase)) continue;
                         double pv = d.CostFor(p);
-                        if (pv > 0.001) parts.Add(p + " " + Fmt.UsdShort(pv));
+                        if (pv > 0.001) { parts.Add(p + " " + Fmt.UsdShort(pv)); filteredSum += pv; }
                     }
-                    string detail = parts.Count > 0 ? string.Join(" · ", parts.ToArray()) : Fmt.UsdShort(d.Cost);
+                    string detail = parts.Count > 0
+                        ? string.Join(" · ", parts.ToArray())
+                        : Fmt.UsdShort(hasFilter ? filteredSum : d.Cost);
                     _tip.SetToolTip(this, string.Format("{0:yyyy-MM-dd}: {1}", d.Date, detail));
                 }
                 else _tip.SetToolTip(this, null);
@@ -105,17 +141,20 @@ namespace ClaudeUsageWidget
             double[] provTotals = new double[Providers.Length];
             double peak = 0;
             bool anyProvData = false;
+            bool hasProvFilter = !string.IsNullOrEmpty(_providerFilter);
             for (int i = 0; i < _days.Length; i++)
             {
                 double sum = 0;
                 for (int pi = 0; pi < Providers.Length; pi++)
                 {
+                    if (hasProvFilter && !string.Equals(Providers[pi], _providerFilter, StringComparison.OrdinalIgnoreCase)) continue;
                     double v = _days[i].CostFor(Providers[pi]);
                     if (v > 0) { anyProvData = true; provTotals[pi] += v; sum += v; }
                 }
-                if (sum == 0 && _days[i].Cost > 0) sum = _days[i].Cost;
+                if (!hasProvFilter && sum == 0 && _days[i].Cost > 0) sum = _days[i].Cost;
                 if (sum > peak) peak = sum;
             }
+            double scalePeak = _dailyTarget > 0 ? Math.Max(peak, _dailyTarget) : peak;
 
             using (Font fHead = new Font("Segoe UI Semibold", 9.5f))
             using (Font fSmall = new Font("Segoe UI", 8.25f))
@@ -123,9 +162,17 @@ namespace ClaudeUsageWidget
                 List<string> sumParts = new List<string>();
                 for (int pi = 0; pi < Providers.Length; pi++)
                     if (provTotals[pi] > 0) sumParts.Add(Providers[pi] + ": " + Fmt.UsdShort(provTotals[pi]));
+                string summaryStr = string.Join("  ·  ", sumParts.ToArray());
                 string headText = anyProvData
-                    ? L.T("proj.trends.summary", string.Join("  ·  ", sumParts.ToArray()))
+                    ? (_days.Length == 30 ? L.T("proj.trends.summary", summaryStr) : L.T("proj.trends.summary_n", _days.Length, summaryStr))
                     : L.T("proj.trends.empty");
+                if (_monthlyBudget > 0 || _monthCost > 0)
+                {
+                    double eom = BudgetForecast.EstimateMonthEnd(_monthCost, _days, DateTime.Now);
+                    if (eom > 0) headText += "  |  " + L.T("proj.trends.eom", Fmt.Usd(eom));
+                }
+                if (_dailyTarget > 0)
+                    headText += "  |  " + L.T("proj.trends.target", Fmt.UsdShort(_dailyTarget));
                 TextRenderer.DrawText(g, headText, fHead, new Rectangle(pad, pad, Width - pad * 2, (int)(20 * s)), Palette.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
 
@@ -137,7 +184,7 @@ namespace ClaudeUsageWidget
                 using (Pen axis = new Pen(Palette.Border, 1f))
                     g.DrawLine(axis, pad, chartBot, Width - pad, chartBot);
 
-                if (peak > 0)
+                if (scalePeak > 0)
                 {
                     for (int i = 0; i < _days.Length; i++)
                     {
@@ -146,18 +193,19 @@ namespace ClaudeUsageWidget
                         bool drewSegment = false;
                         for (int pi = 0; pi < Providers.Length; pi++)
                         {
+                            if (hasProvFilter && !string.Equals(Providers[pi], _providerFilter, StringComparison.OrdinalIgnoreCase)) continue;
                             double pv = _days[i].CostFor(Providers[pi]);
                             if (pv <= 0) continue;
                             drewSegment = true;
-                            float sh = (float)(pv / peak * (chartBot - chartTop));
+                            float sh = (float)(pv / scalePeak * (chartBot - chartTop));
                             if (sh < 1.5f) sh = 1.5f;
                             using (SolidBrush br = new SolidBrush(ColorForProvider(Providers[pi])))
                                 g.FillRectangle(br, bx, curY - sh, bw, sh);
                             curY -= sh;
                         }
-                        if (!drewSegment && _days[i].Cost > 0)
+                        if (!hasProvFilter && !drewSegment && _days[i].Cost > 0)
                         {
-                            float sh = (float)(_days[i].Cost / peak * (chartBot - chartTop));
+                            float sh = (float)(_days[i].Cost / scalePeak * (chartBot - chartTop));
                             if (sh < 2f) sh = 2f;
                             using (SolidBrush br = new SolidBrush(Palette.Accent))
                                 g.FillRectangle(br, bx, curY - sh, bw, sh);
@@ -168,6 +216,16 @@ namespace ClaudeUsageWidget
                                 g.DrawRectangle(hp, bx, chartTop, bw, chartBot - chartTop);
                         }
                     }
+
+                    if (_dailyTarget > 0)
+                    {
+                        float ty = chartBot - (float)(_dailyTarget / scalePeak * (chartBot - chartTop));
+                        using (Pen tp = new Pen(Color.FromArgb(200, Palette.Amber), Math.Max(1f, s)))
+                        {
+                            tp.DashStyle = DashStyle.Dash;
+                            g.DrawLine(tp, pad, ty, Width - pad, ty);
+                        }
+                    }
                 }
 
                 // Legend row
@@ -175,11 +233,14 @@ namespace ClaudeUsageWidget
                 int ly = Height - legH;
                 for (int pi = 0; pi < Providers.Length; pi++)
                 {
-                    using (SolidBrush lb = new SolidBrush(ColorForProvider(Providers[pi])))
+                    bool activeProv = !hasProvFilter || string.Equals(Providers[pi], _providerFilter, StringComparison.OrdinalIgnoreCase);
+                    Color swCol = activeProv ? ColorForProvider(Providers[pi]) : ThemeUtil.Blend(ColorForProvider(Providers[pi]), Palette.Track, 0.72);
+                    Color lblCol = activeProv ? Palette.Dim : Palette.Gray;
+                    using (SolidBrush lb = new SolidBrush(swCol))
                         g.FillRectangle(lb, lx, ly + (int)(5 * s), (int)(10 * s), (int)(10 * s));
                     lx += (int)(14 * s);
                     int tw = TextRenderer.MeasureText(g, Providers[pi], fSmall, new Size(200, 24), TextFormatFlags.NoPadding).Width + (int)(12 * s);
-                    TextRenderer.DrawText(g, Providers[pi], fSmall, new Rectangle(lx, ly, tw, (int)(20 * s)), Palette.Dim,
+                    TextRenderer.DrawText(g, Providers[pi], fSmall, new Rectangle(lx, ly, tw, (int)(20 * s)), lblCol,
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                     lx += tw;
                 }
@@ -196,6 +257,19 @@ namespace ClaudeUsageWidget
         private DayStat[] _days;
         private readonly ToolTip _tip = new ToolTip();
         private int _hoverIdx = -1;
+        private float _dpiScale;
+
+        private float GetDpiScale()
+        {
+            if (_dpiScale <= 0f) { using (Graphics g = CreateGraphics()) _dpiScale = g.DpiX / 96f; }
+            return _dpiScale;
+        }
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            _dpiScale = 0f;
+        }
 
         public ActivityHeatmapControl()
         {
@@ -245,8 +319,7 @@ namespace ClaudeUsageWidget
 
         private int HitTest(Point p)
         {
-            float s;
-            using (Graphics g = CreateGraphics()) { s = g.DpiX / 96f; }
+            float s = GetDpiScale();
             int boxSize = (int)Math.Round(18 * s);
             int gap = (int)Math.Round(4 * s);
             int startX = (int)Math.Round(12 * s);
@@ -380,6 +453,9 @@ namespace ClaudeUsageWidget
         private readonly Panel _searchPanel = new Panel();
         private readonly Label _searchLabel = new Label();
         private readonly TextBox _searchBox = new TextBox();
+        private readonly Label _lblProvFilter = new Label();
+        private readonly ComboBox _providerFilter = new ComboBox();
+        private static readonly string[] FilterProviders = { "", "Claude", "Antigravity", "Codex", "Gemini CLI", "OpenCode", "Cline", "Copilot" };
         private readonly Panel _summaryPanel = new Panel();
         private readonly Label _summaryLabel = new Label();
         private readonly ListView _list = new ListView();
@@ -396,10 +472,11 @@ namespace ClaudeUsageWidget
         private int _sortCol = 3;      // default: 7-Day Cost
         private bool _sortAsc = false; // default: descending
 
-        public ProjectExplorerForm(UsageSnapshot usage, HistoryStore history)
+        public ProjectExplorerForm(UsageSnapshot usage, HistoryStore history, double budgetDaily = 0, double budgetMonthly = 0, double monthCost = 0)
         {
             _usageRef = usage;
             _historyRef = history;
+            _trends.SetBudgetForecast(budgetDaily, budgetMonthly, monthCost);
             Text = L.T("proj.window.title");
             Font = new Font("Segoe UI", 9f);
             StartPosition = FormStartPosition.CenterScreen;
@@ -569,15 +646,36 @@ namespace ClaudeUsageWidget
             _searchLabel.TextAlign = ContentAlignment.MiddleLeft;
             _searchLabel.Padding = new Padding(0, 0, (int)Math.Round(8 * s), 0);
 
-            _searchBox.Width = (int)Math.Round(240 * s);
+            _searchBox.Width = (int)Math.Round(220 * s);
             _searchBox.Dock = DockStyle.Left;
             _searchBox.BackColor = Palette.Surface;
             _searchBox.ForeColor = Palette.Text;
             _searchBox.BorderStyle = BorderStyle.FixedSingle;
-            _searchBox.TextChanged += delegate { PopulateList(); };
+            _searchBox.TextChanged += delegate { OnFilterChanged(); };
 
+            _lblProvFilter.Text = L.T("proj.filter.provider");
+            _lblProvFilter.AutoSize = true;
+            _lblProvFilter.ForeColor = Palette.Dim;
+            _lblProvFilter.Dock = DockStyle.Left;
+            _lblProvFilter.TextAlign = ContentAlignment.MiddleLeft;
+            _lblProvFilter.Padding = new Padding((int)Math.Round(12 * s), 0, (int)Math.Round(6 * s), 0);
+
+            _providerFilter.DropDownStyle = ComboBoxStyle.DropDownList;
+            _providerFilter.Dock = DockStyle.Left;
+            _providerFilter.Width = (int)Math.Round(135 * s);
+            _providerFilter.FlatStyle = FlatStyle.Flat;
+            _providerFilter.BackColor = Palette.Surface;
+            _providerFilter.ForeColor = Palette.Text;
+            _providerFilter.Items.Add(L.T("proj.filter.all"));
+            for (int pi = 1; pi < FilterProviders.Length; pi++) _providerFilter.Items.Add(FilterProviders[pi]);
+            _providerFilter.SelectedIndex = 0;
+            _providerFilter.SelectedIndexChanged += delegate { OnFilterChanged(); };
+
+            _searchPanel.Controls.Add(_providerFilter);
+            _searchPanel.Controls.Add(_lblProvFilter);
             _searchPanel.Controls.Add(_searchBox);
             _searchPanel.Controls.Add(_searchLabel);
+            _searchPanel.Height = Math.Max(_searchPanel.Height, _providerFilter.PreferredHeight + (int)Math.Round(8 * s));
 
             // List View
             _list.Dock = DockStyle.Fill;
@@ -666,7 +764,6 @@ namespace ClaudeUsageWidget
 
             _projectsPage.Controls.Add(_list);
             _projectsPage.Controls.Add(_summaryPanel);
-            _projectsPage.Controls.Add(_searchPanel);
             _projectsPage.Controls.Add(_heatmap);
 
             // Trends page (with 7d / 30d / 90d range selector)
@@ -728,14 +825,26 @@ namespace ClaudeUsageWidget
             _sessionList.Columns.Add(L.T("proj.sess.anomaly"), (int)Math.Round(110 * s), HorizontalAlignment.Left);
             PopulateSessionsList(usage);
             _sessMenu = new ContextMenuStrip();
+            ToolStripMenuItem smFocus = new ToolStripMenuItem(L.T("proj.sess.focus"), null, delegate
+            {
+                if (_sessionList.SelectedItems.Count == 0) return;
+                SessionCostRecord sr = _sessionList.SelectedItems[0].Tag as SessionCostRecord;
+                string p = SelectedSessionPath();
+                string hint = sr != null && !string.IsNullOrEmpty(sr.Project) ? sr.Project : (sr != null ? sr.Provider : null);
+                if (!ProcessHelper.FocusWindow(hint, p, sr != null ? sr.Provider : null) && p != null)
+                    ProcessHelper.OpenTerminal(p);
+            });
             ToolStripMenuItem smFolder = new ToolStripMenuItem(L.T("proj.btn.folder"), null, delegate { string p = SelectedSessionPath(); if (p != null) ProcessHelper.OpenFolder(p); });
             ToolStripMenuItem smTerm = new ToolStripMenuItem(L.T("proj.btn.terminal"), null, delegate { string p = SelectedSessionPath(); if (p != null) ProcessHelper.OpenTerminal(p); });
             ToolStripMenuItem smCode = new ToolStripMenuItem(L.T("proj.btn.vscode"), null, delegate { string p = SelectedSessionPath(); if (p != null) ProcessHelper.OpenVSCode(p); });
+            ToolStripMenuItem smCopyCompact = new ToolStripMenuItem(L.T("proj.sess.copycompact"), null, delegate { try { Clipboard.SetText("/compact"); } catch { } });
             ToolStripMenuItem smCopy = new ToolStripMenuItem(L.T("proj.sess.copydetail"), null, delegate { CopySelectedSession(); });
+            _sessMenu.Items.Add(smFocus);
             _sessMenu.Items.Add(smFolder);
             _sessMenu.Items.Add(smTerm);
             _sessMenu.Items.Add(smCode);
             _sessMenu.Items.Add(new ToolStripSeparator());
+            _sessMenu.Items.Add(smCopyCompact);
             _sessMenu.Items.Add(smCopy);
             MenuTheme.Apply(_sessMenu);
             _sessionList.ContextMenuStrip = _sessMenu;
@@ -743,10 +852,13 @@ namespace ClaudeUsageWidget
             {
                 string p = SelectedSessionPath();
                 bool pathOk = !string.IsNullOrEmpty(p) && Directory.Exists(p);
+                bool hasSel = _sessionList.SelectedItems.Count > 0 && (_sessionList.SelectedItems[0].Tag is SessionCostRecord);
+                smFocus.Enabled = hasSel;
                 smFolder.Enabled = pathOk;
                 smTerm.Enabled = pathOk;
                 smCode.Enabled = pathOk && ProcessHelper.HasVSCode();
-                smCopy.Enabled = _sessionList.SelectedItems.Count > 0 && (_sessionList.SelectedItems[0].Tag is SessionCostRecord);
+                smCopyCompact.Enabled = hasSel;
+                smCopy.Enabled = hasSel;
             };
             _sessionList.DoubleClick += delegate { string p = SelectedSessionPath(); if (p != null) try { ProcessHelper.OpenTerminal(p); } catch { } };
             _sessionsPage.Controls.Add(_sessionList);
@@ -779,8 +891,38 @@ namespace ClaudeUsageWidget
             _pageHost.Controls.Add(_toolsPage);
 
             Controls.Add(_pageHost);
+            Controls.Add(_searchPanel);
             Controls.Add(_tabStrip);
             SelectTab(0);
+        }
+
+        private string SelectedProviderFilter()
+        {
+            int idx = _providerFilter.SelectedIndex;
+            if (idx > 0 && idx < FilterProviders.Length) return FilterProviders[idx];
+            return "";
+        }
+
+        private bool MatchesFilter(string provider, params string[] fields)
+        {
+            string pf = SelectedProviderFilter();
+            if (!string.IsNullOrEmpty(pf) &&
+                (string.IsNullOrEmpty(provider) || provider.IndexOf(pf, StringComparison.OrdinalIgnoreCase) < 0))
+                return false;
+            string q = (_searchBox.Text ?? "").Trim();
+            if (q.Length == 0) return true;
+            if (!string.IsNullOrEmpty(provider) && provider.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            for (int i = 0; i < fields.Length; i++)
+                if (!string.IsNullOrEmpty(fields[i]) && fields[i].IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
+        }
+
+        private void OnFilterChanged()
+        {
+            _trends.SetProviderFilter(SelectedProviderFilter());
+            PopulateList();
+            PopulateSessionsList(_usageRef);
+            PopulateToolsList(_usageRef);
         }
 
         private void PopulateToolsList(UsageSnapshot usage)
@@ -795,9 +937,11 @@ namespace ClaudeUsageWidget
                 return;
             }
             long totalTokens = 0;
-            for (int i = 0; i < list.Count; i++) totalTokens += list[i].Tokens;
+            for (int i = 0; i < list.Count; i++)
+                if (MatchesFilter(list[i].Provider, list[i].Tool)) totalTokens += list[i].Tokens;
             foreach (ToolUsageRecord tr in list)
             {
+                if (!MatchesFilter(tr.Provider, tr.Tool)) continue;
                 long avg = tr.Calls > 0 ? tr.Tokens / tr.Calls : 0;
                 int share = totalTokens > 0 ? (int)Math.Round((double)tr.Tokens / totalTokens * 100.0) : 0;
                 ListViewItem it = new ListViewItem(tr.Tool ?? "-");
@@ -809,6 +953,12 @@ namespace ClaudeUsageWidget
                 it.SubItems.Add(share + "%");
                 it.Tag = tr;
                 _toolList.Items.Add(it);
+            }
+            if (_toolList.Items.Count == 0)
+            {
+                ListViewItem empty = new ListViewItem(L.T("proj.tools.empty"));
+                empty.ForeColor = Palette.Dim;
+                _toolList.Items.Add(empty);
             }
         }
 
@@ -823,6 +973,7 @@ namespace ClaudeUsageWidget
                 sb.AppendLine("|:---|:---|---:|---:|---:|");
                 foreach (ToolUsageRecord tr in list)
                 {
+                    if (!MatchesFilter(tr.Provider, tr.Tool)) continue;
                     sb.AppendFormat(CultureInfo.InvariantCulture,
                         "| `{0}` | {1} | {2} | {3} | ${4:F2} |\r\n",
                         tr.Tool, tr.Provider, tr.Calls, Fmt.Tokens(tr.Tokens), tr.Cost);
@@ -876,6 +1027,7 @@ namespace ClaudeUsageWidget
             double avg = total / list.Count;
             foreach (SessionCostRecord sr in list)
             {
+                if (!MatchesFilter(sr.Provider, sr.Project, sr.SessionId, sr.TopModel)) continue;
                 string sidShort = string.IsNullOrEmpty(sr.SessionId) ? "" : (sr.SessionId.Length > 10 ? sr.SessionId.Substring(0, 10) : sr.SessionId);
                 string label = string.IsNullOrEmpty(sr.Project) ? sidShort : (sr.Project + " · " + sidShort);
                 ListViewItem it = new ListViewItem(label);
@@ -890,6 +1042,12 @@ namespace ClaudeUsageWidget
                 it.Tag = sr;
                 if (!string.IsNullOrEmpty(anom)) it.ForeColor = Palette.Amber;
                 _sessionList.Items.Add(it);
+            }
+            if (_sessionList.Items.Count == 0)
+            {
+                ListViewItem empty = new ListViewItem(L.T("proj.sess.empty"));
+                empty.ForeColor = Palette.Dim;
+                _sessionList.Items.Add(empty);
             }
         }
 
@@ -927,16 +1085,12 @@ namespace ClaudeUsageWidget
         {
             _list.Items.Clear();
             _filteredRows.Clear();
-            string q = (_searchBox.Text ?? "").Trim();
             int shown = 0;
             double sumToday = 0, sumWeek = 0;
             long sumTokens = 0, sumReqs = 0;
             foreach (ProjectRow r in _rows)
             {
-                if (q.Length > 0 &&
-                    (r.Name == null || r.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) &&
-                    (r.Provider == null || r.Provider.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0) &&
-                    (r.Path == null || r.Path.IndexOf(q, StringComparison.OrdinalIgnoreCase) < 0))
+                if (!MatchesFilter(r.Provider, r.Name, r.Path))
                     continue;
 
                 _filteredRows.Add(r);
@@ -1048,7 +1202,8 @@ namespace ClaudeUsageWidget
         {
             try
             {
-                string md = BuildMarkdownTable(_filteredRows.Count > 0 || !string.IsNullOrWhiteSpace(_searchBox.Text) ? _filteredRows : _rows);
+                bool hasFilter = !string.IsNullOrWhiteSpace(_searchBox.Text) || !string.IsNullOrEmpty(SelectedProviderFilter());
+                string md = BuildMarkdownTable(_filteredRows.Count > 0 || hasFilter ? _filteredRows : _rows);
                 Clipboard.SetText(md);
                 MessageBox.Show(this, L.T("proj.copied"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

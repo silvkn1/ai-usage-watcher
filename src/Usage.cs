@@ -239,11 +239,15 @@ namespace ClaudeUsageWidget
         public Dictionary<string, Tally> TodayCodex = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> TodayGeminiCli = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> TodayOpenCode = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> TodayCline = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> TodayCopilot = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekClaude = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekAntigravity = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekCodex = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekGeminiCli = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekOpenCode = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> WeekCline = new Dictionary<string, Tally>();
+        public Dictionary<string, Tally> WeekCopilot = new Dictionary<string, Tally>();
         public Tally TodayTotal = new Tally();
         public Tally WeekTotal = new Tally();
         public Tally ClaudeToday = new Tally();
@@ -251,11 +255,15 @@ namespace ClaudeUsageWidget
         public Tally CodexToday = new Tally();
         public Tally GeminiCliToday = new Tally();
         public Tally OpenCodeToday = new Tally();
+        public Tally ClineToday = new Tally();
+        public Tally CopilotToday = new Tally();
         public Tally ClaudeWeek = new Tally();
         public Tally AntigravityWeek = new Tally();
         public Tally CodexWeek = new Tally();
         public Tally GeminiCliWeek = new Tally();
         public Tally OpenCodeWeek = new Tally();
+        public Tally ClineWeek = new Tally();
+        public Tally CopilotWeek = new Tally();
         public Dictionary<string, Tally> TodayProjects = new Dictionary<string, Tally>();
         public Dictionary<string, Tally> WeekProjects = new Dictionary<string, Tally>();
         public Dictionary<string, string> ProjectPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -334,6 +342,9 @@ namespace ClaudeUsageWidget
         public Func<List<string>> Roots;
         public Func<List<string>> GeminiCliRoots;
         public Func<List<string>> OpenCodeDirs;
+        public Func<List<string>> ClineRoots;
+        public Func<List<string>> CopilotDirs;
+        public Func<List<string>> CustomJsonlRoots;
         private readonly Dictionary<string, long> _offsets = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _loadedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _seen = new Dictionary<string, DateTime>();
@@ -342,11 +353,17 @@ namespace ClaudeUsageWidget
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysCodex = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysGeminiCli = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysOpenCode = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysCline = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysCopilot = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _daysCustom = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _proj = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projAg = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projCodex = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projGeminiCli = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projOpenCode = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projCline = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projCopilot = new Dictionary<DateTime, Dictionary<string, Tally>>();
+        private readonly Dictionary<DateTime, Dictionary<string, Tally>> _projCustom = new Dictionary<DateTime, Dictionary<string, Tally>>();
         private readonly Dictionary<string, string> _projPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _codexFileModels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _codexFileCwds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -395,8 +412,8 @@ namespace ClaudeUsageWidget
         private void ClearAggregates()
         {
             _offsets.Clear(); _loadedFiles.Clear(); _seen.Clear();
-            _days.Clear(); _daysAg.Clear(); _daysCodex.Clear(); _daysGeminiCli.Clear(); _daysOpenCode.Clear();
-            _proj.Clear(); _projAg.Clear(); _projCodex.Clear(); _projGeminiCli.Clear(); _projOpenCode.Clear();
+            _days.Clear(); _daysAg.Clear(); _daysCodex.Clear(); _daysGeminiCli.Clear(); _daysOpenCode.Clear(); _daysCline.Clear(); _daysCopilot.Clear(); _daysCustom.Clear();
+            _proj.Clear(); _projAg.Clear(); _projCodex.Clear(); _projGeminiCli.Clear(); _projOpenCode.Clear(); _projCline.Clear(); _projCopilot.Clear(); _projCustom.Clear();
             _projPaths.Clear(); _codexFileModels.Clear(); _codexFileCwds.Clear();
             _sessions.Clear(); _sessionCosts.Clear(); _tools.Clear();
             _diskCache.Clear(); _activeCache = null; _cacheLoaded = false; _cacheDirty = false;
@@ -436,6 +453,9 @@ namespace ClaudeUsageWidget
         public bool ScanCodex = true;
         public bool ScanGeminiCli = true;
         public bool ScanOpenCode = true;
+        public bool ScanCline = false;
+        public bool ScanCopilot = false;
+        public string CustomJsonlDirs = "";
         public long AntigravityQuota5hTokens = 1000000;
         public long AntigravityQuota7dTokens = 10000000;
         private readonly List<KeyValuePair<DateTime, long>> _recentTokens = new List<KeyValuePair<DateTime, long>>();
@@ -462,6 +482,21 @@ namespace ClaudeUsageWidget
             {
                 List<string> r = new List<string>();
                 if (ScanOpenCode && Directory.Exists(Paths.OpenCodeDataDir)) r.Add(Paths.OpenCodeDataDir);
+                return r;
+            };
+            ClineRoots = delegate { return ScanCline ? Paths.ClineTaskRoots() : new List<string>(); };
+            CopilotDirs = delegate { return ScanCopilot ? Paths.CopilotDataDirs() : new List<string>(); };
+            CustomJsonlRoots = delegate
+            {
+                List<string> r = new List<string>();
+                if (!string.IsNullOrWhiteSpace(CustomJsonlDirs))
+                {
+                    foreach (string raw in CustomJsonlDirs.Split(';'))
+                    {
+                        string t = raw.Trim();
+                        if (t.Length > 0 && Directory.Exists(t)) r.Add(t);
+                    }
+                }
                 return r;
             };
         }
@@ -495,6 +530,9 @@ namespace ClaudeUsageWidget
                 }
                 if (ScanGeminiCli) ScanGeminiCliDirs(cutoffUtc);
                 if (ScanOpenCode) ScanOpenCodeDirs(cutoffUtc);
+                if (ScanCline) ScanClineDirs(cutoffUtc);
+                if (ScanCopilot) ScanCopilotDirs(cutoffUtc);
+                ScanCustomJsonlDirs(cutoffUtc);
                 Prune();
                 _ready = true;
                 if (_cacheDirty) SaveCache();
@@ -545,6 +583,14 @@ namespace ClaudeUsageWidget
                              (f.IndexOf("\\opencode\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
                               f.IndexOf("/opencode/", StringComparison.OrdinalIgnoreCase) >= 0))
                         ScanWholeJsonFile(f, cutoffUtc, IngestOpenCodeJson);
+                    else if (ScanCline && string.Equals(Path.GetFileName(f), "ui_messages.json", StringComparison.OrdinalIgnoreCase))
+                        ScanWholeJsonFile(f, cutoffUtc, IngestClineUiMessagesJson);
+                    else if (ScanCopilot && f.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
+                             (f.IndexOf("\\chatSessions\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              f.IndexOf("/chatSessions/", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              f.IndexOf("\\.copilot\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                              f.IndexOf("/.copilot/", StringComparison.OrdinalIgnoreCase) >= 0))
+                        ScanWholeJsonFile(f, cutoffUtc, IngestCopilotFile);
                 }
                 if (_cacheDirty) SaveCache();
             }
@@ -1264,11 +1310,17 @@ namespace ClaudeUsageWidget
             PruneDaysMap(_daysCodex, min);
             PruneDaysMap(_daysGeminiCli, min);
             PruneDaysMap(_daysOpenCode, min);
+            PruneDaysMap(_daysCline, min);
+            PruneDaysMap(_daysCopilot, min);
+            PruneDaysMap(_daysCustom, min);
             PruneDaysMap(_proj, min);
             PruneDaysMap(_projAg, min);
             PruneDaysMap(_projCodex, min);
             PruneDaysMap(_projGeminiCli, min);
             PruneDaysMap(_projOpenCode, min);
+            PruneDaysMap(_projCline, min);
+            PruneDaysMap(_projCopilot, min);
+            PruneDaysMap(_projCustom, min);
             if (_sessionCosts.Count > 0)
             {
                 List<string> oldSess = new List<string>();
@@ -1351,6 +1403,9 @@ namespace ClaudeUsageWidget
                 AggregateProviderSnapshot(ScanCodex, _daysCodex, weekStart, today, s, s.TodayCodex, s.WeekCodex, s.CodexToday, s.CodexWeek, out tmp);
                 AggregateProviderSnapshot(ScanGeminiCli, _daysGeminiCli, weekStart, today, s, s.TodayGeminiCli, s.WeekGeminiCli, s.GeminiCliToday, s.GeminiCliWeek, out tmp);
                 AggregateProviderSnapshot(ScanOpenCode, _daysOpenCode, weekStart, today, s, s.TodayOpenCode, s.WeekOpenCode, s.OpenCodeToday, s.OpenCodeWeek, out tmp);
+                AggregateProviderSnapshot(ScanCline, _daysCline, weekStart, today, s, s.TodayCline, s.WeekCline, s.ClineToday, s.ClineWeek, out tmp);
+                AggregateProviderSnapshot(ScanCopilot, _daysCopilot, weekStart, today, s, s.TodayCopilot, s.WeekCopilot, s.CopilotToday, s.CopilotWeek, out tmp);
+                AggregateProviderSnapshot(true, _daysCustom, weekStart, today, s, new Dictionary<string, Tally>(), new Dictionary<string, Tally>(), new Tally(), new Tally(), out tmp);
 
                 HashSet<DateTime> allDates = new HashSet<DateTime>();
                 if (ScanClaude) foreach (DateTime d in _days.Keys) allDates.Add(d);
@@ -1358,6 +1413,9 @@ namespace ClaudeUsageWidget
                 if (ScanCodex) foreach (DateTime d in _daysCodex.Keys) allDates.Add(d);
                 if (ScanGeminiCli) foreach (DateTime d in _daysGeminiCli.Keys) allDates.Add(d);
                 if (ScanOpenCode) foreach (DateTime d in _daysOpenCode.Keys) allDates.Add(d);
+                if (ScanCline) foreach (DateTime d in _daysCline.Keys) allDates.Add(d);
+                if (ScanCopilot) foreach (DateTime d in _daysCopilot.Keys) allDates.Add(d);
+                foreach (DateTime d in _daysCustom.Keys) allDates.Add(d);
                 foreach (DateTime d in allDates)
                 {
                     Tally dt = new Tally();
@@ -1367,6 +1425,9 @@ namespace ClaudeUsageWidget
                     if (ScanCodex && _daysCodex.TryGetValue(d, out md)) foreach (Tally t in md.Values) dt.Add(t);
                     if (ScanGeminiCli && _daysGeminiCli.TryGetValue(d, out md)) foreach (Tally t in md.Values) dt.Add(t);
                     if (ScanOpenCode && _daysOpenCode.TryGetValue(d, out md)) foreach (Tally t in md.Values) dt.Add(t);
+                    if (ScanCline && _daysCline.TryGetValue(d, out md)) foreach (Tally t in md.Values) dt.Add(t);
+                    if (ScanCopilot && _daysCopilot.TryGetValue(d, out md)) foreach (Tally t in md.Values) dt.Add(t);
+                    if (_daysCustom.TryGetValue(d, out md)) foreach (Tally t in md.Values) dt.Add(t);
 
                     Dictionary<string, double> pCosts = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
                     double pc;
@@ -1375,6 +1436,9 @@ namespace ClaudeUsageWidget
                     if (ScanCodex && (pc = SumDayCost(_daysCodex, d)) > 0) pCosts["Codex"] = pc;
                     if (ScanGeminiCli && (pc = SumDayCost(_daysGeminiCli, d)) > 0) pCosts["Gemini CLI"] = pc;
                     if (ScanOpenCode && (pc = SumDayCost(_daysOpenCode, d)) > 0) pCosts["OpenCode"] = pc;
+                    if (ScanCline && (pc = SumDayCost(_daysCline, d)) > 0) pCosts["Cline"] = pc;
+                    if (ScanCopilot && (pc = SumDayCost(_daysCopilot, d)) > 0) pCosts["Copilot"] = pc;
+                    if ((pc = SumDayCost(_daysCustom, d)) > 0) pCosts["Custom"] = pc;
                     s.Days.Add(new DayStat(d, dt.Total, dt.Cost, dt.Requests, pCosts.Count > 0 ? pCosts : null));
                 }
 
@@ -1385,15 +1449,14 @@ namespace ClaudeUsageWidget
                     if (ScanCodex) CollectProjects(_projCodex, weekStart, today, s, "Codex");
                     if (ScanGeminiCli) CollectProjects(_projGeminiCli, weekStart, today, s, "Gemini CLI");
                     if (ScanOpenCode) CollectProjects(_projOpenCode, weekStart, today, s, "OpenCode");
+                    if (ScanCline) CollectProjects(_projCline, weekStart, today, s, "Cline");
+                    if (ScanCopilot) CollectProjects(_projCopilot, weekStart, today, s, "Copilot");
+                    CollectProjects(_projCustom, weekStart, today, s, "Custom");
                 }
                 List<SessionCostRecord> scList = new List<SessionCostRecord>();
                 foreach (SessionCostRecord sr in _sessionCosts.Values)
                 {
-                    if (sr.Provider == "Claude" && !ScanClaude) continue;
-                    if (sr.Provider == "Antigravity" && !ScanGemini) continue;
-                    if (sr.Provider == "Codex" && !ScanCodex) continue;
-                    if (sr.Provider == "Gemini CLI" && !ScanGeminiCli) continue;
-                    if (sr.Provider == "OpenCode" && !ScanOpenCode) continue;
+                    if (!IsProviderScanned(sr.Provider)) continue;
                     if (sr.TotalTokens > 0 || sr.Cost > 0) scList.Add(sr);
                 }
                 scList.Sort(delegate(SessionCostRecord a, SessionCostRecord b)
@@ -1407,9 +1470,7 @@ namespace ClaudeUsageWidget
                 List<ToolUsageRecord> tList = new List<ToolUsageRecord>();
                 foreach (ToolUsageRecord tr in _tools.Values)
                 {
-                    if (tr.Provider == "Claude" && !ScanClaude) continue;
-                    if (tr.Provider == "Antigravity" && !ScanGemini) continue;
-                    if (tr.Provider == "Codex" && !ScanCodex) continue;
+                    if (!IsProviderScanned(tr.Provider)) continue;
                     if (tr.Calls > 0)
                         tList.Add(new ToolUsageRecord { Provider = tr.Provider, Tool = tr.Tool, Calls = tr.Calls, Tokens = tr.Tokens, Cost = tr.Cost });
                 }
@@ -2145,6 +2206,345 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private Tally BuildUsageTally(long inTok, long outTok, long cacheRead, long cacheWrite, double explicitCost, string model)
+        {
+            Tally t = new Tally();
+            t.Requests = 1;
+            t.Input = Math.Max(0, inTok);
+            t.Output = Math.Max(0, outTok);
+            t.CacheRead = Math.Max(0, cacheRead);
+            t.CacheWrite5m = Math.Max(0, cacheWrite);
+            if (!double.IsNaN(explicitCost) && explicitCost > 0)
+            {
+                t.Cost = explicitCost;
+            }
+            else
+            {
+                Price pr = _pricing.Find(model);
+                if (pr == null) t.UnpricedRequests = 1;
+                else
+                {
+                    t.Cost = (t.Input * pr.Input + t.Output * pr.Output + t.CacheRead * pr.CacheRead + t.CacheWrite5m * pr.CacheWrite5m) / 1e6;
+                    t.Saved = (t.CacheRead * (pr.Input - pr.CacheRead)) / 1e6;
+                }
+            }
+            return t;
+        }
+
+        private static bool TryParseTimestampFlexible(Dictionary<string, object> obj, DateTime fallbackLocal, out DateTime local)
+        {
+            local = fallbackLocal;
+            if (obj == null) return fallbackLocal != DateTime.MinValue;
+            string[] sk = { "timestamp", "created_at", "creationDate", "time" };
+            for (int i = 0; i < sk.Length; i++)
+            {
+                string raw = J.Str(obj, sk[i]);
+                DateTime dt;
+                if (!string.IsNullOrEmpty(raw) && DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out dt))
+                {
+                    local = DateTime.SpecifyKind(dt, DateTimeKind.Utc).ToLocalTime();
+                    return true;
+                }
+            }
+            string[] nk = { "ts", "timestamp", "creationDate", "created" };
+            for (int i = 0; i < nk.Length; i++)
+            {
+                double num = J.Num(obj, nk[i]);
+                if (!double.IsNaN(num) && num > 1000000000)
+                {
+                    local = Fmt.FromUnix(num > 1e11 ? num / 1000.0 : num);
+                    return true;
+                }
+            }
+            return fallbackLocal != DateTime.MinValue;
+        }
+
+        private void ScanClineDirs(DateTime cutoffUtc)
+        {
+            List<string> roots = null;
+            try { if (ClineRoots != null) roots = ClineRoots(); } catch (Exception ex) { Log.Write("cline.roots", ex); }
+            if (roots == null) return;
+            foreach (string root in roots)
+            {
+                try
+                {
+                    if (!Directory.Exists(root)) continue;
+                    foreach (string f in SafeEnumerateFiles(root, "ui_messages.json"))
+                        ScanWholeJsonFile(f, cutoffUtc, IngestClineUiMessagesJson);
+                }
+                catch (Exception ex) { Log.Write("cline.enum", ex); }
+            }
+        }
+
+        internal void ScanClineFile(string f)
+        {
+            lock (_gate)
+            {
+                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
+                ScanWholeJsonFile(f, cutoffUtc, IngestClineUiMessagesJson);
+            }
+        }
+
+        private void IngestClineUiMessagesJson(string json, string filePath)
+        {
+            System.Collections.IList arr = null;
+            try { arr = J.Ser.DeserializeObject(json) as System.Collections.IList; } catch { _skipped++; return; }
+            if (arr == null || arr.Count == 0) return;
+
+            string taskId = Path.GetFileName(Path.GetDirectoryName(filePath)) ?? Path.GetFileNameWithoutExtension(filePath);
+            string label = filePath.IndexOf("roo-cline", StringComparison.OrdinalIgnoreCase) >= 0 ? "Roo Code" : "Cline";
+            DateTime minDate = DateTime.Today.AddDays(-(KeepDays - 1));
+            DateTime fileLocal = DateTime.Now;
+            try { fileLocal = File.GetLastWriteTime(filePath); } catch { }
+
+            for (int i = 0; i < arr.Count; i++)
+            {
+                Dictionary<string, object> m = arr[i] as Dictionary<string, object>;
+                if (m == null) continue;
+                if (!string.Equals(J.Str(m, "say"), "api_req_started", StringComparison.OrdinalIgnoreCase)) continue;
+                string rawText = J.Str(m, "text");
+                if (string.IsNullOrWhiteSpace(rawText)) continue;
+                Dictionary<string, object> meta = null;
+                try { meta = J.Parse(rawText); } catch { }
+                if (meta == null) continue;
+
+                long inTok = J.Long(meta, "tokensIn");
+                long outTok = J.Long(meta, "tokensOut");
+                long cWrite = J.Long(meta, "cacheWrites");
+                long cRead = J.Long(meta, "cacheReads");
+                if (inTok <= 0 && outTok <= 0 && cWrite <= 0 && cRead <= 0) continue;
+
+                DateTime local;
+                if (!TryParseTimestampFlexible(m, fileLocal, out local)) continue;
+                if (local.Date < minDate) continue;
+
+                string model = J.Str(meta, "model") ?? J.Str(meta, "apiModelId") ?? "claude-sonnet-4-5";
+                double explicitCost = J.Num(meta, "cost");
+                string dedupKey = "cline|" + taskId + "|" + i + "|" + local.Ticks + "|" + inTok + "|" + outTok;
+                if (_seen.ContainsKey(dedupKey)) continue;
+                _seen[dedupKey] = local;
+
+                Tally t = BuildUsageTally(inTok, outTok, cRead, cWrite, explicitCost, model);
+                RecordUsage("Cline", _daysCline, _projCline, local, model, label, null, t, "cline:" + taskId, false);
+                RecordRecentToken(local, t.Total, false);
+            }
+        }
+
+        private void ScanCopilotDirs(DateTime cutoffUtc)
+        {
+            List<string> dirs = null;
+            try { if (CopilotDirs != null) dirs = CopilotDirs(); } catch (Exception ex) { Log.Write("copilot.dirs", ex); }
+            if (dirs == null) return;
+            foreach (string dir in dirs)
+            {
+                try
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    string leaf = Path.GetFileName(dir.TrimEnd('\\', '/'));
+                    if (string.Equals(leaf, ".copilot", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (string f in SafeEnumerateFiles(dir, "*.jsonl")) ScanWholeJsonFile(f, cutoffUtc, IngestCopilotFile);
+                        foreach (string f in SafeEnumerateFiles(dir, "*.json")) ScanWholeJsonFile(f, cutoffUtc, IngestCopilotFile);
+                    }
+                    else
+                    {
+                        foreach (string ws in Directory.GetDirectories(dir))
+                        {
+                            string csDir = Path.Combine(ws, "chatSessions");
+                            if (!Directory.Exists(csDir)) continue;
+                            foreach (string f in SafeEnumerateFiles(csDir, "*.json"))
+                                ScanWholeJsonFile(f, cutoffUtc, IngestCopilotFile);
+                        }
+                    }
+                }
+                catch (Exception ex) { Log.Write("copilot.enum", ex); }
+            }
+        }
+
+        internal void ScanCopilotFile(string f)
+        {
+            lock (_gate)
+            {
+                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
+                ScanWholeJsonFile(f, cutoffUtc, IngestCopilotFile);
+            }
+        }
+
+        private static string TryReadVsCodeWorkspaceFolder(string sessionJsonPath)
+        {
+            try
+            {
+                string chatDir = Path.GetDirectoryName(sessionJsonPath);
+                string wsDir = !string.IsNullOrEmpty(chatDir) ? Path.GetDirectoryName(chatDir) : null;
+                if (string.IsNullOrEmpty(wsDir)) return null;
+                string wsFile = Path.Combine(wsDir, "workspace.json");
+                if (!File.Exists(wsFile)) return null;
+                Dictionary<string, object> o = J.Parse(File.ReadAllText(wsFile, Encoding.UTF8));
+                string folderUri = J.Str(o, "folder");
+                Uri u;
+                if (!string.IsNullOrEmpty(folderUri) && Uri.TryCreate(folderUri, UriKind.Absolute, out u) && u.IsFile)
+                    return u.LocalPath;
+            }
+            catch { }
+            return null;
+        }
+
+        private void IngestCopilotFile(string content, string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(content)) return;
+            DateTime fileLocal = DateTime.Now;
+            try { fileLocal = File.GetLastWriteTime(filePath); } catch { }
+            DateTime minDate = DateTime.Today.AddDays(-(KeepDays - 1));
+            string trimmed = content.TrimStart();
+            if (trimmed.StartsWith("{", StringComparison.Ordinal))
+            {
+                Dictionary<string, object> root = null;
+                try { root = J.Parse(content); } catch { root = null; }
+                if (root != null && J.Arr(root, "requests") != null)
+                {
+                    string sessId = J.Str(root, "sessionId") ?? Path.GetFileNameWithoutExtension(filePath);
+                    string cwd = J.Str(root, "cwd") ?? TryReadVsCodeWorkspaceFolder(filePath);
+                    string proj = !string.IsNullOrEmpty(cwd) ? ProjectName(cwd) : "GitHub Copilot";
+                    System.Collections.IList reqs = J.Arr(root, "requests");
+                    DateTime rootDt = fileLocal;
+                    TryParseTimestampFlexible(root, fileLocal, out rootDt);
+                    for (int i = 0; i < reqs.Count; i++)
+                    {
+                        Dictionary<string, object> req = reqs[i] as Dictionary<string, object>;
+                        if (req == null) continue;
+                        Dictionary<string, object> res = J.Obj(req, "result");
+                        Dictionary<string, object> u = J.Obj(res, "usage") ?? J.Obj(req, "usage");
+                        if (u == null) continue;
+                        IngestCopilotUsageDict(u, req, rootDt, minDate, sessId + "|" + (J.Str(req, "requestId") ?? i.ToString(System.Globalization.CultureInfo.InvariantCulture)), proj, cwd, "cp:" + sessId);
+                    }
+                    return;
+                }
+            }
+            string sidFallback = Path.GetFileNameWithoutExtension(filePath);
+            string[] lines = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                Dictionary<string, object> d = null;
+                try { d = J.Parse(lines[i]); } catch { continue; }
+                if (d == null) continue;
+                Dictionary<string, object> u = J.Obj(d, "usage") ?? J.Obj(d, "tokens");
+                if (u == null) continue;
+                string cwd = J.Str(d, "cwd");
+                string proj = !string.IsNullOrEmpty(cwd) ? ProjectName(cwd) : "Copilot CLI";
+                IngestCopilotUsageDict(u, d, fileLocal, minDate, sidFallback + "|" + i, proj, cwd, "cp:" + sidFallback);
+            }
+        }
+
+        private void IngestCopilotUsageDict(Dictionary<string, object> u, Dictionary<string, object> meta, DateTime fallbackDt, DateTime minDate, string itemKey, string proj, string cwd, string sessKey)
+        {
+            long inTok = FirstPositive(u, "promptTokens", "prompt_tokens", "input_tokens", "input");
+            long outTok = FirstPositive(u, "completionTokens", "completion_tokens", "output_tokens", "output");
+            long cRead = FirstPositive(u, "cachedTokens", "cached_tokens", "cache_read_input_tokens", "cache_read");
+            if (inTok <= 0 && outTok <= 0 && cRead <= 0) return;
+
+            DateTime local;
+            if (!TryParseTimestampFlexible(meta, fallbackDt, out local)) return;
+            if (local.Date < minDate) return;
+
+            string model = J.Str(meta, "modelId") ?? J.Str(meta, "model") ?? "gpt-4.1";
+            double cost = J.Num(meta, "cost");
+            string dedupKey = "copilot|" + itemKey + "|" + local.Ticks + "|" + inTok + "|" + outTok;
+            if (_seen.ContainsKey(dedupKey)) return;
+            _seen[dedupKey] = local;
+
+            long netIn = (cRead > 0 && inTok >= cRead) ? inTok - cRead : inTok;
+            Tally t = BuildUsageTally(netIn, outTok, cRead, 0, cost, model);
+            RecordUsage("Copilot", _daysCopilot, _projCopilot, local, model, proj, cwd, t, sessKey, false);
+            RecordRecentToken(local, t.Total, false);
+        }
+
+        private static long FirstPositive(Dictionary<string, object> d, params string[] keys)
+        {
+            for (int i = 0; i < keys.Length; i++)
+            {
+                long v = J.Long(d, keys[i]);
+                if (v > 0) return v;
+            }
+            return 0;
+        }
+
+        private void ScanCustomJsonlDirs(DateTime cutoffUtc)
+        {
+            List<string> dirs = null;
+            try { if (CustomJsonlRoots != null) dirs = CustomJsonlRoots(); } catch (Exception ex) { Log.Write("customjsonl.roots", ex); }
+            if (dirs == null) return;
+            foreach (string dir in dirs)
+            {
+                try
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    foreach (string f in SafeEnumerateFiles(dir, "*.jsonl"))
+                        ScanWholeJsonFile(f, cutoffUtc, IngestCustomJsonlFile);
+                }
+                catch (Exception ex) { Log.Write("customjsonl.enum", ex); }
+            }
+        }
+
+        internal void ScanCustomJsonlFile(string f)
+        {
+            lock (_gate)
+            {
+                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
+                ScanWholeJsonFile(f, cutoffUtc, IngestCustomJsonlFile);
+            }
+        }
+
+        private void IngestCustomJsonlFile(string content, string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(content)) return;
+            DateTime fileLocal = DateTime.Now;
+            try { fileLocal = File.GetLastWriteTime(filePath); } catch { }
+            DateTime minDate = DateTime.Today.AddDays(-(KeepDays - 1));
+            string stem = Path.GetFileNameWithoutExtension(filePath);
+            string[] lines = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                Dictionary<string, object> d = null;
+                try { d = J.Parse(lines[i]); } catch { _skipped++; continue; }
+                if (d == null) continue;
+                Dictionary<string, object> u = J.Obj(d, "usage") ?? J.Obj(d, "tokens") ?? d;
+                long inTok = FirstPositive(u, "input_tokens", "prompt_tokens", "input", "tokensIn");
+                long outTok = FirstPositive(u, "output_tokens", "completion_tokens", "output", "tokensOut");
+                long cRead = FirstPositive(u, "cache_read_input_tokens", "cached_tokens", "cached_input_tokens", "cache_read", "cacheReads");
+                long cWrite = FirstPositive(u, "cache_creation_input_tokens", "cache_write", "cacheWrites");
+                if (inTok <= 0 && outTok <= 0 && cRead <= 0 && cWrite <= 0) continue;
+
+                DateTime local;
+                if (!TryParseTimestampFlexible(d, fileLocal, out local)) continue;
+                if (local.Date < minDate) continue;
+
+                string rawProv = J.Str(d, "provider");
+                string prov = "Custom";
+                if (string.Equals(rawProv, "Claude", StringComparison.OrdinalIgnoreCase)) prov = "Claude";
+                else if (string.Equals(rawProv, "Antigravity", StringComparison.OrdinalIgnoreCase)) prov = "Antigravity";
+                else if (string.Equals(rawProv, "Codex", StringComparison.OrdinalIgnoreCase)) prov = "Codex";
+                else if (string.Equals(rawProv, "Gemini CLI", StringComparison.OrdinalIgnoreCase)) prov = "Gemini CLI";
+                else if (string.Equals(rawProv, "OpenCode", StringComparison.OrdinalIgnoreCase)) prov = "OpenCode";
+                else if (string.Equals(rawProv, "Cline", StringComparison.OrdinalIgnoreCase)) prov = "Cline";
+                else if (string.Equals(rawProv, "Copilot", StringComparison.OrdinalIgnoreCase)) prov = "Copilot";
+
+                string model = J.Str(d, "model") ?? J.Str(d, "modelId") ?? "custom";
+                string cwd = J.Str(d, "cwd");
+                string proj = J.Str(d, "project") ?? (!string.IsNullOrEmpty(cwd) ? ProjectName(cwd) : stem);
+                double cost = J.Num(d, "cost");
+                if (double.IsNaN(cost)) cost = J.Num(d, "cost_usd");
+                string pathKey = string.IsNullOrEmpty(filePath) ? stem : filePath.Replace('/', '\\').ToLowerInvariant();
+                string dedupKey = "custom|" + pathKey + "|" + i + "|" + local.Ticks + "|" + inTok + "|" + outTok;
+                if (_seen.ContainsKey(dedupKey)) continue;
+                _seen[dedupKey] = local;
+
+                Tally t = BuildUsageTally(inTok, outTok, cRead, cWrite, cost, model);
+                RecordUsage(prov, DaysMapForProvider(prov), ProjMapForProvider(prov), local, model, proj, cwd, t, "custom:" + pathKey, false);
+                RecordRecentToken(local, t.Total, false);
+            }
+        }
+
         private void ScanWholeJsonFile(string f, DateTime cutoffUtc, Action<string, string> parser)
         {
             try
@@ -2388,8 +2788,12 @@ namespace ClaudeUsageWidget
                 psi.StandardOutputEncoding = Encoding.UTF8;
                 using (System.Diagnostics.Process p = System.Diagnostics.Process.Start(psi))
                 {
-                    string jsonOut = p.StandardOutput.ReadToEnd();
-                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return; }
+                    System.Threading.Tasks.Task<string> readTask = System.Threading.Tasks.Task.Run(delegate
+                    {
+                        try { return p.StandardOutput.ReadToEnd(); } catch { return ""; }
+                    });
+                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } readTask.Wait(200); return; }
+                    string jsonOut = readTask.Wait(1000) ? readTask.Result : "";
                     if (p.ExitCode != 0 || string.IsNullOrWhiteSpace(jsonOut)) return;
                     System.Collections.IList rows = J.Ser.DeserializeObject(jsonOut) as System.Collections.IList;
                     if (rows == null) return;
@@ -2408,6 +2812,18 @@ namespace ClaudeUsageWidget
                 }
             }
             catch (Exception ex) { Log.Write("opencode.sqlite", ex); }
+        }
+
+        internal bool IsProviderScanned(string provider)
+        {
+            if (provider == "Claude") return ScanClaude;
+            if (provider == "Antigravity") return ScanGemini;
+            if (provider == "Codex") return ScanCodex;
+            if (provider == "Gemini CLI") return ScanGeminiCli;
+            if (provider == "OpenCode") return ScanOpenCode;
+            if (provider == "Cline") return ScanCline;
+            if (provider == "Copilot") return ScanCopilot;
+            return true;
         }
 
         private class CachedTallyRow
@@ -2492,7 +2908,8 @@ namespace ClaudeUsageWidget
         private int CurrentScanFlags()
         {
             return (ScanClaude ? 1 : 0) | (ScanGemini ? 2 : 0) | (ScanCodex ? 4 : 0) |
-                   (ScanGeminiCli ? 8 : 0) | (ScanOpenCode ? 16 : 0);
+                   (ScanGeminiCli ? 8 : 0) | (ScanOpenCode ? 16 : 0) |
+                   (ScanCline ? 32 : 0) | (ScanCopilot ? 64 : 0);
         }
 
         private Dictionary<DateTime, Dictionary<string, Tally>> DaysMapForProvider(string provider)
@@ -2501,6 +2918,9 @@ namespace ClaudeUsageWidget
             if (provider == "Codex") return _daysCodex;
             if (provider == "Gemini CLI") return _daysGeminiCli;
             if (provider == "OpenCode") return _daysOpenCode;
+            if (provider == "Cline") return _daysCline;
+            if (provider == "Copilot") return _daysCopilot;
+            if (provider == "Custom") return _daysCustom;
             return _days;
         }
 
@@ -2510,6 +2930,9 @@ namespace ClaudeUsageWidget
             if (provider == "Codex") return _projCodex;
             if (provider == "Gemini CLI") return _projGeminiCli;
             if (provider == "OpenCode") return _projOpenCode;
+            if (provider == "Cline") return _projCline;
+            if (provider == "Copilot") return _projCopilot;
+            if (provider == "Custom") return _projCustom;
             return _proj;
         }
 

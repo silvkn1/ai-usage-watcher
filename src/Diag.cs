@@ -79,10 +79,14 @@ namespace ClaudeUsageWidget
                     : "(offline)"));
             b.AppendLine("providers: claude=" + YesNo(cfg.ScanClaude) + " gemini=" + YesNo(cfg.ScanGemini) + " codex=" + YesNo(cfg.ScanCodex)
                 + " geminiCli=" + YesNo(cfg.ScanGeminiCli) + " opencode=" + YesNo(cfg.ScanOpenCode)
+                + " cline=" + YesNo(cfg.ScanCline) + " copilot=" + YesNo(cfg.ScanCopilot)
+                + " customJsonl=" + (string.IsNullOrWhiteSpace(cfg.CustomJsonlDirs) ? 0 : cfg.CustomJsonlDirs.Split(';').Length)
                 + " sqliteMissingCli=" + YesNo(u != null && u.OpenCodeSqliteMissingCli)
                 + " ollama=" + ollamaState);
             b.AppendLine("features: cardLayout=" + (cfg.CardLayout ?? "auto") + " miniPill=" + (cfg.MiniPillMode ?? "all")
-                + " contextBar=" + YesNo(cfg.ShowContextBar) + " quietHours=" + YesNo(cfg.QuietHoursEnabled)
+                + " contextBar=" + YesNo(cfg.ShowContextBar) + " zenMode=" + YesNo(cfg.ZenMode)
+                + " ctxOverride=" + cfg.ContextWindowOverride + " cacheDrop=" + YesNo(cfg.CacheDropAlertEnabled)
+                + " quietHours=" + YesNo(cfg.QuietHoursEnabled)
                 + " cooldownMin=" + cfg.AlertCooldownMinutes + " digest=" + (cfg.DigestEnabled ? cfg.DigestSchedule : "off")
                 + " customPricing=" + YesNo(File.Exists(Paths.CustomPricingFile)));
             b.AppendLine("probe: " + YesNo(cfg.ProbeEnabled) + " every=" + cfg.ProbeMinMinutes + "m mirror=" + (cfg.MirrorEnabled ? "on" : "off")

@@ -47,7 +47,11 @@ if (Test-Path $legacyInstallDir) {
     Remove-Item $legacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($extParent in @((Join-Path $env:USERPROFILE '.vscode\extensions'), (Join-Path $env:USERPROFILE '.cursor\extensions'))) {
+foreach ($extParent in @(
+    (Join-Path $env:USERPROFILE '.vscode\extensions'),
+    (Join-Path $env:USERPROFILE '.cursor\extensions'),
+    (Join-Path $env:USERPROFILE '.antigravity\extensions'),
+    (Join-Path $env:USERPROFILE '.windsurf\extensions'))) {
     $extDir = Join-Path $extParent 'ai-usage-watcher'
     if (Test-Path $extDir) {
         Remove-Item $extDir -Recurse -Force -ErrorAction SilentlyContinue

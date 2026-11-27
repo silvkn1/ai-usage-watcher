@@ -24,29 +24,35 @@ namespace ClaudeUsageWidget
 
         public static List<LangPackInfo> Discover()
         {
+            return DiscoverInDirs(new[] { Paths.LangDirAppData, Paths.LangDirExe });
+        }
+
+        internal static List<LangPackInfo> DiscoverInDirs(IEnumerable<string> dirs)
+        {
             List<LangPackInfo> r = new List<LangPackInfo>();
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "en", "id" };
-            foreach (string dir in new[] { Paths.LangDirAppData, Paths.LangDirExe })
+            foreach (string dir in dirs)
             {
                 try
                 {
-                    if (!Directory.Exists(dir)) continue;
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
                     foreach (string f in Directory.GetFiles(dir, "*.json"))
                     {
                         string code = System.IO.Path.GetFileNameWithoutExtension(f);
                         if (!CodeRe.IsMatch(code) || seen.Contains(code)) continue;
                         FileInfo fi = new FileInfo(f);
                         if (fi.Length > MaxBytes) { Log.Write("langpack: file too large"); continue; }
-                        seen.Add(code);
                         LangPackInfo i = new LangPackInfo();
                         i.Code = code; i.Path = f; i.Name = code;
                         try
                         {
                             Dictionary<string, object> o = J.Parse(File.ReadAllText(f, Encoding.UTF8));
+                            if (o == null) continue;
                             string n = J.Str(o, "_name");
                             if (!string.IsNullOrWhiteSpace(n)) i.Name = n.Trim();
                         }
-                        catch { continue; }   // JSON rusak: lewati
+                        catch { continue; }   // JSON rusak: lewati sebelum menandai seen agar fallback tetap terbaca
+                        seen.Add(code);
                         r.Add(i);
                     }
                 }
@@ -76,6 +82,7 @@ namespace ClaudeUsageWidget
             try
             {
                 Dictionary<string, object> o = J.Parse(File.ReadAllText(info.Path, Encoding.UTF8));
+                if (o == null) return false;
                 foreach (KeyValuePair<string, object> kv in o)
                 {
                     if (kv.Key.StartsWith("_", StringComparison.Ordinal)) continue;

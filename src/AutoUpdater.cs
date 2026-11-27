@@ -37,10 +37,51 @@ namespace ClaudeUsageWidget
         private static HttpClient CreateHttpClient()
         {
             try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
-            HttpClient c = new HttpClient();
+            // Disable automatic redirects so every hop is validated against IsTrustedUpdateUrl before connecting.
+            HttpClientHandler handler = new HttpClientHandler { AllowAutoRedirect = false };
+            HttpClient c = new HttpClient(handler);
             c.Timeout = TimeSpan.FromMinutes(3);
             c.DefaultRequestHeaders.Add("User-Agent", "AIUsageWatcher-AutoUpdater");
             return c;
+        }
+
+        internal static string ResolveTrustedRedirectUrl(Uri currentUri, Uri location)
+        {
+            if (location == null) return null;
+            Uri next;
+            if (location.IsAbsoluteUri) next = location;
+            else if (currentUri != null) next = new Uri(currentUri, location);
+            else return null;
+            return IsTrustedUpdateUrl(next.AbsoluteUri) ? next.AbsoluteUri : null;
+        }
+
+        private static HttpResponseMessage SendWithTrustedRedirects(string url, HttpCompletionOption option, CancellationToken ct, string acceptHeader = null, int maxHops = 5)
+        {
+            string cur = url;
+            for (int hop = 0; hop <= maxHops; hop++)
+            {
+                if (!IsTrustedUpdateUrl(cur))
+                    throw new InvalidDataException("Redirected update URL is untrusted or non-HTTPS.");
+                HttpResponseMessage resp;
+                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, cur))
+                {
+                    if (!string.IsNullOrEmpty(acceptHeader))
+                        req.Headers.Add("Accept", acceptHeader);
+                    resp = Http.SendAsync(req, option, ct).Result;
+                    int code = (int)resp.StatusCode;
+                    if (code >= 300 && code < 400 && resp.Headers.Location != null)
+                    {
+                        string nextUrl = ResolveTrustedRedirectUrl(req.RequestUri, resp.Headers.Location);
+                        resp.Dispose();
+                        if (nextUrl == null)
+                            throw new InvalidDataException("Redirected update URL is untrusted or non-HTTPS.");
+                        cur = nextUrl;
+                        continue;
+                    }
+                    return resp;
+                }
+            }
+            throw new InvalidDataException("Too many HTTP redirects during update request.");
         }
 
         public static Version CurrentVersion
@@ -72,10 +113,13 @@ namespace ClaudeUsageWidget
             string clean = tag.Trim().TrimStart('v', 'V');
             Match m = Regex.Match(clean, @"^(\d+)\.(\d+)(?:\.(\d+))?(?:\.(\d+))?");
             if (!m.Success) return null;
-            int maj = int.Parse(m.Groups[1].Value);
-            int min = int.Parse(m.Groups[2].Value);
-            int build = m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : 0;
-            int rev = m.Groups[4].Success ? int.Parse(m.Groups[4].Value) : 0;
+            int maj, min, build = 0, rev = 0;
+            if (!int.TryParse(m.Groups[1].Value, out maj) || !int.TryParse(m.Groups[2].Value, out min))
+                return null;
+            if (m.Groups[3].Success && !int.TryParse(m.Groups[3].Value, out build))
+                return null;
+            if (m.Groups[4].Success && !int.TryParse(m.Groups[4].Value, out rev))
+                return null;
             return new Version(maj, min, build, rev);
         }
 
@@ -214,16 +258,12 @@ namespace ClaudeUsageWidget
                 if (!Regex.IsMatch(useRepo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
                     return null;
                 string url = "https://api.github.com/repos/" + useRepo + "/releases/latest";
-                using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, url))
+                using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                using (HttpResponseMessage resp = SendWithTrustedRedirects(url, HttpCompletionOption.ResponseContentRead, cts.Token, "application/vnd.github.v3+json"))
                 {
-                    req.Headers.Add("Accept", "application/vnd.github.v3+json");
-                    using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
-                    using (HttpResponseMessage resp = Http.SendAsync(req, cts.Token).Result)
-                    {
-                        if (!resp.IsSuccessStatusCode) return null;
-                        string json = resp.Content.ReadAsStringAsync().Result;
-                        return ParseReleaseJson(json);
-                    }
+                    if (!resp.IsSuccessStatusCode) return null;
+                    string json = resp.Content.ReadAsStringAsync().Result;
+                    return ParseReleaseJson(json);
                 }
             }
             catch (Exception ex)
@@ -243,6 +283,60 @@ namespace ClaudeUsageWidget
                     try { onCompleted(info); } catch { }
                 }
             });
+        }
+
+        internal static string ExtractUpdateZip(string zipPath, string targetExePath, string targetDir)
+        {
+            string extractedExe = Path.Combine(targetDir, "update-extracted-" + Guid.NewGuid().ToString("N") + ".exe");
+            string fullTargetDir = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string targetExeName = Path.GetFileName(targetExePath);
+            try
+            {
+                using (ZipArchive zip = ZipFile.OpenRead(zipPath))
+                {
+                    ZipArchiveEntry exeEntry = null;
+                    List<KeyValuePair<ZipArchiveEntry, string>> auxEntries = new List<KeyValuePair<ZipArchiveEntry, string>>();
+                    foreach (ZipArchiveEntry e in zip.Entries)
+                    {
+                        if (string.IsNullOrEmpty(e.Name)) continue; // directory entry
+                        string relDest = e.FullName.Replace('/', Path.DirectorySeparatorChar);
+                        string destPath = Path.GetFullPath(Path.Combine(fullTargetDir, relDest));
+                        if (!destPath.StartsWith(fullTargetDir, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("Archive entry attempts path traversal: " + e.FullName);
+
+                        string normName = e.FullName.TrimStart('/', '\\');
+                        if (string.Equals(normName, "AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(normName, targetExeName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exeEntry = e;
+                        }
+                        else
+                        {
+                            auxEntries.Add(new KeyValuePair<ZipArchiveEntry, string>(e, destPath));
+                        }
+                    }
+                    if (exeEntry == null)
+                        throw new InvalidDataException("ZIP archive does not contain target executable.");
+
+                    // Validate extracted executable BEFORE writing any auxiliary files into targetDir.
+                    exeEntry.ExtractToFile(extractedExe, true);
+                    if (!IsValidExecutable(extractedExe))
+                        throw new InvalidDataException("Downloaded file is not a valid Windows executable.");
+
+                    for (int i = 0; i < auxEntries.Count; i++)
+                    {
+                        string dest = auxEntries[i].Value;
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                        auxEntries[i].Key.ExtractToFile(dest, true);
+                    }
+                }
+                return extractedExe;
+            }
+            catch
+            {
+                try { if (File.Exists(extractedExe)) File.Delete(extractedExe); } catch { }
+                throw;
+            }
         }
 
         public static bool DownloadAndApplyUpdate(ReleaseInfo release, string targetExePath = null, Action<int, string> onProgress = null)
@@ -287,12 +381,9 @@ namespace ClaudeUsageWidget
             {
                 if (onProgress != null) onProgress(10, L.T("update.downloading", release.AssetName ?? "update"));
 
-                using (HttpResponseMessage resp = Http.GetAsync(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead).Result)
+                using (HttpResponseMessage resp = SendWithTrustedRedirects(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None))
                 {
                     resp.EnsureSuccessStatusCode();
-                    if (resp.RequestMessage != null && resp.RequestMessage.RequestUri != null &&
-                        !IsTrustedUpdateUrl(resp.RequestMessage.RequestUri.AbsoluteUri))
-                        throw new InvalidDataException("Redirected update download URL is untrusted or non-HTTPS.");
                     long totalBytes = resp.Content.Headers.ContentLength ?? -1;
 
                     using (Stream input = resp.Content.ReadAsStreamAsync().Result)
@@ -323,35 +414,8 @@ namespace ClaudeUsageWidget
                 if (release.AssetName != null && release.AssetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
                     if (onProgress != null) onProgress(85, "Extracting update...");
-                    string extractedExe = Path.Combine(targetDir, "update-extracted-" + Guid.NewGuid().ToString("N") + ".exe");
-                    string fullTargetDir = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                    string targetExeName = Path.GetFileName(target);
-                    using (ZipArchive zip = ZipFile.OpenRead(downloadFile))
-                    {
-                        ZipArchiveEntry exeEntry = null;
-                        foreach (ZipArchiveEntry e in zip.Entries)
-                        {
-                            if (string.IsNullOrEmpty(e.Name)) continue; // directory entry
-                            string relDest = e.FullName.Replace('/', Path.DirectorySeparatorChar);
-                            string destPath = Path.GetFullPath(Path.Combine(fullTargetDir, relDest));
-                            if (!destPath.StartsWith(fullTargetDir, StringComparison.OrdinalIgnoreCase))
-                                throw new InvalidDataException("Archive entry attempts path traversal: " + e.FullName);
-
-                            if (string.Equals(e.FullName.TrimStart('/', '\\'), "AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(e.FullName.TrimStart('/', '\\'), targetExeName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                exeEntry = e;
-                                continue;
-                            }
-                            Directory.CreateDirectory(Path.GetDirectoryName(destPath));
-                            e.ExtractToFile(destPath, true);
-                        }
-                        if (exeEntry == null)
-                            throw new Exception("ZIP archive does not contain target executable.");
-                        exeEntry.ExtractToFile(extractedExe, true);
-                    }
+                    exeToInstall = ExtractUpdateZip(downloadFile, target, targetDir);
                     try { File.Delete(downloadFile); } catch { }
-                    exeToInstall = extractedExe;
                 }
 
                 if (!IsValidExecutable(exeToInstall))
@@ -436,12 +500,9 @@ namespace ClaudeUsageWidget
             try
             {
                 using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
-                using (HttpResponseMessage resp = Http.GetAsync(checksumsUrl, cts.Token).Result)
+                using (HttpResponseMessage resp = SendWithTrustedRedirects(checksumsUrl, HttpCompletionOption.ResponseContentRead, cts.Token))
                 {
                     if (!resp.IsSuccessStatusCode) return null;
-                    if (resp.RequestMessage != null && resp.RequestMessage.RequestUri != null &&
-                        !IsTrustedUpdateUrl(resp.RequestMessage.RequestUri.AbsoluteUri))
-                        return null;
                     string txt = resp.Content.ReadAsStringAsync().Result;
                     foreach (string rawLine in txt.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                     {

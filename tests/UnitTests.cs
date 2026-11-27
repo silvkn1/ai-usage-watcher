@@ -2970,6 +2970,478 @@ namespace Tests
                 L.Set(origLang);
             }
         }
+
+        public static void Test_Common_J_Ser_ThreadIsolation_And_ConcurrentParse()
+        {
+            object serMain = J.Ser;
+            object serWorker = null;
+            Exception workerErr = null;
+
+            System.Threading.Thread tProbe = new System.Threading.Thread(delegate()
+            {
+                try
+                {
+                    serWorker = J.Ser;
+                }
+                catch (Exception ex) { workerErr = ex; }
+            });
+            tProbe.Start();
+            tProbe.Join();
+
+            Assert.True(workerErr == null, "Worker J.Ser access must succeed");
+            Assert.NotNull(serWorker);
+            Assert.False(object.ReferenceEquals(serMain, serWorker), "J.Ser must return distinct per-thread instances");
+
+            const int ThreadCount = 8;
+            const int Iterations = 50;
+            System.Threading.Tasks.Task[] tasks = new System.Threading.Tasks.Task[ThreadCount];
+            for (int t = 0; t < ThreadCount; t++)
+            {
+                int tid = t;
+                tasks[t] = System.Threading.Tasks.Task.Run(delegate
+                {
+                    for (int i = 0; i < Iterations; i++)
+                    {
+                        Dictionary<string, object> o = J.Parse("{\"t\":" + tid + ",\"i\":" + i + "}");
+                        Assert.NotNull(o);
+                        Assert.Equal((long)tid, J.Long(o, "t"), "Thread id mismatch");
+                        Assert.Equal((long)i, J.Long(o, "i"), "Iteration mismatch");
+                    }
+                });
+            }
+            System.Threading.Tasks.Task.WaitAll(tasks);
+        }
+
+        public static void Test_Security_Webhook_EmptyDns_And_AutoUpdater_Hardening()
+        {
+            Assert.False(WebhookSender.AreResolvedAddressesSafe(null), "Null DNS result must fail closed");
+            Assert.False(WebhookSender.AreResolvedAddressesSafe(new System.Net.IPAddress[0]), "Empty DNS result must fail closed");
+            Assert.False(WebhookSender.AreResolvedAddressesSafe(new[] { System.Net.IPAddress.Loopback }), "Loopback DNS result must fail closed");
+            Assert.False(WebhookSender.AreResolvedAddressesSafe(new[] { System.Net.IPAddress.Parse("169.254.169.254") }), "IMDS DNS result must fail closed");
+            Assert.True(WebhookSender.AreResolvedAddressesSafe(new[] { System.Net.IPAddress.Parse("93.184.216.34") }), "Public IPv4 must pass");
+
+            Assert.True(AutoUpdater.ParseVersion("v9999999999999.1.0") == null, "Oversized major version must return null cleanly without OverflowException");
+            Assert.True(AutoUpdater.ParseVersion("1.2.3.4") == new Version(1, 2, 3, 4));
+
+            Uri curUri = new Uri("https://github.com/silvkn1/ai-usage-watcher/releases/download/v1.2.3/a.zip");
+            Assert.NotNull(AutoUpdater.ResolveTrustedRedirectUrl(curUri, new Uri("https://objects.githubusercontent.com/abc/a.zip")));
+            Assert.True(AutoUpdater.ResolveTrustedRedirectUrl(curUri, new Uri("https://evil.example.com/payload.exe")) == null, "Untrusted redirect host must be rejected");
+            Assert.True(AutoUpdater.ResolveTrustedRedirectUrl(curUri, new Uri("http://objects.githubusercontent.com/abc/a.zip")) == null, "HTTP downgrade redirect must be rejected");
+            Assert.NotNull(AutoUpdater.ResolveTrustedRedirectUrl(curUri, new Uri("/silvkn1/ai-usage-watcher/releases/v2", UriKind.Relative)));
+
+            string tmpDir = Path.Combine(Path.GetTempPath(), "cuw_zip_test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tmpDir);
+            try
+            {
+                string keepFile = Path.Combine(tmpDir, "config.txt");
+                File.WriteAllText(keepFile, "ORIGINAL_KEEP");
+                string badZip = Path.Combine(tmpDir, "no_exe.zip");
+                using (System.IO.Compression.ZipArchive za = System.IO.Compression.ZipFile.Open(badZip, System.IO.Compression.ZipArchiveMode.Create))
+                {
+                    System.IO.Compression.ZipArchiveEntry e = za.CreateEntry("config.txt");
+                    using (StreamWriter sw = new StreamWriter(e.Open())) sw.Write("OVERWRITTEN");
+                }
+                bool threwNoExe = false;
+                try { AutoUpdater.ExtractUpdateZip(badZip, Path.Combine(tmpDir, "AIUsageWatcher.exe"), tmpDir); }
+                catch (InvalidDataException) { threwNoExe = true; }
+                Assert.True(threwNoExe, "ZIP without target exe must reject");
+                Assert.Equal("ORIGINAL_KEEP", File.ReadAllText(keepFile), "Missing-exe ZIP must NOT overwrite existing auxiliary files");
+
+                string invalidPeZip = Path.Combine(tmpDir, "bad_pe.zip");
+                using (System.IO.Compression.ZipArchive za = System.IO.Compression.ZipFile.Open(invalidPeZip, System.IO.Compression.ZipArchiveMode.Create))
+                {
+                    System.IO.Compression.ZipArchiveEntry e1 = za.CreateEntry("config.txt");
+                    using (StreamWriter sw = new StreamWriter(e1.Open())) sw.Write("OVERWRITTEN_BY_BAD_PE");
+                    System.IO.Compression.ZipArchiveEntry e2 = za.CreateEntry("AIUsageWatcher.exe");
+                    using (Stream s = e2.Open()) { byte[] junk = new byte[64]; s.Write(junk, 0, junk.Length); }
+                }
+                bool threwBadPe = false;
+                try { AutoUpdater.ExtractUpdateZip(invalidPeZip, Path.Combine(tmpDir, "AIUsageWatcher.exe"), tmpDir); }
+                catch (InvalidDataException) { threwBadPe = true; }
+                Assert.True(threwBadPe, "ZIP with non-PE executable must reject");
+                Assert.Equal("ORIGINAL_KEEP", File.ReadAllText(keepFile), "Invalid-PE ZIP must NOT overwrite existing auxiliary files");
+            }
+            finally
+            {
+                try { Directory.Delete(tmpDir, true); } catch { }
+            }
+        }
+
+        public static void Test_LangPacks_Fallback_UsageToolFilter_And_SessionChipsWidth()
+        {
+            string tmpDir = Path.Combine(Path.GetTempPath(), "cuw_c3_test_" + Guid.NewGuid().ToString("N"));
+            string appLang = Path.Combine(tmpDir, "app");
+            string exeLang = Path.Combine(tmpDir, "exe");
+            Directory.CreateDirectory(appLang);
+            Directory.CreateDirectory(exeLang);
+            try
+            {
+                // Corrupt primary JSON must NOT mark code as seen before fallback dir is scanned
+                File.WriteAllText(Path.Combine(appLang, "fr.json"), "{broken json!!!");
+                File.WriteAllText(Path.Combine(exeLang, "fr.json"), "{\"_name\":\"Français\",\"ok\":\"OK\"}");
+                File.WriteAllText(Path.Combine(appLang, "es.json"), "null");
+
+                List<LangPackInfo> found = LangPacks.DiscoverInDirs(new[] { appLang, exeLang });
+                Assert.Equal(1, found.Count, "Corrupt fr in primary dir must fall back to valid exe fr; literal null es must be skipped");
+                Assert.Equal("fr", found[0].Code);
+                Assert.Equal("Français", found[0].Name);
+                Assert.Equal(Path.Combine(exeLang, "fr.json"), found[0].Path);
+
+                Dictionary<string, string> loadedStrings;
+                CultureInfo loadedCult;
+                Assert.False(LangPacks.Load(new LangPackInfo { Code = "es", Path = Path.Combine(appLang, "es.json") }, out loadedStrings, out loadedCult),
+                    "LangPacks.Load with null JSON object must return false cleanly");
+            }
+            finally
+            {
+                try { Directory.Delete(tmpDir, true); } catch { }
+            }
+
+            UsageScanner sc = new UsageScanner(Pricing.Load());
+            sc.ScanClaude = true;
+            sc.ScanGemini = true;
+            sc.ScanCodex = true;
+            sc.ScanGeminiCli = false;
+            sc.ScanOpenCode = false;
+            Assert.False(sc.IsProviderScanned("Gemini CLI"), "Disabled Gemini CLI must filter out tool & session breakdown");
+            Assert.False(sc.IsProviderScanned("OpenCode"), "Disabled OpenCode must filter out tool & session breakdown");
+            Assert.True(sc.IsProviderScanned("Claude"));
+
+            using (Bitmap bmp = new Bitmap(400, 64))
+            using (Graphics g = Graphics.FromImage(bmp))
+            using (Font f = new Font("Segoe UI", 8.5f))
+            {
+                List<string> labels = new List<string> { "? Confirm (12)", "● Running (34)", "✓ Done (56)" };
+                Assert.True(FloatingForm.ChipsExceedWidth(g, f, labels, 150, 18, 10, 5), "Wide verbose chips must report overflow cleanly");
+                Assert.False(FloatingForm.ChipsExceedWidth(g, f, labels, 800, 18, 10, 5), "Sufficient width must not force compact fallback");
+            }
+        }
+
+        public static void Test_TrayApp_Lifecycle_SnapMenu_And_DiagFeatures()
+        {
+            AppConfig cfg = new AppConfig { ZenMode = true, ContextWindowOverride = 500000 };
+            string diag = Diag.Build(cfg, new RateLimitSnapshot(), new UsageSnapshot(), null, null, 0);
+            Assert.True(diag.Contains("zenMode=yes"), "Diag features must include zenMode");
+            Assert.True(diag.Contains("ctxOverride=500000"), "Diag features must include ctxOverride");
+
+            bool hadCfg = File.Exists(Paths.ConfigFile);
+            byte[] prevCfgBytes = hadCfg ? File.ReadAllBytes(Paths.ConfigFile) : null;
+            try
+            {
+                using (TrayApp app = new TrayApp())
+                {
+                    FieldInfo fiCompact = typeof(TrayApp).GetField("_miCompact", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiClick = typeof(TrayApp).GetField("_miClickThrough", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiDock = typeof(TrayApp).GetField("_miDock", BindingFlags.NonPublic | BindingFlags.Instance);
+                    ToolStripMenuItem miCompact = fiCompact.GetValue(app) as ToolStripMenuItem;
+                    ToolStripMenuItem miClick = fiClick.GetValue(app) as ToolStripMenuItem;
+                    ToolStripMenuItem miDock = fiDock.GetValue(app) as ToolStripMenuItem;
+
+                    MethodInfo miSnap = typeof(TrayApp).GetMethod("SnapToPosition", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miSnap.Invoke(app, new object[] { "top-right", "" });
+                    Assert.True(miDock.Checked, "SnapToPosition must mark Dock checked");
+                    Assert.False(miCompact.Enabled, "SnapToPosition must disable Compact menu item while docked");
+                    Assert.False(miClick.Enabled, "SnapToPosition must disable ClickThrough menu item while docked");
+
+                    MethodInfo miExit = typeof(TrayApp).GetMethod("ExitThreadCore", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miExit.Invoke(app, null);
+                    MethodInfo miPostUi = typeof(TrayApp).GetMethod("PostUi", BindingFlags.NonPublic | BindingFlags.Instance);
+                    bool callbackRanAfterDispose = false;
+                    miPostUi.Invoke(app, new object[] { (Action)delegate { callbackRanAfterDispose = true; } });
+                    Application.DoEvents();
+                    Assert.False(callbackRanAfterDispose, "PostUi must ignore callbacks queued after disposal");
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (hadCfg) File.WriteAllBytes(Paths.ConfigFile, prevCfgBytes);
+                    else if (File.Exists(Paths.ConfigFile)) File.Delete(Paths.ConfigFile);
+                }
+                catch { }
+            }
+        }
+
+        public static void Test_SetupWizard_FontReuse_And_Disposal()
+        {
+            AppConfig cfg = new AppConfig();
+            SetupWizardForm wiz = new SetupWizardForm(cfg);
+            FieldInfo fiFonts = typeof(SetupWizardForm).GetField("_fonts", BindingFlags.NonPublic | BindingFlags.Instance);
+            List<Font> fonts = fiFonts.GetValue(wiz) as List<Font>;
+            Assert.NotNull(fonts);
+            int initialCount = fonts.Count;
+            Assert.True(initialCount > 0, "SetupWizardForm must track created GDI Font handles");
+
+            MethodInfo miApply = typeof(SetupWizardForm).GetMethod("ApplyTheme", BindingFlags.NonPublic | BindingFlags.Instance);
+            miApply.Invoke(wiz, null);
+            miApply.Invoke(wiz, null);
+            Assert.Equal(initialCount, fonts.Count, "Reapplying SetupWizardForm theme must reuse cached button Font without allocating new GDI fonts");
+
+            wiz.Dispose();
+            Assert.Equal(0, fonts.Count, "Disposing SetupWizardForm must clear and dispose all tracked Font objects");
+        }
+
+        public static void Test_NewFeatures_Profiles_CacheDrop_Forecast_Audio_And_FocusScore()
+        {
+            Assert.True(AppConfig.SanitizeProfileName("../evil") == null, "Path traversal profile name must be rejected");
+            Assert.Equal("Work-1", AppConfig.SanitizeProfileName("  Work-1  "));
+
+            string profDir = Path.Combine(Path.GetTempPath(), "cuw_prof_test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(profDir);
+            try
+            {
+                AppConfig cfg = new AppConfig { Theme = "light", Compact = false, BudgetDaily = 12.5 };
+                cfg.SetAdminKey("secret-keep");
+                Assert.True(cfg.SaveNamedProfileInDir("WorkMain", profDir), "Named profile save must succeed");
+                List<string> names = AppConfig.ListProfileNamesInDir(profDir);
+                Assert.Equal(1, names.Count);
+                Assert.Equal("WorkMain", names[0]);
+
+                AppConfig target = new AppConfig { Theme = "dark" };
+                target.SetAdminKey("local-secret");
+                AppConfig loaded = target.LoadNamedProfileInDir("WorkMain", profDir);
+                Assert.NotNull(loaded);
+                Assert.Equal("light", loaded.Theme);
+                Assert.Equal(12.5, loaded.BudgetDaily);
+                Assert.Equal("local-secret", loaded.GetAdminKey(), "Loading profile must keep local secrets intact");
+                Assert.True(AppConfig.DeleteNamedProfileInDir("WorkMain", profDir), "Deleting named profile must remove file");
+                Assert.Equal(0, AppConfig.ListProfileNamesInDir(profDir).Count);
+
+                AppConfig focus = AppConfig.BuildPresetProfile("focus", cfg);
+                Assert.True(focus.ZenMode && focus.Compact && focus.MiniPillMode == "highest");
+
+                string fakeMp3 = Path.Combine(profDir, "beep.mp3");
+                File.WriteAllBytes(fakeMp3, new byte[64]);
+                Assert.False(AudioAlert.IsValidWavFile(fakeMp3), "Non-WAV file must be rejected");
+                string goodWav = Path.Combine(profDir, "ok.wav");
+                File.WriteAllBytes(goodWav, new byte[64]);
+                Assert.True(AudioAlert.IsValidWavFile(goodWav), "Valid sized .wav file must pass");
+            }
+            finally
+            {
+                try { Directory.Delete(profDir, true); } catch { }
+            }
+
+            UsageSnapshot snap = new UsageSnapshot();
+            snap.ExpensiveSessions.Add(new SessionCostRecord
+            {
+                SessionId = "s-low", Provider = "Claude", Project = "alpha",
+                Input = 60000, CacheRead = 6000, Output = 1000, Cost = 2.1, LastActivity = DateTime.Now
+            });
+            snap.ExpensiveSessions.Add(new SessionCostRecord
+            {
+                SessionId = "s-high", Provider = "Claude", Project = "beta",
+                Input = 10000, CacheRead = 90000, Output = 1000, Cost = 4.0, LastActivity = DateTime.Now
+            });
+            SessionCostRecord drop = CacheEfficiencyAdvisor.FindCacheDrop(snap, 30);
+            Assert.NotNull(drop, "Heavy session below 30% cache hit must trigger CacheEfficiencyAdvisor");
+            Assert.Equal("s-low", drop.SessionId);
+
+            DayStat[] days = new[]
+            {
+                new DayStat(DateTime.Today.AddDays(-1), 1000, 4.0, 10),
+                new DayStat(DateTime.Today, 2000, 6.0, 20)
+            };
+            double eom = BudgetForecast.EstimateMonthEnd(50.0, days, new DateTime(2026, 11, 10));
+            Assert.Equal(50.0 + 5.0 * 20, eom, "EOM projection must equal MTD + 7d daily pace * remaining days");
+            Assert.Equal(50.0, BudgetForecast.EstimateMonthEnd(50.0, days, new DateTime(2026, 11, 30)), "Last day of month must return MTD");
+
+            int ideScore = ProcessHelper.ScoreWindowMatch("main.cs - widget-claude - Visual Studio Code", "widget-claude", @"d:\dev\widget-claude", "Cline");
+            int genericScore = ProcessHelper.ScoreWindowMatch("widget-claude - Notepad", "widget-claude", @"d:\dev\widget-claude", "Cline");
+            int wtScore = ProcessHelper.ScoreWindowMatch("myproj - Windows Terminal", "", @"d:\dev\myproj\.worktrees\feat-1", "Claude");
+            Assert.True(ideScore > genericScore, "Matching IDE window must rank higher than generic window");
+            Assert.True(wtScore >= 3, "Worktree grandparent name must match terminal host window");
+        }
+
+        public static void Test_NewFeatures_Cline_Copilot_CustomJsonl_And_ExplorerFilters()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.CacheFilePath = null;
+            sc.ScanCline = true;
+            sc.ScanCopilot = true;
+            sc.ScanClaude = false; sc.ScanGemini = false; sc.ScanCodex = false; sc.ScanGeminiCli = false; sc.ScanOpenCode = false;
+
+            string tmp = Path.Combine(Path.GetTempPath(), "cuw_newscan_" + Guid.NewGuid().ToString("N"));
+            string clineTaskDir = Path.Combine(tmp, "cline", "task123");
+            string cpDir = Path.Combine(tmp, ".copilot");
+            string customDir = Path.Combine(tmp, "custom");
+            Directory.CreateDirectory(clineTaskDir);
+            Directory.CreateDirectory(cpDir);
+            Directory.CreateDirectory(customDir);
+            try
+            {
+                long tsMs = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+                string clineFile = Path.Combine(clineTaskDir, "ui_messages.json");
+                File.WriteAllText(clineFile, string.Format(CultureInfo.InvariantCulture,
+                    "[{{\"ts\":{0},\"type\":\"say\",\"say\":\"api_req_started\",\"text\":\"{{\\\"tokensIn\\\":2000,\\\"tokensOut\\\":500,\\\"cacheReads\\\":1000,\\\"cacheWrites\\\":200,\\\"cost\\\":0.12,\\\"model\\\":\\\"claude-sonnet-4-5\\\"}}\"}}]",
+                    tsMs));
+
+                string cpFile = Path.Combine(cpDir, "session.json");
+                File.WriteAllText(cpFile, string.Format(CultureInfo.InvariantCulture,
+                    "{{\"sessionId\":\"cp1\",\"cwd\":\"d:\\\\repos\\\\appX\",\"requests\":[{{\"requestId\":\"r1\",\"modelId\":\"gpt-4.1\",\"timestamp\":{0},\"result\":{{\"usage\":{{\"promptTokens\":3000,\"completionTokens\":400,\"cachedTokens\":500}}}}}}]}}",
+                    tsMs));
+
+                string customFile = Path.Combine(customDir, "aider.jsonl");
+                File.WriteAllText(customFile, string.Format(CultureInfo.InvariantCulture,
+                    "{{\"timestamp\":\"{0}\",\"provider\":\"Custom\",\"model\":\"gpt-5\",\"project\":\"customProj\",\"usage\":{{\"input_tokens\":1000,\"output_tokens\":200,\"cached_tokens\":100}},\"cost\":0.05}}",
+                    DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")));
+
+                sc.ClineRoots = delegate { return new List<string> { Path.Combine(tmp, "cline") }; };
+                sc.CopilotDirs = delegate { return new List<string> { cpDir }; };
+                sc.CustomJsonlDirs = customDir;
+                sc.Roots = delegate { return new List<string>(); };
+                sc.Scan();
+
+                UsageSnapshot snap = sc.Snapshot();
+                Assert.Equal(3700L, snap.ClineToday.Total, "Cline tokensIn+Out+CacheReads+Writes must total 3700");
+                Assert.Equal(3400L, snap.CopilotToday.Total, "Copilot tokens total must equal 3400");
+                Assert.Equal(8400L, snap.TodayTotal.Total, "TodayTotal must sum Cline + Copilot + Custom");
+
+                // Verify ProjectExplorerForm cross-tab provider + search filters
+                snap.ToolBreakdown.Add(new ToolUsageRecord { Provider = "Cline", Tool = "edit_file", Calls = 3, Tokens = 1200, Cost = 0.05 });
+                snap.ToolBreakdown.Add(new ToolUsageRecord { Provider = "Copilot", Tool = "search_grep", Calls = 2, Tokens = 900, Cost = 0.02 });
+                using (ProjectExplorerForm form = new ProjectExplorerForm(snap, new HistoryStore(Path.Combine(tmp, "hist.json")), 10.0, 100.0, 45.0))
+                {
+                    IntPtr h = form.Handle;
+                    ComboBox cbProv = typeof(ProjectExplorerForm).GetField("_providerFilter", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form) as ComboBox;
+                    ListView lvProj = typeof(ProjectExplorerForm).GetField("_list", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form) as ListView;
+                    ListView lvSess = typeof(ProjectExplorerForm).GetField("_sessionList", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form) as ListView;
+                    ListView lvTools = typeof(ProjectExplorerForm).GetField("_toolList", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(form) as ListView;
+
+                    cbProv.SelectedIndex = Array.IndexOf((string[])typeof(ProjectExplorerForm).GetField("FilterProviders", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null), "Copilot");
+                    Assert.Equal(1, lvTools.Items.Count, "Copilot provider filter must narrow Tools list to Copilot");
+                    Assert.Equal("search_grep", lvTools.Items[0].Text);
+                    Assert.True(lvSess.Items.Count >= 1 && lvSess.Items[0].SubItems[1].Text == "Copilot", "Provider filter must also filter Sessions list");
+                    Assert.True(lvProj.Items.Count >= 1, "Projects list must stay populated for Copilot");
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(tmp, true); } catch { }
+            }
+        }
+
+        public static void Test_Pass2_CopilotFullCache_CustomCase_SettingsPreservation_And_Exports()
+        {
+            Pricing pricing = Pricing.Load();
+            UsageScanner sc = new UsageScanner(pricing);
+            sc.CacheFilePath = null;
+            sc.ScanClaude = true;
+            sc.ScanGemini = false; sc.ScanCodex = true; sc.ScanGeminiCli = false; sc.ScanOpenCode = false;
+            sc.ScanCline = true; sc.ScanCopilot = true;
+
+            string tmp = Path.Combine(Path.GetTempPath(), "cuw_pass2_test_" + Guid.NewGuid().ToString("N"));
+            string dirA = Path.Combine(tmp, "a");
+            string dirB = Path.Combine(tmp, "b");
+            string cpDir = Path.Combine(tmp, ".copilot");
+            Directory.CreateDirectory(dirA);
+            Directory.CreateDirectory(dirB);
+            Directory.CreateDirectory(cpDir);
+            try
+            {
+                long tsMs = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+                // 100% cached Copilot turn: inTok == cRead (1000 == 1000) must yield Input=0, CacheRead=1000, Total=1200 (not double-counted 2200)
+                File.WriteAllText(Path.Combine(cpDir, "fullcache.json"), string.Format(CultureInfo.InvariantCulture,
+                    "{{\"sessionId\":\"cp-fc\",\"requests\":[{{\"requestId\":\"r1\",\"modelId\":\"gpt-4.1\",\"timestamp\":{0},\"result\":{{\"usage\":{{\"promptTokens\":1000,\"completionTokens\":200,\"cachedTokens\":1000}}}}}}]}}",
+                    tsMs));
+
+                // Same basename usage.jsonl in two directories with lowercase providers
+                string nowIso = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                File.WriteAllText(Path.Combine(dirA, "usage.jsonl"), string.Format(CultureInfo.InvariantCulture,
+                    "{{\"timestamp\":\"{0}\",\"provider\":\"claude\",\"model\":\"claude-sonnet-4-5\",\"project\":\"pA\",\"usage\":{{\"input_tokens\":500,\"output_tokens\":100}}}}",
+                    nowIso));
+                File.WriteAllText(Path.Combine(dirB, "usage.jsonl"), string.Format(CultureInfo.InvariantCulture,
+                    "{{\"timestamp\":\"{0}\",\"provider\":\"codex\",\"model\":\"gpt-5-codex\",\"project\":\"pB\",\"usage\":{{\"input_tokens\":600,\"output_tokens\":50}}}}",
+                    nowIso));
+
+                sc.Roots = delegate { return new List<string>(); };
+                sc.CopilotDirs = delegate { return new List<string> { cpDir }; };
+                sc.CustomJsonlRoots = delegate { return new List<string> { dirA, dirB }; };
+                sc.Scan();
+
+                UsageSnapshot s1 = sc.Snapshot();
+                Assert.Equal(0L, s1.CopilotToday.Input, "100%-cached Copilot turn must not double-count cached promptTokens into Input");
+                Assert.Equal(1000L, s1.CopilotToday.CacheRead);
+                Assert.Equal(1200L, s1.CopilotToday.Total);
+                Assert.Equal(600L, s1.ClaudeToday.Total, "Lowercase 'claude' provider in Custom JSONL must normalize canonically to ClaudeToday");
+                Assert.Equal(650L, s1.CodexToday.Total, "Same-filename usage.jsonl in second folder must not collide on dedup key");
+
+                // StatusFormatter must include Cline/Copilot when week total > 0
+                s1.ClineToday.Input = 100; s1.ClineWeek.Input = 100;
+                string statusTxt = StatusFormatter.Format(new RateLimitSnapshot(), s1, true, false, true, null);
+                Assert.True(statusTxt.Contains("Copilot:"), "StatusFormatter must include Copilot summary");
+                Assert.True(statusTxt.Contains("Cline:"), "StatusFormatter must include Cline summary");
+
+                // FloatingForm budget EOM forecast & daily target line must render cleanly
+                bool oldZen = Opts.ZenMode;
+                try
+                {
+                    Opts.ZenMode = false;
+                    using (FloatingForm ff = new FloatingForm())
+                    {
+                        IntPtr fh = ff.Handle;
+                        ViewModel vm = new ViewModel
+                        {
+                            Usage = s1,
+                            Limits = new RateLimitSnapshot(),
+                            BudgetDaily = 5.0,
+                            BudgetMonthly = 100.0,
+                            MonthCost = 40.0,
+                            History = new[] { new DayStat(DateTime.Today.AddDays(-1), 500, 2.0, 2), new DayStat(DateTime.Today, 1200, 3.0, 3) }
+                        };
+                        ff.Compact = false;
+                        ff.SetData(vm);
+                        using (Bitmap bmp = new Bitmap(Math.Max(10, ff.Width), Math.Max(10, ff.Height)))
+                            ff.DrawToBitmap(bmp, new Rectangle(0, 0, ff.Width, ff.Height));
+                    }
+                }
+                finally { Opts.ZenMode = oldZen; }
+
+                // SettingsForm unbuilt tabs must preserve new config fields (Cline, Copilot, CacheDrop, CustomSoundPath)
+                bool hadCfg = File.Exists(Paths.ConfigFile);
+                byte[] prevCfg = hadCfg ? File.ReadAllBytes(Paths.ConfigFile) : null;
+                try
+                {
+                    AppConfig cfg = new AppConfig
+                    {
+                        CacheDropAlertEnabled = false,
+                        CacheDropMinPercent = 42,
+                        CustomSoundPath = @"C:\custom\ping.wav",
+                        ScanCline = false,
+                        ScanCopilot = false,
+                        CustomJsonlDirs = @"C:\logs"
+                    };
+                    SettingsCallbacks cb = new SettingsCallbacks();
+                    using (SettingsForm sf = new SettingsForm(cfg, cb))
+                    {
+                        IntPtr sh = sf.Handle;
+                        MethodInfo miApply = typeof(SettingsForm).GetMethod("OnApply", BindingFlags.NonPublic | BindingFlags.Instance);
+                        miApply.Invoke(sf, new object[] { null, EventArgs.Empty });
+                        Assert.False(cfg.CacheDropAlertEnabled, "Unbuilt Alerts tab must preserve CacheDropAlertEnabled");
+                        Assert.Equal(42, cfg.CacheDropMinPercent, "Unbuilt Alerts tab must preserve CacheDropMinPercent");
+                        Assert.Equal(@"C:\custom\ping.wav", cfg.CustomSoundPath, "Unbuilt Alerts tab must preserve CustomSoundPath");
+                        Assert.False(cfg.ScanCline, "Unbuilt Data tab must preserve ScanCline");
+                        Assert.False(cfg.ScanCopilot, "Unbuilt Data tab must preserve ScanCopilot");
+                        Assert.Equal(@"C:\logs", cfg.CustomJsonlDirs, "Unbuilt Data tab must preserve CustomJsonlDirs");
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        if (hadCfg) File.WriteAllBytes(Paths.ConfigFile, prevCfg);
+                        else if (File.Exists(Paths.ConfigFile)) File.Delete(Paths.ConfigFile);
+                    }
+                    catch { }
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(tmp, true); } catch { }
+            }
+        }
     }
 
     public static class TestRunner

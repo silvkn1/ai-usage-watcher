@@ -283,18 +283,24 @@ namespace ClaudeUsageWidget
                 if ((DateTime.Now - _at).TotalMinutes < 10) return;
                 _at = DateTime.Now;   // jangan ulangi terus saat gagal
             }
-            List<string> foundClaude = new List<string>();
-            List<string> foundCodex = new List<string>();
             try
             {
-                Task t = Task.Run(delegate { Discover(foundClaude, foundCodex); });
+                Task t = Task.Run(delegate { DiscoverAndPublish(); });
                 if (!t.Wait(8000)) Log.Write("wsl: discovery timeout");
             }
             catch (Exception ex) { Log.Write("wsl", ex); }
+        }
+
+        private static void DiscoverAndPublish()
+        {
+            List<string> foundClaude = new List<string>();
+            List<string> foundCodex = new List<string>();
+            Discover(foundClaude, foundCodex);
+            // Only publish complete lists under Gate so a timed-out Wait never races with Discover mutating them.
             lock (Gate)
             {
-                _cache = new List<string>(foundClaude);
-                _codexCache = new List<string>(foundCodex);
+                _cache = foundClaude;
+                _codexCache = foundCodex;
             }
         }
 
@@ -305,11 +311,12 @@ namespace ClaudeUsageWidget
             ProcessStartInfo psi = new ProcessStartInfo(wsl, "-l --running -q");
             psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true;
             psi.StandardOutputEncoding = Encoding.Unicode;   // wsl.exe menulis UTF-16
-            string output;
+            string output = "";
             using (Process p = Process.Start(psi))
             {
-                if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return; }
-                output = p.StandardOutput.ReadToEnd();
+                Task<string> readTask = Task.Run(delegate { try { return p.StandardOutput.ReadToEnd(); } catch { return ""; } });
+                if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } readTask.Wait(200); return; }
+                output = readTask.Wait(1000) ? readTask.Result : "";
             }
             foreach (string raw in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
             {

@@ -56,11 +56,14 @@ namespace ClaudeUsageWidget
         private readonly NumericUpDown _currencyRate = new NumericUpDown();
         private readonly CheckBox _scanClaude = new CheckBox(), _scanGemini = new CheckBox(), _scanCodex = new CheckBox(), _adminData = new CheckBox();
         private readonly CheckBox _scanGeminiCli = new CheckBox(), _scanOpenCode = new CheckBox();
+        private readonly CheckBox _scanCline = new CheckBox(), _scanCopilot = new CheckBox();
+        private readonly TextBox _customJsonlDirs = new TextBox();
         private readonly CheckBox _ollamaOn = new CheckBox();
         private readonly NumericUpDown _ollamaPort = new NumericUpDown();
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
-        private readonly CheckBox _burnRateOn = new CheckBox();
-        private readonly NumericUpDown _burnRateTokens = new NumericUpDown(), _cooldownMins = new NumericUpDown();
+        private readonly TextBox _wavPath = new TextBox();
+        private readonly CheckBox _burnRateOn = new CheckBox(), _cacheDropOn = new CheckBox();
+        private readonly NumericUpDown _burnRateTokens = new NumericUpDown(), _cooldownMins = new NumericUpDown(), _cacheDropPct = new NumericUpDown();
         private readonly CheckBox _quietOn = new CheckBox(), _digestOn = new CheckBox(), _contextBar = new CheckBox(), _zenMode = new CheckBox();
         private readonly NumericUpDown _quietStart = new NumericUpDown(), _quietEnd = new NumericUpDown(), _digestHour = new NumericUpDown();
         private readonly ComboBox _cardLayout = new ComboBox(), _pillMode = new ComboBox(), _digestSchedule = new ComboBox(), _scale = new ComboBox(), _probeModel = new ComboBox(), _ctxWin = new ComboBox();
@@ -427,11 +430,40 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.alerts.th"), _alertTh);
             AddCheck(t, _resetOn, L.T("set.alerts.reset"), _cfg.ResetNotify);
             AddCheck(t, _audioOn, L.T("set.audio.enable"), _cfg.AudioAlertsEnabled);
+            _wavPath.Width = 140; _wavPath.Text = _cfg.CustomSoundPath ?? ""; _wavPath.Margin = new Padding(0, 2, 0, 0);
+            Button wavBrowse = new Button { Text = L.T("set.browse"), AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+            wavBrowse.Click += delegate
+            {
+                using (OpenFileDialog d = new OpenFileDialog())
+                {
+                    d.Filter = L.T("set.audio.wav.filter");
+                    d.CheckFileExists = true;
+                    if (d.ShowDialog(this) == DialogResult.OK) _wavPath.Text = d.FileName;
+                }
+            };
+            Button wavClear = new Button { Text = L.T("set.audio.clear"), AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+            wavClear.Click += delegate { _wavPath.Text = ""; };
+            Button wavTest = new Button { Text = L.T("set.audio.test"), AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+            wavTest.Click += delegate
+            {
+                string prev = AudioAlert.CustomWavPath;
+                AudioAlert.CustomWavPath = _wavPath.Text.Trim();
+                AudioAlert.PlayPrompt();
+                AudioAlert.CustomWavPath = prev;
+            };
+            FlowLayoutPanel wavRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            wavRow.Controls.Add(_wavPath); wavRow.Controls.Add(wavBrowse); wavRow.Controls.Add(wavClear); wavRow.Controls.Add(wavTest);
+            AddRow(t, L.T("set.audio.wav"), wavRow);
+
             AddCheck(t, _contextOn, L.T("set.context.enable"), _cfg.ContextAlertEnabled);
             AddCheck(t, _burnRateOn, L.T("set.burnrate.enable"), _cfg.BurnRateAlertEnabled);
             _burnRateTokens.Minimum = 1000; _burnRateTokens.Maximum = 10000000; _burnRateTokens.Increment = 10000; _burnRateTokens.Width = 110;
             _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
             AddRow(t, L.T("set.burnrate.th"), _burnRateTokens);
+            AddCheck(t, _cacheDropOn, L.T("set.cachedrop.enable"), _cfg.CacheDropAlertEnabled);
+            _cacheDropPct.Minimum = 5; _cacheDropPct.Maximum = 95; _cacheDropPct.Width = 80;
+            _cacheDropPct.Value = Math.Max(5, Math.Min(95, _cfg.CacheDropMinPercent <= 0 ? 30 : _cfg.CacheDropMinPercent));
+            AddRow(t, L.T("set.cachedrop.pct"), _cacheDropPct);
             _cooldownMins.Minimum = 1; _cooldownMins.Maximum = 1440; _cooldownMins.Width = 90;
             _cooldownMins.Value = Math.Max(1, Math.Min(1440, _cfg.AlertCooldownMinutes <= 0 ? 15 : _cfg.AlertCooldownMinutes));
             AddRow(t, L.T("set.cooldown"), _cooldownMins);
@@ -535,6 +567,8 @@ namespace ClaudeUsageWidget
             AddCheck(t, _scanCodex, L.T("set.codex"), _cfg.ScanCodex);
             AddCheck(t, _scanGeminiCli, L.T("set.geminicli"), _cfg.ScanGeminiCli);
             AddCheck(t, _scanOpenCode, L.T("set.opencode"), _cfg.ScanOpenCode);
+            AddCheck(t, _scanCline, L.T("set.cline"), _cfg.ScanCline);
+            AddCheck(t, _scanCopilot, L.T("set.copilot"), _cfg.ScanCopilot);
             if ((_cb != null && _cb.IsOpenCodeSqliteMissing != null && _cb.IsOpenCodeSqliteMissing()) ||
                 (System.IO.File.Exists(System.IO.Path.Combine(Paths.OpenCodeDataDir, "opencode.db")) && ProcessHelper.FindExecutableOnPath("sqlite3.exe") == null))
             {
@@ -569,6 +603,24 @@ namespace ClaudeUsageWidget
             extraRow.AutoSize = true; extraRow.WrapContents = false; extraRow.Margin = new Padding(0);
             extraRow.Controls.Add(_extraDirs); extraRow.Controls.Add(browseExtra);
             AddRow(t, L.T("set.extradirs"), extraRow);
+
+            _customJsonlDirs.Width = 160; _customJsonlDirs.Text = _cfg.CustomJsonlDirs ?? "";
+            _customJsonlDirs.Margin = new Padding(0, 2, 0, 0);
+            Button browseJsonl = new Button { Text = L.T("set.browse"), AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
+            browseJsonl.Click += delegate
+            {
+                using (FolderBrowserDialog d = new FolderBrowserDialog())
+                {
+                    if (d.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(d.SelectedPath)) return;
+                    string cur = _customJsonlDirs.Text.Trim();
+                    string picked = d.SelectedPath.Trim();
+                    if (string.IsNullOrEmpty(cur)) _customJsonlDirs.Text = picked;
+                    else if (cur.IndexOf(picked, StringComparison.OrdinalIgnoreCase) < 0) _customJsonlDirs.Text = cur.TrimEnd(';') + ";" + picked;
+                }
+            };
+            FlowLayoutPanel jsonlRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            jsonlRow.Controls.Add(_customJsonlDirs); jsonlRow.Controls.Add(browseJsonl);
+            AddRow(t, L.T("set.customjsonl"), jsonlRow);
             AddNote(t, L.T("set.sources.note"), "dim");
             AddCheck(t, _projects, L.T("set.projects"), _cfg.ShowProjects);
 
@@ -1015,6 +1067,12 @@ namespace ClaudeUsageWidget
                     return false;
                 }
             }
+            if (_tabBuilt[2] && !string.IsNullOrWhiteSpace(_wavPath.Text) && !AudioAlert.IsValidWavFile(_wavPath.Text))
+            {
+                SelectTab(2);
+                MessageBox.Show(this, L.T("msg.wav.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
             if (_tabBuilt[1])
             {
                 try { Autostart.Set(_auto.Checked); } catch (Exception ex) { Log.Write("autostart", ex); }
@@ -1062,9 +1120,12 @@ namespace ClaudeUsageWidget
                 _cfg.HookNotifyMinSeconds = (int)_stopSecs.Value;
                 _cfg.HookNotifyInput = _inputOn.Checked;
                 _cfg.AudioAlertsEnabled = _audioOn.Checked;
+                _cfg.CustomSoundPath = _wavPath.Text.Trim();
                 _cfg.ContextAlertEnabled = _contextOn.Checked;
                 _cfg.BurnRateAlertEnabled = _burnRateOn.Checked;
                 _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
+                _cfg.CacheDropAlertEnabled = _cacheDropOn.Checked;
+                _cfg.CacheDropMinPercent = (int)_cacheDropPct.Value;
                 _cfg.AlertCooldownMinutes = (int)_cooldownMins.Value;
                 _cfg.QuietHoursEnabled = _quietOn.Checked;
                 _cfg.QuietStartHour = (int)_quietStart.Value;
@@ -1082,9 +1143,12 @@ namespace ClaudeUsageWidget
                 _cfg.ScanCodex = _scanCodex.Checked;
                 _cfg.ScanGeminiCli = _scanGeminiCli.Checked;
                 _cfg.ScanOpenCode = _scanOpenCode.Checked;
+                _cfg.ScanCline = _scanCline.Checked;
+                _cfg.ScanCopilot = _scanCopilot.Checked;
                 _cfg.ScanWsl = _wsl.Checked;
                 _cfg.ShowProjects = _projects.Checked;
                 _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
+                _cfg.CustomJsonlDirs = _customJsonlDirs.Text.Trim();
                 _cfg.OllamaEnabled = _ollamaOn.Checked;
                 _cfg.OllamaPort = (int)_ollamaPort.Value;
             }
@@ -1243,9 +1307,12 @@ namespace ClaudeUsageWidget
                 _alertTh.Text = _cfg.AlertThresholds ?? "80,95";
                 _resetOn.Checked = _cfg.ResetNotify;
                 _audioOn.Checked = _cfg.AudioAlertsEnabled;
+                _wavPath.Text = _cfg.CustomSoundPath ?? "";
                 _contextOn.Checked = _cfg.ContextAlertEnabled;
                 _burnRateOn.Checked = _cfg.BurnRateAlertEnabled;
                 _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
+                _cacheDropOn.Checked = _cfg.CacheDropAlertEnabled;
+                _cacheDropPct.Value = Math.Max(5, Math.Min(95, _cfg.CacheDropMinPercent <= 0 ? 30 : _cfg.CacheDropMinPercent));
                 _cooldownMins.Value = Math.Max(1, Math.Min(1440, _cfg.AlertCooldownMinutes <= 0 ? 15 : _cfg.AlertCooldownMinutes));
                 _webhookOn.Checked = _cfg.WebhookEnabled;
                 _webhookUrl.Text = _cfg.GetWebhookUrl() ?? "";
@@ -1269,9 +1336,12 @@ namespace ClaudeUsageWidget
                 _scanCodex.Checked = _cfg.ScanCodex;
                 _scanGeminiCli.Checked = _cfg.ScanGeminiCli;
                 _scanOpenCode.Checked = _cfg.ScanOpenCode;
+                _scanCline.Checked = _cfg.ScanCline;
+                _scanCopilot.Checked = _cfg.ScanCopilot;
                 _wsl.Checked = _cfg.ScanWsl;
                 _projects.Checked = _cfg.ShowProjects;
                 _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
+                _customJsonlDirs.Text = _cfg.CustomJsonlDirs ?? "";
                 _ollamaOn.Checked = _cfg.OllamaEnabled;
                 _ollamaPort.Value = _cfg.OllamaPort > 0 && _cfg.OllamaPort <= 65535 ? _cfg.OllamaPort : 11434;
             }

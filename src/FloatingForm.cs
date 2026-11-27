@@ -19,6 +19,8 @@ namespace ClaudeUsageWidget
         public bool ScanCodex = true;
         public bool ScanGeminiCli = true;
         public bool ScanOpenCode = true;
+        public bool ScanCline = true;
+        public bool ScanCopilot = true;
         public OllamaStatus Ollama;
         public string ProbeStatus;
         public DayStat[] History;
@@ -68,6 +70,8 @@ namespace ClaudeUsageWidget
         public static Color CodexColor { get { return IsLight ? Color.FromArgb(16, 138, 101) : Color.FromArgb(16, 163, 127); } }
         public static Color GeminiCliColor { get { return IsLight ? Color.FromArgb(14, 116, 144) : Color.FromArgb(56, 189, 248); } }
         public static Color OpenCodeColor { get { return IsLight ? Color.FromArgb(147, 51, 234) : Color.FromArgb(192, 132, 252); } }
+        public static Color ClineColor { get { return IsLight ? Color.FromArgb(13, 148, 136) : Color.FromArgb(45, 212, 191); } }
+        public static Color CopilotColor { get { return IsLight ? Color.FromArgb(109, 40, 217) : Color.FromArgb(139, 92, 246); } }
         public static Color ConfirmColor { get { return IsLight ? Color.FromArgb(124, 58, 237) : Color.FromArgb(192, 132, 252); } }
     }
 
@@ -463,6 +467,7 @@ namespace ClaudeUsageWidget
             public Color Color = Palette.Text;
             public double Percent = -1;
             public double Marker = -1;          // posisi penanda laju (0..1) searah dengan isi bar
+            public double TargetLine;           // garis batas harian pada grafik Spark
             public bool Warn, Faded, ClickDone, ClickSessionMenu, HasTerminalBtn;
             public double[] Series;             // untuk Kind.Spark
             public DayStat[] Days;              // data harian di balik Series
@@ -563,6 +568,28 @@ namespace ClaudeUsageWidget
                 ocCol.Today = u.OpenCodeToday;
                 ocCol.Models = u.TodayOpenCode;
                 allCols.Add(ocCol);
+            }
+
+            if (vm.ScanCline && u.ClineWeek.Total > 0)
+            {
+                CardCol clCol = new CardCol();
+                clCol.Title = "Cline";
+                clCol.TitleColor = Palette.ClineColor;
+                clCol.CapturedAt = u.ScannedAt != DateTime.MinValue ? u.ScannedAt : DateTime.Now;
+                clCol.Today = u.ClineToday;
+                clCol.Models = u.TodayCline;
+                allCols.Add(clCol);
+            }
+
+            if (vm.ScanCopilot && u.CopilotWeek.Total > 0)
+            {
+                CardCol cpCol = new CardCol();
+                cpCol.Title = "Copilot";
+                cpCol.TitleColor = Palette.CopilotColor;
+                cpCol.CapturedAt = u.ScannedAt != DateTime.MinValue ? u.ScannedAt : DateTime.Now;
+                cpCol.Today = u.CopilotToday;
+                cpCol.Models = u.TodayCopilot;
+                allCols.Add(cpCol);
             }
 
             if (ShowCompact)
@@ -749,7 +776,11 @@ namespace ClaudeUsageWidget
                 }
 
                 if (vm.BudgetDaily > 0) AddBudget(rows, "budget.day", u.TodayTotal.Cost, vm.BudgetDaily);
-                if (vm.BudgetMonthly > 0) AddBudget(rows, "budget.month", vm.MonthCost, vm.BudgetMonthly);
+                if (vm.BudgetMonthly > 0)
+                {
+                    double eom = BudgetForecast.EstimateMonthEnd(vm.MonthCost, vm.History, DateTime.Now);
+                    AddBudget(rows, "budget.month", vm.MonthCost, vm.BudgetMonthly, eom);
+                }
                 if (vm.ShowProjects && u.WeekProjects.Count > 0) AddProjects(rows, u.WeekProjects, 5);
 
                 // 6. Sparkline (7-day history)
@@ -763,6 +794,7 @@ namespace ClaudeUsageWidget
                         Row sp = new Row(Kind.Spark, L.T("hist.title", ser.Length, Fmt.Usd(total)), L.T("hist.peak", Fmt.Usd(peak)));
                         sp.Series = ser;
                         sp.Days = vm.History;
+                        if (vm.BudgetDaily > 0) sp.TargetLine = vm.BudgetDaily;
                         rows.Add(sp);
                     }
                 }
@@ -796,11 +828,12 @@ namespace ClaudeUsageWidget
             return rows;
         }
 
-        private static void AddBudget(List<Row> rows, string key, double cost, double budget)
+        private static void AddBudget(List<Row> rows, string key, double cost, double budget, double eom = 0)
         {
             int pct = (int)Math.Round(cost / budget * 100);
-            Row r = new Row(Kind.Small, L.T(key, Fmt.Usd(cost), Fmt.Usd(budget), pct), null);
-            r.Warn = pct >= 80;
+            string right = eom > 0 ? L.T("budget.eom", Fmt.Usd(eom)) : null;
+            Row r = new Row(Kind.Small, L.T(key, Fmt.Usd(cost), Fmt.Usd(budget), pct), right);
+            r.Warn = pct >= 80 || (eom > 0 && eom > budget);
             rows.Add(r);
         }
 
@@ -1303,10 +1336,12 @@ namespace ClaudeUsageWidget
                 else if (col.Title.IndexOf("Codex", StringComparison.OrdinalIgnoreCase) >= 0) prefix = "CX";
                 else if (col.Title.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0) prefix = "GM";
                 else if (col.Title.IndexOf("OpenCode", StringComparison.OrdinalIgnoreCase) >= 0) prefix = "OC";
+                else if (col.Title.IndexOf("Cline", StringComparison.OrdinalIgnoreCase) >= 0) prefix = "CL";
+                else if (col.Title.IndexOf("Copilot", StringComparison.OrdinalIgnoreCase) >= 0) prefix = "CP";
             }
             if (col.Limit5 != null && col.Limit5.Available)
                 return prefix + " 5h: " + PctShort(col.Limit5);
-            if (col.Today != null && col.Today.Total > 0 && (prefix == "CX" || prefix == "GM" || prefix == "OC"))
+            if (col.Today != null && col.Today.Total > 0 && (prefix == "CX" || prefix == "GM" || prefix == "OC" || prefix == "CL" || prefix == "CP"))
                 return prefix + ": " + Fmt.Tokens(col.Today.Total);
             return prefix + " 5h: " + L.T("na");
         }
@@ -1648,17 +1683,27 @@ namespace ClaudeUsageWidget
                     int n = r.Series.Length;
                     double peak = 0;
                     foreach (double v in r.Series) if (v > peak) peak = v;
+                    double scalePeak = r.TargetLine > 0 ? Math.Max(peak, r.TargetLine) : peak;
                     float slot = (right - x) / (float)n, bw = Math.Max(2f, slot - 2f * s);
                     _sparkN = n; _sparkX = x; _sparkSlot = slot; _sparkRowTop = y; _sparkRowBottom = y + rh;   // geometri untuk hover
                     using (Pen basePen = new Pen(Palette.Track, Math.Max(1f, s)))
                         g.DrawLine(basePen, x, bottom, right, bottom);
                     for (int i = 0; i < n; i++)
                     {
-                        float hgt = peak <= 0 ? 0 : (float)(r.Series[i] / peak) * (bottom - top);
+                        float hgt = scalePeak <= 0 ? 0 : (float)(r.Series[i] / scalePeak) * (bottom - top);
                         if (r.Series[i] > 0 && hgt < 2f * s) hgt = 2f * s;
                         Color bc = i == _hoverBar ? Palette.Accent : (i == n - 1 ? Palette.Green : ThemeUtil.Blend(Palette.Dim, Palette.Track, 0.35));
                         using (SolidBrush bb = new SolidBrush(bc))
                             g.FillRectangle(bb, x + i * slot + (slot - bw) / 2f, bottom - hgt, bw, hgt);
+                    }
+                    if (r.TargetLine > 0 && scalePeak > 0)
+                    {
+                        float ty = bottom - (float)(r.TargetLine / scalePeak) * (bottom - top);
+                        using (Pen tp = new Pen(Color.FromArgb(190, Palette.Amber), Math.Max(1f, s)))
+                        {
+                            tp.DashStyle = DashStyle.Dash;
+                            g.DrawLine(tp, x, ty, right, ty);
+                        }
                     }
                 }
                 y += rh;
@@ -1713,30 +1758,41 @@ namespace ClaudeUsageWidget
             int cx = x + lw;
             int maxChipRight = right - ackW - (int)(4 * s);
             int availW = maxChipRight - cx;
-            bool compactLabels = availW < (int)(260 * s);
-            List<KeyValuePair<string, Color>> chips = new List<KeyValuePair<string, Color>>();
-            if (sess.ConfirmCount > 0)
-                chips.Add(new KeyValuePair<string, Color>(
-                    compactLabels ? "? " + sess.ConfirmCount : L.T("sess.chip.confirm", sess.ConfirmCount),
-                    _pulsePhase ? Palette.ConfirmColor : ThemeUtil.Blend(Palette.ConfirmColor, Palette.Text, 0.25)));
-            if (sess.RunningCount > 0)
-                chips.Add(new KeyValuePair<string, Color>(
-                    compactLabels ? "● " + sess.RunningCount : L.T("sess.chip.run", sess.RunningCount),
-                    _pulsePhase ? Palette.Amber : ThemeUtil.Blend(Palette.Amber, Palette.Text, 0.25)));
-            if (sess.DoneCount > 0)
-                chips.Add(new KeyValuePair<string, Color>(
-                    compactLabels ? "✓ " + sess.DoneCount : L.T("sess.chip.done", sess.DoneCount),
-                    Palette.Green));
-
             int chipTop = y + (int)(2 * s);
             int chipH = Math.Max(14, rh - (int)(4 * s));
             int chipGap = (int)(5 * s);
-            int firstChipX = cx;
-            for (int i = 0; i < chips.Count; i++)
+            int chipPad = (int)(10 * s);
+
+            List<string> verbose = new List<string>();
+            List<string> compact = new List<string>();
+            List<Color> colors = new List<Color>();
+            if (sess.ConfirmCount > 0)
             {
-                string txt = chips[i].Key;
-                Color col = chips[i].Value;
-                int cw = TextRenderer.MeasureText(g, txt, _fSmall, new Size(200, chipH), TextFormatFlags.NoPadding).Width + (int)(10 * s);
+                verbose.Add(L.T("sess.chip.confirm", sess.ConfirmCount));
+                compact.Add("? " + sess.ConfirmCount);
+                colors.Add(_pulsePhase ? Palette.ConfirmColor : ThemeUtil.Blend(Palette.ConfirmColor, Palette.Text, 0.25));
+            }
+            if (sess.RunningCount > 0)
+            {
+                verbose.Add(L.T("sess.chip.run", sess.RunningCount));
+                compact.Add("● " + sess.RunningCount);
+                colors.Add(_pulsePhase ? Palette.Amber : ThemeUtil.Blend(Palette.Amber, Palette.Text, 0.25));
+            }
+            if (sess.DoneCount > 0)
+            {
+                verbose.Add(L.T("sess.chip.done", sess.DoneCount));
+                compact.Add("✓ " + sess.DoneCount);
+                colors.Add(Palette.Green);
+            }
+
+            bool compactLabels = availW < (int)(260 * s) || ChipsExceedWidth(g, _fSmall, verbose, availW, chipH, chipPad, chipGap);
+            List<string> chosen = compactLabels ? compact : verbose;
+            int firstChipX = cx;
+            for (int i = 0; i < chosen.Count; i++)
+            {
+                string txt = chosen[i];
+                Color col = colors[i];
+                int cw = TextRenderer.MeasureText(g, txt, _fSmall, new Size(200, chipH), TextFormatFlags.NoPadding).Width + chipPad;
                 if (cx + cw > maxChipRight && i > 0) break;
                 Rectangle cr = new Rectangle(cx, chipTop, Math.Min(cw, Math.Max(16, maxChipRight - cx)), chipH);
                 using (SolidBrush cb = new SolidBrush(Color.FromArgb(Palette.IsLight ? 38 : 48, col))) g.FillRectangle(cb, cr);
@@ -1746,6 +1802,17 @@ namespace ClaudeUsageWidget
                 cx += cr.Width + chipGap;
             }
             _sessRowRect = new Rectangle(firstChipX, y, Math.Max(20, maxChipRight - firstChipX), rh);
+        }
+
+        internal static bool ChipsExceedWidth(Graphics g, Font font, List<string> labels, int availW, int chipH, int padW, int gap)
+        {
+            int total = 0;
+            for (int i = 0; i < labels.Count; i++)
+            {
+                if (i > 0) total += gap;
+                total += TextRenderer.MeasureText(g, labels[i], font, new Size(200, chipH), TextFormatFlags.NoPadding).Width + padW;
+            }
+            return total > availW;
         }
 
         private void UpdatePillTooltip(Point loc)

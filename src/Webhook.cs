@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ClaudeUsageWidget
@@ -12,9 +13,30 @@ namespace ClaudeUsageWidget
     internal static class WebhookSender
     {
         private static readonly HttpClient Http = CreateClient();
+        private static int _failCount;
+        private static volatile string _lastError;
 
-        public static int FailCount { get; private set; }
-        public static string LastError { get; private set; }
+        public static int FailCount { get { return Interlocked.CompareExchange(ref _failCount, 0, 0); } }
+        public static string LastError { get { return _lastError; } private set { _lastError = value; } }
+
+        private static void RecordError(string err, Exception ex = null)
+        {
+            Interlocked.Increment(ref _failCount);
+            LastError = err;
+            if (ex != null) Log.Write("webhook", ex);
+            else Log.Write("webhook: " + err);
+        }
+
+        internal static bool AreResolvedAddressesSafe(IPAddress[] addrs)
+        {
+            // Fail closed when DNS yields zero addresses or any private/loopback/reserved IP.
+            if (addrs == null || addrs.Length == 0) return false;
+            for (int i = 0; i < addrs.Length; i++)
+            {
+                if (IsPrivateOrReservedIp(addrs[i])) return false;
+            }
+            return true;
+        }
 
         private static HttpClient CreateClient()
         {
@@ -139,16 +161,13 @@ namespace ClaudeUsageWidget
             try
             {
                 IPAddress[] addrs = await Dns.GetHostAddressesAsync(uri.DnsSafeHost).ConfigureAwait(false);
-                for (int i = 0; i < addrs.Length; i++)
+                if (!AreResolvedAddressesSafe(addrs))
                 {
-                    if (IsPrivateOrReservedIp(addrs[i]))
-                    {
-                        string blocked = "Blocked private/loopback webhook destination IP.";
-                        FailCount++;
-                        LastError = blocked;
-                        Log.Write("webhook: " + blocked);
-                        return blocked;
-                    }
+                    string blocked = (addrs == null || addrs.Length == 0)
+                        ? "Webhook destination hostname resolved to no IP addresses."
+                        : "Blocked private/loopback webhook destination IP.";
+                    RecordError(blocked);
+                    return blocked;
                 }
 
                 string json = BuildPayload(uri.AbsoluteUri, title, message);
@@ -158,9 +177,7 @@ namespace ClaudeUsageWidget
                     if (!resp.IsSuccessStatusCode)
                     {
                         string err = "HTTP " + (int)resp.StatusCode;
-                        FailCount++;
-                        LastError = err;
-                        Log.Write("webhook: " + err);
+                        RecordError(err);
                         return err;
                     }
                     LastError = null;
@@ -170,9 +187,7 @@ namespace ClaudeUsageWidget
             catch (Exception ex)
             {
                 string err = ex.GetType().Name + ": " + ex.Message;
-                FailCount++;
-                LastError = err;
-                Log.Write("webhook", ex);
+                RecordError(err, ex);
                 return err;
             }
         }
