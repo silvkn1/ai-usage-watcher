@@ -21,12 +21,22 @@ namespace ClaudeUsageWidget
         public static string CardLayout = "auto";
         public static string MiniPillMode = "all";
         public static bool ShowContextBar = true;
+        public static double WidgetScale = 1.0;
+        public static bool ZenMode;
+        public static long ContextWindowOverride;
     }
 
     internal static class ContextLimits
     {
         public static long WindowForModel(string model)
         {
+            return WindowForModel(model, 0);
+        }
+
+        public static long WindowForModel(string model, long observedTokens)
+        {
+            if (Opts.ContextWindowOverride > 0) return Opts.ContextWindowOverride;
+            if (observedTokens > 205000L) return 1000000L;
             if (string.IsNullOrEmpty(model)) return 200000L;
             if (model.IndexOf("gemini", StringComparison.OrdinalIgnoreCase) >= 0) return 1000000L;
             if (model.IndexOf("[1m]", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -183,6 +193,17 @@ namespace ClaudeUsageWidget
             TimeSpan left = hit - DateTime.Now;
             untilHit = left < TimeSpan.Zero ? TimeSpan.Zero : left;
             return true;
+        }
+
+        public static string DailyAllowance(LimitWindow w7, DateTime now)
+        {
+            if (w7 == null || !w7.Available || w7.IsStale || w7.UsedPercent < 50 || w7.UsedPercent >= 100) return null;
+            if (w7.ResetsAt == DateTime.MinValue || w7.ResetsAt <= now) return null;
+            double hrs = (w7.ResetsAt - now).TotalHours;
+            if (hrs < 12) return null;
+            double perDay = (100.0 - w7.UsedPercent) / Math.Max(0.5, hrs / 24.0);
+            int val = Math.Max(1, (int)Math.Round(perDay));
+            return L.T("pace.allow.day", val);
         }
     }
 
@@ -498,7 +519,10 @@ namespace ClaudeUsageWidget
             }
             else if (usage != null)
             {
-                lines.Add(L.T("tip.today", Fmt.UsdShort(usage.TodayTotal.Cost)));
+                string line = L.T("tip.today", Fmt.UsdShort(usage.TodayTotal.Cost));
+                if (usage.Sessions != null && usage.Sessions.ConfirmCount > 0)
+                    line = "?" + usage.Sessions.ConfirmCount + " · " + line;
+                lines.Add(line);
             }
 
             string s = string.Join("\n", lines.ToArray());

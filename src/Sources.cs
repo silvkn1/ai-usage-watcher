@@ -28,6 +28,7 @@ namespace ClaudeUsageWidget
         public LimitWindow AntigravitySevenDay = new LimitWindow();
         public LimitWindow CodexFiveHour = new LimitWindow();
         public LimitWindow CodexSevenDay = new LimitWindow();
+        public Dictionary<string, LimitWindow> AntigravityPools = new Dictionary<string, LimitWindow>(StringComparer.OrdinalIgnoreCase);
         public DateTime CapturedAt = DateTime.MinValue;
         public bool FileFound;
         public string Source = "statusline";
@@ -87,6 +88,15 @@ namespace ClaudeUsageWidget
                     Dictionary<string, object> rl = J.Obj(o, "rate_limits");
                     s.AntigravityFiveHour = Window(J.Obj(rl, "five_hour"));
                     s.AntigravitySevenDay = Window(J.Obj(rl, "seven_day"));
+                    Dictionary<string, object> pools = J.Obj(o, "pools");
+                    if (pools != null)
+                    {
+                        foreach (KeyValuePair<string, object> kv in pools)
+                        {
+                            LimitWindow pw = Window(kv.Value as Dictionary<string, object>);
+                            if (pw.Available) s.AntigravityPools[kv.Key] = pw;
+                        }
+                    }
                 }
             }
             catch (Exception ex) { Log.Write("ratelimits.ag.read", ex); }
@@ -632,19 +642,40 @@ namespace ClaudeUsageWidget
 
                 double used5h = double.NaN, used7d = double.NaN;
                 DateTime reset5h = DateTime.MinValue, reset7d = DateTime.MinValue;
+                Dictionary<string, LimitWindow> pools = new Dictionary<string, LimitWindow>(StringComparer.OrdinalIgnoreCase);
 
-                // Cari group Gemini Models lebih dulu, fallback ke group pertama yang punya buckets
                 Dictionary<string, object> targetGroup = null;
                 for (int i = 0; i < groups.Count; i++)
                 {
                     Dictionary<string, object> g = groups[i] as Dictionary<string, object>;
                     if (g == null) continue;
                     string disp = J.Str(g, "displayName");
-                    if (disp != null && disp.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0)
+                    double g5h = double.NaN; DateTime gR5 = DateTime.MinValue;
+                    IList gBuckets = J.Arr(g, "buckets");
+                    if (gBuckets != null)
                     {
-                        targetGroup = g;
-                        break;
+                        for (int bi = 0; bi < gBuckets.Count; bi++)
+                        {
+                            Dictionary<string, object> b = gBuckets[bi] as Dictionary<string, object>;
+                            if (b == null) continue;
+                            string win = J.Str(b, "window") ?? "";
+                            string bid = J.Str(b, "bucketId") ?? "";
+                            double rem = J.Num(b, "remainingFraction");
+                            if ((win == "5h" || bid.IndexOf("5h", StringComparison.OrdinalIgnoreCase) >= 0) && !double.IsNaN(rem))
+                            {
+                                g5h = Math.Max(0.0, Math.Min(100.0, (1.0 - rem) * 100.0));
+                                DateTime dt;
+                                string rt = J.Str(b, "resetTime");
+                                if (!string.IsNullOrEmpty(rt) && DateTime.TryParse(rt, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out dt))
+                                    gR5 = dt.ToLocalTime();
+                            }
+                        }
                     }
+                    if (!double.IsNaN(g5h) && !string.IsNullOrEmpty(disp))
+                        pools[ShortPoolName(disp)] = new LimitWindow { Available = true, UsedPercent = g5h, ResetsAt = gR5 };
+
+                    if (targetGroup == null && disp != null && disp.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0)
+                        targetGroup = g;
                 }
                 if (targetGroup == null && groups.Count > 0)
                     targetGroup = groups[0] as Dictionary<string, object>;
@@ -683,7 +714,7 @@ namespace ClaudeUsageWidget
 
                 if (double.IsNaN(used5h) && double.IsNaN(used7d)) return false;
 
-                SaveRateLimitsFile(used5h, reset5h, used7d, reset7d);
+                SaveRateLimitsFile(used5h, reset5h, used7d, reset7d, pools);
                 return true;
             }
             catch (Exception ex)
@@ -734,6 +765,7 @@ namespace ClaudeUsageWidget
 
                 double used5h = double.NaN;
                 DateTime reset5h = DateTime.MinValue;
+                Dictionary<string, LimitWindow> pools = new Dictionary<string, LimitWindow>(StringComparer.OrdinalIgnoreCase);
 
                 for (int i = 0; i < configs.Count; i++)
                 {
@@ -742,19 +774,28 @@ namespace ClaudeUsageWidget
                     Dictionary<string, object> q = J.Obj(c, "quotaInfo");
                     if (q == null) continue;
                     double rem = J.Num(q, "remainingFraction");
+                    if (double.IsNaN(rem)) continue;
                     string rTime = J.Str(q, "resetTime");
-                    if (!double.IsNaN(rem))
+                    double pct = Math.Max(0.0, Math.Min(100.0, (1.0 - rem) * 100.0));
+                    DateTime dt;
+                    DateTime rDt = DateTime.MinValue;
+                    if (!string.IsNullOrEmpty(rTime) && DateTime.TryParse(rTime, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out dt))
+                        rDt = dt.ToLocalTime();
+
+                    string poolName = ClassifyModelPool(J.Str(c, "label") ?? J.Str(J.Obj(c, "modelOrAlias"), "model"));
+                    LimitWindow existingPool;
+                    if (!pools.TryGetValue(poolName, out existingPool) || pct > existingPool.UsedPercent)
+                        pools[poolName] = new LimitWindow { Available = true, UsedPercent = pct, ResetsAt = rDt };
+
+                    if (double.IsNaN(used5h) || pct > used5h)
                     {
-                        used5h = Math.Max(0.0, Math.Min(100.0, (1.0 - rem) * 100.0));
-                        DateTime dt;
-                        if (!string.IsNullOrEmpty(rTime) && DateTime.TryParse(rTime, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out dt))
-                            reset5h = dt.ToLocalTime();
-                        break;
+                        used5h = pct;
+                        reset5h = rDt;
                     }
                 }
 
                 if (double.IsNaN(used5h)) return false;
-                SaveRateLimitsFile(used5h, reset5h, double.NaN, DateTime.MinValue);
+                SaveRateLimitsFile(used5h, reset5h, double.NaN, DateTime.MinValue, pools);
                 _lastFetch = DateTime.Now;
                 return true;
             }
@@ -765,7 +806,26 @@ namespace ClaudeUsageWidget
             }
         }
 
-        private static void SaveRateLimitsFile(double used5h, DateTime reset5h, double used7d, DateTime reset7d)
+        private static string ShortPoolName(string disp)
+        {
+            if (string.IsNullOrEmpty(disp)) return "Model";
+            if (disp.IndexOf("Flash", StringComparison.OrdinalIgnoreCase) >= 0) return "Flash";
+            if (disp.IndexOf("Claude", StringComparison.OrdinalIgnoreCase) >= 0) return "Claude";
+            if (disp.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0) return "Gemini";
+            return disp.Length > 14 ? disp.Substring(0, 14) : disp;
+        }
+
+        private static string ClassifyModelPool(string modelOrLabel)
+        {
+            if (string.IsNullOrEmpty(modelOrLabel)) return "Gemini";
+            if (modelOrLabel.IndexOf("claude", StringComparison.OrdinalIgnoreCase) >= 0) return "Claude";
+            if (modelOrLabel.IndexOf("flash", StringComparison.OrdinalIgnoreCase) >= 0) return "Flash";
+            if (modelOrLabel.IndexOf("pro", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                modelOrLabel.IndexOf("gemini", StringComparison.OrdinalIgnoreCase) >= 0) return "Pro";
+            return modelOrLabel.Length > 14 ? modelOrLabel.Substring(0, 14) : modelOrLabel;
+        }
+
+        private static void SaveRateLimitsFile(double used5h, DateTime reset5h, double used7d, DateTime reset7d, Dictionary<string, LimitWindow> pools = null)
         {
             double nowUnix = (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
             StringBuilder sb = new StringBuilder();
@@ -791,7 +851,28 @@ namespace ClaudeUsageWidget
             }
 
             sb.AppendLine(string.Join(",\n", rls.ToArray()));
-            sb.AppendLine("  }");
+            if (pools != null && pools.Count > 0)
+            {
+                sb.AppendLine("  },");
+                sb.AppendLine("  \"pools\": {");
+                List<string> pLines = new List<string>();
+                foreach (KeyValuePair<string, LimitWindow> kv in pools)
+                {
+                    if (kv.Value == null || !kv.Value.Available) continue;
+                    double rUnix = kv.Value.ResetsAt != DateTime.MinValue
+                        ? (kv.Value.ResetsAt.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds
+                        : 0;
+                    pLines.Add(string.Format(CultureInfo.InvariantCulture,
+                        "    {0}: {{ \"used_percentage\": {1:F2}, \"resets_at\": {2} }}",
+                        J.Ser.Serialize(kv.Key), kv.Value.UsedPercent, (long)rUnix));
+                }
+                sb.AppendLine(string.Join(",\n", pLines.ToArray()));
+                sb.AppendLine("  }");
+            }
+            else
+            {
+                sb.AppendLine("  }");
+            }
             sb.AppendLine("}");
 
             Paths.Ensure();

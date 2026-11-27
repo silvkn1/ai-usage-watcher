@@ -12,6 +12,18 @@ namespace ClaudeUsageWidget
             return InstallTo(null, out installedPaths, out error);
         }
 
+        private static string[] IdeRoots()
+        {
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return new[]
+            {
+                Path.Combine(userProfile, ".vscode", "extensions"),
+                Path.Combine(userProfile, ".cursor", "extensions"),
+                Path.Combine(userProfile, ".antigravity", "extensions"),
+                Path.Combine(userProfile, ".windsurf", "extensions")
+            };
+        }
+
         public static bool InstallTo(string customDir, out string installedPaths, out string error)
         {
             installedPaths = "";
@@ -25,19 +37,14 @@ namespace ClaudeUsageWidget
                 }
                 else
                 {
-                    string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                    string vscodeExtDir = Path.Combine(userProfile, ".vscode", "extensions");
-                    string cursorExtDir = Path.Combine(userProfile, ".cursor", "extensions");
-
-                    if (Directory.Exists(vscodeExtDir))
-                        targets.Add(Path.Combine(vscodeExtDir, "ai-usage-watcher"));
-                    if (Directory.Exists(cursorExtDir))
-                        targets.Add(Path.Combine(cursorExtDir, "ai-usage-watcher"));
-
-                    if (targets.Count == 0)
+                    string[] roots = IdeRoots();
+                    for (int i = 0; i < roots.Length; i++)
                     {
-                        targets.Add(Path.Combine(vscodeExtDir, "ai-usage-watcher"));
+                        if (Directory.Exists(roots[i]))
+                            targets.Add(Path.Combine(roots[i], "ai-usage-watcher"));
                     }
+                    if (targets.Count == 0)
+                        targets.Add(Path.Combine(roots[0], "ai-usage-watcher"));
                 }
 
                 string pkgJson = ReadAsset("companion-package.json", Path.Combine("companion", "vscode-status-bar", "package.json"));
@@ -77,15 +84,11 @@ namespace ClaudeUsageWidget
                 string extJs = ReadAsset("companion-extension.js", Path.Combine("companion", "vscode-status-bar", "extension.js"));
                 if (string.IsNullOrEmpty(pkgJson) || string.IsNullOrEmpty(extJs)) return;
 
-                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                string[] dirs = new[]
-                {
-                    Path.Combine(userProfile, ".vscode", "extensions", "ai-usage-watcher"),
-                    Path.Combine(userProfile, ".cursor", "extensions", "ai-usage-watcher")
-                };
+                string[] roots = IdeRoots();
                 Encoding utf8NoBom = new UTF8Encoding(false);
-                foreach (string dir in dirs)
+                foreach (string root in roots)
                 {
+                    string dir = Path.Combine(root, "ai-usage-watcher");
                     if (!Directory.Exists(dir)) continue;
                     string pkgPath = Path.Combine(dir, "package.json");
                     string extPath = Path.Combine(dir, "extension.js");

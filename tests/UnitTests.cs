@@ -2591,6 +2591,385 @@ namespace Tests
                 try { Directory.Delete(tempDir, true); } catch { }
             }
         }
+
+        public static void Test_V122_Pools_Scale_Tools_Companion_And_ConfirmBadge()
+        {
+            // 1. Localization placeholder parity across all EN & ID entries
+            foreach (KeyValuePair<string, string[]> kv in L.All)
+            {
+                Assert.True(kv.Value != null && kv.Value.Length >= 2, "Key " + kv.Key + " must have EN and ID strings");
+                for (int p = 0; p <= 4; p++)
+                {
+                    string ph = "{" + p + "}";
+                    Assert.Equal(kv.Value[0].Contains(ph), kv.Value[1].Contains(ph),
+                        "Placeholder " + ph + " mismatch in key: " + kv.Key);
+                }
+            }
+
+            // 2. Multi-pool Antigravity Connect-RPC parsing
+            string multiGroupJson = "{" +
+                "\"response\":{\"groups\":[" +
+                "{\"displayName\":\"Gemini Pro\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.38,\"resetTime\":\"2026-11-26T18:00:00Z\"}]}," +
+                "{\"displayName\":\"Gemini Flash\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.82,\"resetTime\":\"2026-11-26T18:00:00Z\"}]}," +
+                "{\"displayName\":\"Claude\",\"buckets\":[{\"window\":\"5h\",\"remainingFraction\":0.60,\"resetTime\":\"2026-11-26T18:00:00Z\"}]}" +
+                "]}}";
+            Assert.True(AntigravityRateFetcher.ParseAndSaveQuotaSummary(multiGroupJson), "Multi-group quota summary must parse");
+            RateLimitSnapshot snapMulti = RateLimitReader.Read();
+            Assert.True(snapMulti.AntigravityPools.Count >= 3, "RateLimitReader must populate all 3 Antigravity pools");
+            Assert.True(snapMulti.AntigravityPools.ContainsKey("Flash"), "Flash pool must be present");
+
+            string userStatusJson = "{" +
+                "\"userStatus\":{\"cascadeModelConfigData\":{\"clientModelConfigs\":[" +
+                "{\"label\":\"Gemini Pro\",\"quotaInfo\":{\"remainingFraction\":0.50,\"resetTime\":\"2026-11-26T19:00:00Z\"}}," +
+                "{\"label\":\"Gemini Flash\",\"quotaInfo\":{\"remainingFraction\":0.90,\"resetTime\":\"2026-11-26T19:00:00Z\"}}," +
+                "{\"label\":\"Claude 4.5\",\"quotaInfo\":{\"remainingFraction\":0.25,\"resetTime\":\"2026-11-26T19:00:00Z\"}}" +
+                "]}}}";
+            Assert.True(AntigravityRateFetcher.ParseAndSaveUserStatus(userStatusJson), "Multi-model GetUserStatus fallback must parse");
+            RateLimitSnapshot snapStatus = RateLimitReader.Read();
+            Assert.True(snapStatus.AntigravityPools.ContainsKey("Claude"), "Claude pool must be parsed from GetUserStatus");
+            Assert.True(snapStatus.AntigravityFiveHour.UsedPercent >= 74.0, "Tightest remaining fraction (25% left = 75% used) must be surfaced");
+
+            // 3. AppConfig.WidgetScale normalization & profile export/import + FloatingForm scaling
+            AppConfig cfg = new AppConfig();
+            cfg.WidgetScale = 9.0;
+            cfg.Normalize();
+            Assert.Equal(1.0, cfg.WidgetScale, "Out-of-range WidgetScale must reset to 1.0");
+            cfg.WidgetScale = 1.15;
+            cfg.Normalize();
+            Assert.Equal(1.15, cfg.WidgetScale, "1.15 WidgetScale must be preserved");
+            AppConfig imp = AppConfig.ImportProfileJson(cfg.ExportProfileJson(), new AppConfig());
+            Assert.Equal(1.15, imp.WidgetScale, "WidgetScale must survive profile Export/Import");
+
+            double prevScale = Opts.WidgetScale;
+            try
+            {
+                using (FloatingForm fSmall = new FloatingForm())
+                using (FloatingForm fLarge = new FloatingForm())
+                {
+                    ViewModel vm = new ViewModel { Usage = new UsageSnapshot { Ready = true }, Limits = new RateLimitSnapshot() };
+                    Opts.WidgetScale = 1.0;
+                    IntPtr h1 = fSmall.Handle;
+                    fSmall.SetData(vm);
+                    Opts.WidgetScale = 1.30;
+                    IntPtr h2 = fLarge.Handle;
+                    fLarge.SetData(vm);
+                    Assert.True(fLarge.Width > fSmall.Width, "1.30 WidgetScale must render wider HUD than 1.0");
+                }
+            }
+            finally { Opts.WidgetScale = prevScale; }
+
+            // 4. TrayIconPainter purple confirm dot
+            using (Bitmap bNo = new Bitmap(16, 16))
+            using (Bitmap bYes = new Bitmap(16, 16))
+            {
+                using (Graphics g1 = Graphics.FromImage(bNo)) TrayIconPainter.Draw(g1, 16, "20", TrayIconPainter.StGreen, false, false);
+                using (Graphics g2 = Graphics.FromImage(bYes)) TrayIconPainter.Draw(g2, 16, "20", TrayIconPainter.StGreen, false, true);
+                bool diff = false;
+                for (int px = 9; px < 16; px++)
+                    for (int py = 0; py < 7; py++)
+                        if (bNo.GetPixel(px, py).ToArgb() != bYes.GetPixel(px, py).ToArgb()) diff = true;
+                Assert.True(diff, "Confirm tray dot must alter top-right pixels");
+            }
+
+            // 5. Tool Analytics parsing + Cache v3 persistence + Companion ack_sessions + ProjectExplorer Tab 4
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_v122_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string agDir = Path.Combine(tempDir, "brain", "conv-tool", ".system_generated", "logs");
+                string clDir = Path.Combine(tempDir, "claude", "proj");
+                string cachePath = Path.Combine(tempDir, "scan_cache.json");
+                string compDir = Path.Combine(tempDir, "comp_ext");
+                Directory.CreateDirectory(agDir);
+                Directory.CreateDirectory(clDir);
+
+                string nowUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                string clLine = string.Format(
+                    "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"req_t1\",\"cwd\":\"d:\\\\demo\",\"message\":{{\"id\":\"msg_t1\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"content\":[{{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{{}}}},{{\"type\":\"tool_use\",\"name\":\"mcp__github__search\",\"input\":{{}}}}],\"usage\":{{\"input_tokens\":400,\"output_tokens\":200,\"cache_read_input_tokens\":0}}}}}}",
+                    nowUtc);
+                File.WriteAllLines(Path.Combine(clDir, "sess-t1.jsonl"), new[] { clLine });
+
+                string agLine = string.Format(
+                    "{{\"type\":\"PLANNER_RESPONSE\",\"model\":\"gemini-3.8-flash\",\"created_at\":\"{0}\",\"step_index\":1,\"tool_calls\":[{{\"name\":\"default_api:read_file\",\"args\":{{}}}}],\"input_tokens\":300,\"output_tokens\":100,\"cache_read_tokens\":0}}",
+                    nowUtc);
+                File.WriteAllLines(Path.Combine(agDir, "transcript.jsonl"), new[] { agLine });
+
+                Pricing pr = Pricing.Load();
+                UsageScanner sc1 = new UsageScanner(pr) { CacheFilePath = cachePath, ScanCodex = false, ScanGeminiCli = false, ScanOpenCode = false };
+                sc1.Roots = delegate { return new List<string> { Path.Combine(tempDir, "brain"), clDir }; };
+                sc1.Scan();
+                UsageSnapshot s1 = sc1.Snapshot();
+                Assert.True(s1.ToolBreakdown.Count >= 3, "Must extract Bash, mcp:github/search, and read_file tool stats");
+
+                // Replay strictly from Cache v3 without re-reading JSONL
+                UsageScanner sc2 = new UsageScanner(pr) { CacheFilePath = cachePath, ScanCodex = false, ScanGeminiCli = false, ScanOpenCode = false };
+                sc2.Roots = delegate { return new List<string> { Path.Combine(tempDir, "brain"), clDir }; };
+                sc2.Scan();
+                UsageSnapshot s2 = sc2.Snapshot();
+                Assert.Equal(s1.ToolBreakdown.Count, s2.ToolBreakdown.Count, "ScanCache v3 must restore ToolBreakdown count cleanly");
+                Assert.True(sc2.CacheHitFiles >= 2, "Unchanged files must hit disk cache");
+
+                using (ProjectExplorerForm pe = new ProjectExplorerForm(s2, new HistoryStore(Path.Combine(tempDir, "h.json"))))
+                {
+                    IntPtr peH = pe.Handle;
+                    Assert.NotNull(peH);
+                }
+
+                string instPaths, instErr;
+                Assert.True(CompanionInstaller.InstallTo(compDir, out instPaths, out instErr), "Companion install must succeed: " + instErr);
+                string extJs = File.ReadAllText(Path.Combine(compDir, "extension.js"));
+                Assert.True(extJs.Contains("ack_sessions"), "Companion extension.js must include ack_sessions Quick Pick action");
+                Assert.Equal("ack_sessions", CommandParser.ParseCommandName("{\"cmd\":\"ack_sessions\"}"), "CommandParser must accept ack_sessions");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        public static void Test_Redesign_MaxWidth_Chips_Zen_Worktree_Allowance()
+        {
+            bool oldZen = Opts.ZenMode;
+            long oldCtxOverride = Opts.ContextWindowOverride;
+            double oldScale = Opts.WidgetScale;
+            string oldLayout = Opts.CardLayout;
+            try
+            {
+                Opts.ZenMode = false;
+                Opts.ContextWindowOverride = 0;
+                Opts.WidgetScale = 1.0;
+                Opts.CardLayout = "2col";
+
+                // 1. Auto 1M detection (>205k tokens) + manual override
+                Assert.Equal(1000000L, ContextLimits.WindowForModel("claude-sonnet-4-6", 308200), "Observed >205k tokens must auto-promote window to 1M");
+                Assert.Equal(200000L, ContextLimits.WindowForModel("claude-sonnet-4-6", 190000), "<=205k tokens must stay 200k");
+                Opts.ContextWindowOverride = 400000L;
+                Assert.Equal(400000L, ContextLimits.WindowForModel("claude-sonnet-4-6", 308200), "Explicit ContextWindowOverride must take priority");
+                Opts.ContextWindowOverride = 0;
+
+                // 2. Pace.DailyAllowance on 7-day quota >= 50% with >12h left
+                DateTime now = DateTime.Now;
+                LimitWindow w7Hi = new LimitWindow { Available = true, UsedPercent = 85, ResetsAt = now.AddDays(3) };
+                string allow = Pace.DailyAllowance(w7Hi, now);
+                Assert.NotNull(allow, "7d >= 50% with >12h left must produce daily allowance hint");
+                Assert.True(allow.StartsWith("~") && allow.Contains("%/"), "Daily allowance must match ~X%/d format, got: " + allow);
+                LimitWindow w7Lo = new LimitWindow { Available = true, UsedPercent = 25, ResetsAt = now.AddDays(3) };
+                Assert.Equal((string)null, Pace.DailyAllowance(w7Lo, now), "7d < 50% must not emit allowance hint");
+                LimitWindow w7Soon = new LimitWindow { Available = true, UsedPercent = 85, ResetsAt = now.AddHours(6) };
+                Assert.Equal((string)null, Pace.DailyAllowance(w7Soon, now), "7d < 12h remaining must not emit allowance hint");
+
+                // 3. Worktree ProjectName collapsing & per-session cost/cache stats
+                string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_redesign_" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    string clDir = Path.Combine(tempDir, "claude", "proj");
+                    Directory.CreateDirectory(clDir);
+                    string wtCwd = "d:\\\\code\\\\widget-claude\\\\.claude\\\\worktrees\\\\keen-kilby-aa2b73";
+                    string ts = DateTime.UtcNow.AddSeconds(-15).ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    UsageScanner sc = new UsageScanner(Pricing.Load()) { CacheFilePath = null, ScanCodex = false, ScanGemini = false, ScanGeminiCli = false, ScanOpenCode = false };
+                    sc.Roots = delegate { return new List<string> { clDir }; };
+                    sc.Scan(); // baseline _ready = true
+                    string clLine = string.Format(
+                        "{{\"type\":\"assistant\",\"timestamp\":\"{0}\",\"requestId\":\"req_wt1\",\"cwd\":\"{1}\",\"message\":{{\"id\":\"msg_wt1\",\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"content\":[],\"usage\":{{\"input_tokens\":1000,\"output_tokens\":200,\"cache_read_input_tokens\":9000}}}}}}",
+                        ts, wtCwd);
+                    File.WriteAllLines(Path.Combine(clDir, "sess-wt-1.jsonl"), new[] { clLine });
+
+                    sc.Scan();
+                    UsageSnapshot snap = sc.Snapshot();
+                    Assert.Equal("widget-claude (wt)", snap.LastActiveProject, "LastActiveProject must collapse worktree path");
+                    Assert.True(snap.Sessions != null && snap.Sessions.Items.Count >= 1, "Worktree JSONL must produce SessionActivity");
+                    SessionActivity wtSess = snap.Sessions.Items[0];
+                    Assert.Equal("widget-claude (wt)", wtSess.Project, "Worktree path must collapse to '<repo> (wt)'");
+                    Assert.True(wtSess.SessionTokens >= 10200, "SessionActivity must track SessionTokens");
+                    Assert.True(wtSess.SessionCost > 0, "SessionActivity must track SessionCost");
+                    Assert.True(wtSess.SessionCacheHit > 0.85, "SessionActivity must track SessionCacheHit");
+                }
+                finally
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+
+                // 4. FloatingForm maxW clamp, SessionChips click hit-rects, Header buttons, and Zen Mode height reduction
+                ViewModel vm = new ViewModel();
+                vm.ScanClaude = true;
+                vm.ScanGemini = true;
+                vm.Limits = new RateLimitSnapshot
+                {
+                    FileFound = true,
+                    FiveHour = new LimitWindow { Available = true, UsedPercent = 27, ResetsAt = now.AddHours(2) },
+                    SevenDay = new LimitWindow { Available = true, UsedPercent = 85, ResetsAt = now.AddDays(3).AddHours(16) },
+                    AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 12, ResetsAt = now.AddHours(3) },
+                    AntigravitySevenDay = new LimitWindow { Available = true, UsedPercent = 21, ResetsAt = now.AddDays(5) }
+                };
+                vm.Usage = new UsageSnapshot
+                {
+                    Ready = true,
+                    LastContextTokens = 308200,
+                    LastContextModel = "claude-sonnet-4-6",
+                    Sessions = new SessionStatusSummary
+                    {
+                        RunningCount = 3,
+                        ConfirmCount = 1,
+                        DoneCount = 3,
+                        Items = new List<SessionActivity>
+                        {
+                            new SessionActivity { Id = "s1", Provider = "Claude", Project = "very-long-worktree-repository-name-alpha-beta-gamma (wt)", State = "confirm", NeedsConfirm = true },
+                            new SessionActivity { Id = "s2", Provider = "Claude", Project = "another-super-long-project-directory-name-01 (wt)", State = "running", IsRunning = true },
+                            new SessionActivity { Id = "s3", Provider = "Claude", Project = "third-very-long-directory-name-for-stress-test", State = "done" }
+                        }
+                    }
+                };
+                vm.History = new DayStat[]
+                {
+                    new DayStat(now.Date.AddDays(-1), 120000, 1.5, 10),
+                    new DayStat(now.Date, 240000, 3.0, 20)
+                };
+                vm.BudgetDaily = 10.0;
+
+                using (FloatingForm f = new FloatingForm())
+                {
+                    f.Backdrop = "solid";
+                    f.SetData(vm);
+                    IntPtr h = f.Handle;
+                    Assert.NotNull(h);
+                    int fullWidth = f.Width;
+                    int fullHeight = f.Height;
+                    Assert.True(fullWidth <= 570, "FloatingForm must clamp width even with long session labels, got " + fullWidth);
+
+                    using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                    {
+                        f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
+                    }
+
+                    FieldInfo fiSess = typeof(FloatingForm).GetField("_sessRowRect", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiDone = typeof(FloatingForm).GetField("_pillDoneRect", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiMode = typeof(FloatingForm).GetField("_titleModeRect", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiSet = typeof(FloatingForm).GetField("_titleSettingsRect", BindingFlags.NonPublic | BindingFlags.Instance);
+                    Rectangle sessR = (Rectangle)fiSess.GetValue(f);
+                    Rectangle doneR = (Rectangle)fiDone.GetValue(f);
+                    Rectangle modeR = (Rectangle)fiMode.GetValue(f);
+                    Rectangle setR = (Rectangle)fiSet.GetValue(f);
+                    Assert.False(sessR.IsEmpty, "_sessRowRect must be populated after painting SessionChips");
+                    Assert.False(doneR.IsEmpty, "_pillDoneRect must be populated when confirm/done sessions exist");
+                    Assert.False(modeR.IsEmpty, "_titleModeRect header button must be painted");
+                    Assert.False(setR.IsEmpty, "_titleSettingsRect header button must be painted");
+
+                    bool menuFired = false, doneFired = false, modeFired = false, setFired = false;
+                    f.SessionMenuRequested += delegate { menuFired = true; };
+                    f.DoneSessionsClicked += delegate { doneFired = true; };
+                    f.PresetCycleRequested += delegate { modeFired = true; };
+                    f.SettingsRequested += delegate { setFired = true; };
+
+                    MethodInfo miDown = typeof(FloatingForm).GetMethod("OnMouseDown", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, doneR.Left + 2, doneR.Top + 2, 0) });
+                    miDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, sessR.Left + 4, sessR.Top + 2, 0) });
+                    miDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, modeR.Left + 2, modeR.Top + 2, 0) });
+                    miDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 1, setR.Left + 2, setR.Top + 2, 0) });
+                    Assert.True(doneFired, "Clicking _pillDoneRect must fire DoneSessionsClicked");
+                    Assert.True(menuFired, "Clicking _sessRowRect must fire SessionMenuRequested");
+                    Assert.True(modeFired, "Clicking _titleModeRect must fire PresetCycleRequested");
+                    Assert.True(setFired, "Clicking _titleSettingsRect must fire SettingsRequested");
+
+                    Opts.ZenMode = true;
+                    f.SetData(vm);
+                    Assert.True(f.Height < fullHeight, "ZenMode must shrink widget height cleanly");
+                }
+
+                // 5. TrayApp _miZen wiring in View & Layout submenu
+                using (TrayApp app = new TrayApp())
+                {
+                    FieldInfo fiView = typeof(TrayApp).GetField("_miViewGroup", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiZen = typeof(TrayApp).GetField("_miZen", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiMenu = typeof(TrayApp).GetField("_menu", BindingFlags.NonPublic | BindingFlags.Instance);
+                    ToolStripMenuItem miView = fiView.GetValue(app) as ToolStripMenuItem;
+                    ToolStripMenuItem miZen = fiZen.GetValue(app) as ToolStripMenuItem;
+                    ContextMenuStrip menu = fiMenu.GetValue(app) as ContextMenuStrip;
+                    Assert.NotNull(miZen, "_miZen menu item must exist");
+                    Assert.True(miView.DropDownItems.Contains(miZen), "View submenu must contain _miZen");
+                    Assert.True(menu.Items.Count <= 15, "Top-level right-click menu count must stay <= 15");
+                }
+            }
+            finally
+            {
+                Opts.ZenMode = oldZen;
+                Opts.ContextWindowOverride = oldCtxOverride;
+                Opts.WidgetScale = oldScale;
+                Opts.CardLayout = oldLayout;
+            }
+        }
+
+        public static void Test_SettingsForm_LazyTabs_And_SavePreservation()
+        {
+            string origLang = L.Lang;
+            try
+            {
+                L.Set("en");
+                AppConfig cfg = new AppConfig();
+                cfg.Language = "en";
+                cfg.AlertThresholds = "70,90";
+                cfg.ProbeEnabled = true;
+                cfg.ProbeModel = "claude-sonnet-4-6";
+                cfg.HotkeyEnabled = false;
+                cfg.Hotkey = "Ctrl+Alt+U";
+                cfg.AdminEnabled = false;
+
+                bool applied = false;
+                SettingsCallbacks cb = new SettingsCallbacks();
+                cb.Apply = delegate { applied = true; };
+
+                using (SettingsForm sf = new SettingsForm(cfg, cb))
+                {
+                    IntPtr h = sf.Handle;
+                    Assert.NotNull(h);
+
+                    bool[] built = typeof(SettingsForm).GetField("_tabBuilt", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sf) as bool[];
+                    Assert.NotNull(built, "_tabBuilt array must exist");
+                    Assert.True(built[0], "Display tab (0) must be built eagerly");
+                    Assert.False(built[1] || built[2] || built[3] || built[4] || built[5], "Tabs 1..5 must defer construction until clicked");
+
+                    MethodInfo miApply = typeof(SettingsForm).GetMethod("OnApply", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miApply.Invoke(sf, new object[] { null, EventArgs.Empty });
+                    Assert.True(applied, "OnApply with unbuilt tabs 1..5 must succeed");
+                    Assert.Equal("70,90", cfg.AlertThresholds, "Unbuilt Alerts tab must keep existing thresholds");
+                    Assert.Equal("claude-sonnet-4-6", cfg.ProbeModel, "Unbuilt Probe tab must keep existing ProbeModel");
+                    Assert.Equal("Ctrl+Alt+U", cfg.Hotkey, "Unbuilt Behavior tab must keep existing Hotkey");
+
+                    MethodInfo miSel = typeof(SettingsForm).GetMethod("SelectTab", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miSel.Invoke(sf, new object[] { 2 });
+                    Assert.True(built[2], "Selecting Alerts tab must lazily build tab 2");
+                    TextBox tbTh = typeof(SettingsForm).GetField("_alertTh", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sf) as TextBox;
+                    Assert.Equal("70,90", tbTh.Text, "Lazily built Alerts tab must populate controls from AppConfig");
+
+                    L.Set("id");
+                    sf.RefreshI18n();
+                    miSel.Invoke(sf, new object[] { 3 });
+                    Assert.True(built[3], "Selecting Data tab must lazily build tab 3");
+                    CheckBox chkAdminData = typeof(SettingsForm).GetField("_adminData", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sf) as CheckBox;
+                    chkAdminData.Checked = true;
+
+                    miSel.Invoke(sf, new object[] { 5 });
+                    Assert.True(built[5], "Selecting Admin tab must lazily build tab 5");
+                    CheckBox chkAdmin = typeof(SettingsForm).GetField("_admin", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sf) as CheckBox;
+                    Assert.True(chkAdmin.Checked, "_adminData toggle on Data tab must stay synced when Admin tab builds");
+                    Assert.Equal(L.T("set.admin.enable"), chkAdmin.Text, "Lazy Admin tab must build with active Indonesian strings");
+
+                    L.Set("en");
+                    sf.RefreshI18n();
+                    Assert.Equal(L.T("set.admin.enable"), chkAdmin.Text, "Lazily built Admin tab must also refresh live on language change");
+
+                    sf.PrewarmHandles();
+                    Assert.True(sf.IsHandleCreated && !sf.Visible, "PrewarmHandles must create HWND while staying hidden");
+                    CheckBox chkZen = typeof(SettingsForm).GetField("_zenMode", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sf) as CheckBox;
+                    chkZen.Checked = !cfg.ZenMode;
+                    cfg.ZenMode = !cfg.ZenMode;
+                    sf.PrepareForOpen();
+                    Assert.Equal(cfg.ZenMode, chkZen.Checked, "PrepareForOpen must re-sync controls from external config changes");
+                }
+            }
+            finally
+            {
+                L.Set(origLang);
+            }
+        }
     }
 
     public static class TestRunner

@@ -212,6 +212,7 @@ function activate(context) {
             { label: '$(refresh) Force Refresh Widget', description: 'Rescan logs & reload limits', action: 'refresh' },
             { label: '$(graph) Open Project Cost Explorer', description: 'Open desktop explorer window', action: 'open_explorer' },
             { label: '$(terminal) Open Terminal in Active Project', description: 'Launch terminal in latest active directory', action: 'open_terminal' },
+            { label: '$(check) Mark Sessions Checked (? / ✓)', description: 'Clear finished & confirmation badges on widget', action: 'ack_sessions' },
             { label: '$(layout) Toggle Compact / Full Mode', description: 'Switch floating pill & card view', action: 'toggle_compact' },
             { label: '$(clippy) Copy Status Summary', description: 'Copy quota & today cost to clipboard', action: 'copy_local' },
             { label: '$(terminal) Copy /compact Command', description: 'Copy /compact for long AI sessions', action: 'copy_compact' },

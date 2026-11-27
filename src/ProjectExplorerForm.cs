@@ -374,6 +374,7 @@ namespace ClaudeUsageWidget
         private readonly Panel _projectsPage = new Panel();
         private readonly Panel _trendsPage = new Panel();
         private readonly Panel _sessionsPage = new Panel();
+        private readonly Panel _toolsPage = new Panel();
         private readonly List<Button> _tabBtns = new List<Button>();
         private int _tabIndex;
         private readonly Panel _searchPanel = new Panel();
@@ -383,9 +384,10 @@ namespace ClaudeUsageWidget
         private readonly Label _summaryLabel = new Label();
         private readonly ListView _list = new ListView();
         private readonly ListView _sessionList = new ListView();
+        private readonly ListView _toolList = new ListView();
         private readonly List<ProjectRow> _rows = new List<ProjectRow>();
         private readonly List<ProjectRow> _filteredRows = new List<ProjectRow>();
-        private ContextMenuStrip _ctxMenu, _sessMenu;
+        private ContextMenuStrip _ctxMenu, _sessMenu, _toolMenu;
         private readonly List<Button> _trendRangeBtns = new List<Button>();
         private Font _boldFont, _tabFont;
         private UsageSnapshot _usageRef;
@@ -426,6 +428,7 @@ namespace ClaudeUsageWidget
                 DarkUi.TitleBar(Handle, !Palette.IsLight);
                 DarkUi.ControlTheme(_list.Handle, !Palette.IsLight);
                 DarkUi.ControlTheme(_sessionList.Handle, !Palette.IsLight);
+                DarkUi.ControlTheme(_toolList.Handle, !Palette.IsLight);
             };
         }
 
@@ -512,6 +515,7 @@ namespace ClaudeUsageWidget
             _projectsPage.Visible = (i == 0);
             _trendsPage.Visible = (i == 1);
             _sessionsPage.Visible = (i == 2);
+            _toolsPage.Visible = (i == 3);
             for (int k = 0; k < _tabBtns.Count; k++)
             {
                 _tabBtns[k].ForeColor = (k == i) ? Palette.Text : Palette.Dim;
@@ -534,12 +538,14 @@ namespace ClaudeUsageWidget
             AddTabButton(L.T("proj.tab.projects"), 0);
             AddTabButton(L.T("proj.tab.trends"), 1);
             AddTabButton(L.T("proj.tab.sessions"), 2);
+            AddTabButton(L.T("proj.tab.tools"), 3);
 
             _pageHost.Dock = DockStyle.Fill;
             _pageHost.BackColor = Palette.Bg;
             _projectsPage.Dock = DockStyle.Fill; _projectsPage.BackColor = Palette.Bg;
             _trendsPage.Dock = DockStyle.Fill; _trendsPage.BackColor = Palette.Bg;
             _sessionsPage.Dock = DockStyle.Fill; _sessionsPage.BackColor = Palette.Bg;
+            _toolsPage.Dock = DockStyle.Fill; _toolsPage.BackColor = Palette.Bg;
 
             // Panel Atas: Heatmap
             _heatmap.Dock = DockStyle.Top;
@@ -745,13 +751,86 @@ namespace ClaudeUsageWidget
             _sessionList.DoubleClick += delegate { string p = SelectedSessionPath(); if (p != null) try { ProcessHelper.OpenTerminal(p); } catch { } };
             _sessionsPage.Controls.Add(_sessionList);
 
+            // Tool Analytics page
+            _toolList.Dock = DockStyle.Fill;
+            _toolList.View = View.Details;
+            _toolList.FullRowSelect = true;
+            _toolList.GridLines = true;
+            _toolList.BackColor = Palette.Surface;
+            _toolList.ForeColor = Palette.Text;
+            _toolList.BorderStyle = BorderStyle.FixedSingle;
+            _toolList.Columns.Add(L.T("proj.tools.tool"), (int)Math.Round(210 * s), HorizontalAlignment.Left);
+            _toolList.Columns.Add(L.T("proj.col.provider"), (int)Math.Round(95 * s), HorizontalAlignment.Left);
+            _toolList.Columns.Add(L.T("proj.tools.calls"), (int)Math.Round(80 * s), HorizontalAlignment.Right);
+            _toolList.Columns.Add(L.T("proj.col.tokens"), (int)Math.Round(95 * s), HorizontalAlignment.Right);
+            _toolList.Columns.Add(L.T("proj.tools.avg"), (int)Math.Round(95 * s), HorizontalAlignment.Right);
+            _toolList.Columns.Add(L.T("proj.sess.cost"), (int)Math.Round(85 * s), HorizontalAlignment.Right);
+            _toolList.Columns.Add(L.T("proj.tools.share"), (int)Math.Round(70 * s), HorizontalAlignment.Right);
+            PopulateToolsList(usage);
+            _toolMenu = new ContextMenuStrip();
+            _toolMenu.Items.Add(new ToolStripMenuItem(L.T("proj.btn.copy"), null, delegate { CopyToolsMarkdown(usage); }));
+            MenuTheme.Apply(_toolMenu);
+            _toolList.ContextMenuStrip = _toolMenu;
+            _toolsPage.Controls.Add(_toolList);
+
             _pageHost.Controls.Add(_projectsPage);
             _pageHost.Controls.Add(_trendsPage);
             _pageHost.Controls.Add(_sessionsPage);
+            _pageHost.Controls.Add(_toolsPage);
 
             Controls.Add(_pageHost);
             Controls.Add(_tabStrip);
             SelectTab(0);
+        }
+
+        private void PopulateToolsList(UsageSnapshot usage)
+        {
+            _toolList.Items.Clear();
+            List<ToolUsageRecord> list = usage != null ? usage.ToolBreakdown : null;
+            if (list == null || list.Count == 0)
+            {
+                ListViewItem empty = new ListViewItem(L.T("proj.tools.empty"));
+                empty.ForeColor = Palette.Dim;
+                _toolList.Items.Add(empty);
+                return;
+            }
+            long totalTokens = 0;
+            for (int i = 0; i < list.Count; i++) totalTokens += list[i].Tokens;
+            foreach (ToolUsageRecord tr in list)
+            {
+                long avg = tr.Calls > 0 ? tr.Tokens / tr.Calls : 0;
+                int share = totalTokens > 0 ? (int)Math.Round((double)tr.Tokens / totalTokens * 100.0) : 0;
+                ListViewItem it = new ListViewItem(tr.Tool ?? "-");
+                it.SubItems.Add(tr.Provider ?? "-");
+                it.SubItems.Add(tr.Calls.ToString(CultureInfo.InvariantCulture));
+                it.SubItems.Add(Fmt.Tokens(tr.Tokens));
+                it.SubItems.Add(Fmt.Tokens(avg));
+                it.SubItems.Add(Fmt.UsdShort(tr.Cost));
+                it.SubItems.Add(share + "%");
+                it.Tag = tr;
+                _toolList.Items.Add(it);
+            }
+        }
+
+        private void CopyToolsMarkdown(UsageSnapshot usage)
+        {
+            List<ToolUsageRecord> list = usage != null ? usage.ToolBreakdown : null;
+            if (list == null || list.Count == 0) return;
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("| Tool / Agent | Provider | Calls | Tokens | Est. Cost |");
+                sb.AppendLine("|:---|:---|---:|---:|---:|");
+                foreach (ToolUsageRecord tr in list)
+                {
+                    sb.AppendFormat(CultureInfo.InvariantCulture,
+                        "| `{0}` | {1} | {2} | {3} | ${4:F2} |\r\n",
+                        tr.Tool, tr.Provider, tr.Calls, Fmt.Tokens(tr.Tokens), tr.Cost);
+                }
+                Clipboard.SetText(sb.ToString());
+                MessageBox.Show(this, L.T("proj.copied"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { Log.Write("proj.copytools", ex); }
         }
 
         private string SelectedSessionPath()
@@ -985,6 +1064,7 @@ namespace ClaudeUsageWidget
             {
                 if (_ctxMenu != null) { _ctxMenu.Dispose(); _ctxMenu = null; }
                 if (_sessMenu != null) { _sessMenu.Dispose(); _sessMenu = null; }
+                if (_toolMenu != null) { _toolMenu.Dispose(); _toolMenu = null; }
                 if (_boldFont != null) { _boldFont.Dispose(); _boldFont = null; }
                 if (_tabFont != null) { _tabFont.Dispose(); _tabFont = null; }
             }

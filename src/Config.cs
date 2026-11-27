@@ -119,9 +119,13 @@ namespace ClaudeUsageWidget
         public string DigestSchedule { get; set; }     // "daily", "weekly"
         public int DigestHour { get; set; }
         public string LastDigestKey { get; set; }
+        public double WidgetScale { get; set; }        // 0.85, 1.0, 1.15, 1.30
+        public bool ZenMode { get; set; }
+        public long ContextWindowOverride { get; set; } // 0 = auto, 200000, 400000, 1000000
 
         public AppConfig()
         {
+            WidgetScale = 1.0;
             AutoUpdateCheck = true;
             CardLayout = "auto";
             MiniPillMode = "all";
@@ -233,6 +237,13 @@ namespace ClaudeUsageWidget
             if (DigestSchedule != "weekly") DigestSchedule = "daily";
             if (DigestHour < 0 || DigestHour > 23) DigestHour = 18;
             if (LastDigestKey == null) LastDigestKey = "";
+            if (double.IsNaN(WidgetScale) || WidgetScale < 0.80 || WidgetScale > 1.35) WidgetScale = 1.0;
+            else if (WidgetScale < 0.92) WidgetScale = 0.85;
+            else if (WidgetScale < 1.08) WidgetScale = 1.0;
+            else if (WidgetScale < 1.22) WidgetScale = 1.15;
+            else WidgetScale = 1.30;
+            if (ContextWindowOverride != 200000L && ContextWindowOverride != 400000L && ContextWindowOverride != 1000000L)
+                ContextWindowOverride = 0;
             ShowInTaskbar = false;
         }
 
@@ -252,7 +263,7 @@ namespace ClaudeUsageWidget
             "AntigravityQuota5hTokens", "AntigravityQuota7dTokens", "OllamaEnabled",
             "Backdrop", "CardLayout", "MiniPillMode", "ShowContextBar",
             "QuietHoursEnabled", "QuietStartHour", "QuietEndHour", "AlertCooldownMinutes",
-            "DigestSchedule", "DigestHour"
+            "DigestSchedule", "DigestHour", "WidgetScale", "ZenMode", "ContextWindowOverride"
         };
 
         public string ExportProfileJson()

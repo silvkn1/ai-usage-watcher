@@ -30,7 +30,7 @@ namespace ClaudeUsageWidget
         private readonly SynchronizationContext _ui;
 
         private ToolStripMenuItem _miShow, _miCompact, _miClickThrough, _miAutostart, _miDock, _miSnap, _miCompanion, _miRefresh, _miCopy, _miWizard, _miSettings, _miUpdate, _miAbout, _miData, _miExit, _miCsv, _miJson, _miReport, _miProjects, _miMarkSessions;
-        private ToolStripMenuItem _miViewGroup, _miToolsGroup, _miHelpGroup;
+        private ToolStripMenuItem _miViewGroup, _miToolsGroup, _miHelpGroup, _miZen;
         private ToolStripSeparator _sepProject;
         private ToolStripMenuItem _miOpenFolder, _miOpenTerminal;
 
@@ -46,6 +46,7 @@ namespace ClaudeUsageWidget
             _miDock.Text = L.T("tray.dock");
             if (_miSnap != null) { _miSnap.Text = L.T("tray.snap"); PopulateSnapMenu(_miSnap); }
             _miCompact.Text = L.T("tray.compact");
+            if (_miZen != null) _miZen.Text = L.T("tray.zen");
             _miClickThrough.Text = L.T("tray.clickthrough");
             _miRemaining.Text = L.T("tray.remaining");
             _miRefresh.Text = L.T("tray.refresh");
@@ -115,10 +116,13 @@ namespace ClaudeUsageWidget
             _float.CompactToggled += delegate { SetCompact(!_float.Compact); };
             _float.ClaudeCardDoubleClicked += delegate { OpenProjectTerminal(); };
             _float.AntigravityCardDoubleClicked += delegate { OpenAntigravityFolder(); };
+            _float.CardDoubleClicked += delegate(object s, string prov) { OpenProviderCard(prov); };
             _float.DoneSessionsClicked += delegate { AcknowledgeDoneSessions(); };
             _float.SessionMenuRequested += delegate(object s, MouseEventArgs me) { ShowSessionJumpMenu(_float, me.Location); };
             _float.CopyCompactRequested += delegate { CopyCompactCommand(); };
             _float.OpenActiveTerminalRequested += delegate { OpenProjectTerminal(); };
+            _float.SettingsRequested += delegate { OpenSettings(); };
+            _float.PresetCycleRequested += delegate { CycleViewPreset(); };
             IntPtr force = _float.Handle;   // buat handle sekarang (untuk DPI & ukuran)
             _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
@@ -156,7 +160,14 @@ namespace ClaudeUsageWidget
 
             _fsTimer = new System.Windows.Forms.Timer();
             _fsTimer.Interval = 1000;
-            _fsTimer.Tick += delegate { CheckForeground(); CheckSystemTheme(); };
+            _fsTimer.Tick += delegate
+            {
+                CheckForeground();
+                CheckSystemTheme();
+                bool altHover = _cfg.ClickThrough && !_cfg.DockTop && _float.Visible &&
+                                (Control.ModifierKeys & Keys.Alt) != 0 && _float.Bounds.Contains(Cursor.Position);
+                _float.SetTempInteractive(altHover);
+            };
             _fsTimer.Start();
 
             _tick = new System.Windows.Forms.Timer();
@@ -180,6 +191,17 @@ namespace ClaudeUsageWidget
             _debounce = new System.Windows.Forms.Timer();
             _debounce.Interval = 800;
             _debounce.Tick += delegate { _debounce.Stop(); RequestScan(false); };
+
+            _prewarmTimer = new System.Windows.Forms.Timer();
+            _prewarmTimer.Interval = 1200;
+            _prewarmTimer.Tick += delegate
+            {
+                _prewarmTimer.Stop();
+                _prewarmTimer.Dispose();
+                _prewarmTimer = null;
+                try { if (_settingsForm == null) EnsureSettingsForm().PrewarmHandles(); } catch { }
+            };
+            _prewarmTimer.Start();
 
             _hotkey = new HotkeyWindow();
             _hotkey.Pressed += delegate { ToggleFloating(); };
@@ -581,7 +603,7 @@ namespace ClaudeUsageWidget
         {
             if (!_cfg.ContextAlertEnabled || _usage == null || !_usage.Ready) return;
             int cd = Math.Max(1, _cfg.AlertCooldownMinutes);
-            long cap = ContextLimits.WindowForModel(_usage.LastContextModel);
+            long cap = ContextLimits.WindowForModel(_usage.LastContextModel, _usage.LastContextTokens);
             double pctExact = (double)_usage.LastContextTokens / cap * 100.0;
             if (pctExact >= 75.0 && (DateTime.Now - _lastContextAlert).TotalMinutes >= cd)
             {
@@ -605,6 +627,9 @@ namespace ClaudeUsageWidget
             Opts.CardLayout = _cfg.CardLayout;
             Opts.MiniPillMode = _cfg.MiniPillMode;
             Opts.ShowContextBar = _cfg.ShowContextBar;
+            Opts.WidgetScale = _cfg.WidgetScale > 0 ? _cfg.WidgetScale : 1.0;
+            Opts.ZenMode = _cfg.ZenMode;
+            Opts.ContextWindowOverride = _cfg.ContextWindowOverride;
         }
 
         private ContextMenuStrip _sessionJumpMenu;
@@ -633,8 +658,25 @@ namespace ClaudeUsageWidget
                     string lbl = string.IsNullOrEmpty(item.Project) || string.Equals(item.Project, item.Provider, StringComparison.OrdinalIgnoreCase)
                         ? item.Provider
                         : item.Provider + " · " + item.Project;
+                    if (item.SessionTokens > 0)
+                    {
+                        string stat = item.SessionCost > 0
+                            ? Fmt.Usd(item.SessionCost)
+                            : Fmt.Tokens(item.SessionTokens);
+                        if (item.SessionCacheHit > 0.005)
+                            stat += string.Format(" · {0}%", (int)Math.Round(item.SessionCacheHit * 100));
+                        lbl += "  (" + stat + ")";
+                    }
                     ToolStripMenuItem mi = new ToolStripMenuItem(icon + lbl);
                     bool dirOk = !string.IsNullOrEmpty(item.Cwd) && Directory.Exists(item.Cwd);
+                    string focusHint = !string.IsNullOrEmpty(item.Project) ? item.Project : item.Provider;
+                    if (!string.IsNullOrEmpty(focusHint))
+                    {
+                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.focus", focusHint), null, delegate
+                        {
+                            if (!ProcessHelper.FocusWindow(focusHint) && dirOk) ProcessHelper.OpenTerminal(item.Cwd);
+                        }));
+                    }
                     if (dirOk)
                     {
                         mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.term", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenTerminal(item.Cwd); }));
@@ -726,6 +768,48 @@ namespace ClaudeUsageWidget
             catch (Exception ex) { Log.Write("open.antigravity", ex); }
         }
 
+        private void OpenProviderCard(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return;
+            if (title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                OpenAntigravityFolder();
+                return;
+            }
+            string provKey = title.IndexOf("Codex", StringComparison.OrdinalIgnoreCase) >= 0 ? "Codex"
+                : (title.IndexOf("Gemini", StringComparison.OrdinalIgnoreCase) >= 0 ? "Gemini CLI"
+                : (title.IndexOf("OpenCode", StringComparison.OrdinalIgnoreCase) >= 0 ? "OpenCode" : "Claude"));
+            string dir = null;
+            if (_usage != null)
+            {
+                if (_usage.Sessions != null && _usage.Sessions.Items != null)
+                {
+                    foreach (SessionActivity sa in _usage.Sessions.Items)
+                    {
+                        if (string.Equals(sa.Provider, provKey, StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrEmpty(sa.Cwd) && Directory.Exists(sa.Cwd))
+                        { dir = sa.Cwd; break; }
+                    }
+                }
+                if (dir == null && _usage.ProjectProviders != null && _usage.ProjectPaths != null)
+                {
+                    foreach (KeyValuePair<string, string> kv in _usage.ProjectProviders)
+                    {
+                        if (kv.Value != null && kv.Value.IndexOf(provKey, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            string candidate;
+                            if (_usage.ProjectPaths.TryGetValue(kv.Key, out candidate) && Directory.Exists(candidate))
+                            { dir = candidate; break; }
+                        }
+                    }
+                }
+                if (dir == null && provKey == "Claude" && !string.IsNullOrEmpty(_usage.LastActiveCwd) && Directory.Exists(_usage.LastActiveCwd))
+                    dir = _usage.LastActiveCwd;
+            }
+            if (!string.IsNullOrEmpty(dir)) ProcessHelper.OpenTerminal(dir);
+            else if (provKey == "Claude") OpenProjectTerminal();
+        }
+
         private void CopyStatus()
         {
             try
@@ -754,6 +838,8 @@ namespace ClaudeUsageWidget
             _miCompact = new ToolStripMenuItem(L.T("tray.compact"), null, delegate { SetCompact(!_float.Compact); });
             _miCompact.Checked = _cfg.Compact;
             _miCompact.Enabled = !_cfg.DockTop;
+            _miZen = new ToolStripMenuItem(L.T("tray.zen"), null, delegate { SetZenMode(!_cfg.ZenMode); });
+            _miZen.Checked = _cfg.ZenMode;
             _miRemaining = new ToolStripMenuItem(L.T("tray.remaining"), null, delegate { SetRemaining(!_cfg.ShowRemaining); });
             _miRemaining.Checked = _cfg.ShowRemaining;
             _miClickThrough = new ToolStripMenuItem(L.T("tray.clickthrough"), null, delegate { SetClickThrough(!_cfg.ClickThrough); });
@@ -764,6 +850,7 @@ namespace ClaudeUsageWidget
             _miViewGroup.DropDownItems.Add(_miSnap);
             _miViewGroup.DropDownItems.Add(new ToolStripSeparator());
             _miViewGroup.DropDownItems.Add(_miCompact);
+            _miViewGroup.DropDownItems.Add(_miZen);
             _miViewGroup.DropDownItems.Add(_miRemaining);
             _miViewGroup.DropDownItems.Add(_miClickThrough);
 
@@ -1020,6 +1107,52 @@ namespace ClaudeUsageWidget
             _cfg.Save();
         }
 
+        private void SetZenMode(bool on)
+        {
+            _cfg.ZenMode = on;
+            Opts.ZenMode = on;
+            if (_miZen != null) _miZen.Checked = on;
+            if (on && !_cfg.DockTop && _float.Compact)
+            {
+                _float.Compact = false;
+                if (_miCompact != null) _miCompact.Checked = false;
+                _cfg.Compact = false;
+            }
+            _cfg.Save();
+            Refresh();
+        }
+
+        private void CycleViewPreset()
+        {
+            if (!_float.Compact && !Opts.ZenMode)
+            {
+                SetZenMode(true);
+            }
+            else if (!_float.Compact && Opts.ZenMode)
+            {
+                if (_cfg.DockTop)
+                {
+                    SetZenMode(false);
+                }
+                else
+                {
+                    _cfg.ZenMode = false;
+                    Opts.ZenMode = false;
+                    if (_miZen != null) _miZen.Checked = false;
+                    SetCompact(true);
+                    Refresh();
+                }
+            }
+            else
+            {
+                _cfg.ZenMode = false;
+                Opts.ZenMode = false;
+                if (_miZen != null) _miZen.Checked = false;
+                SetCompact(false);
+                Refresh();
+            }
+        }
+
         /// <summary>Jendela layered tanpa SetLayeredWindowAttributes tidak digambar; WinForms melewatkannya pada
         /// Opacity 100%. Saat klik-tembus (yang butuh WS_EX_LAYERED) aktif, batasi ke 99%.</summary>
         private void ApplyOpacity()
@@ -1093,32 +1226,50 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private SettingsForm _settingsForm;
+        private System.Windows.Forms.Timer _prewarmTimer;
+        private string _settingsOldEdge, _settingsOldMonitor;
+
+        private SettingsForm EnsureSettingsForm()
+        {
+            if (_settingsForm == null || _settingsForm.IsDisposed)
+            {
+                SettingsCallbacks cb = new SettingsCallbacks();
+                cb.ExportCsv = ExportCsv;
+                cb.Diagnostics = delegate { return Diag.Build(_cfg, _limits, _usage, _probeFailed, _org, _history.Count); };
+                cb.IsOpenCodeSqliteMissing = delegate { return _usage != null && _usage.OpenCodeSqliteMissingCli; };
+                cb.CheckUpdates = delegate { CheckForUpdates(true); };
+                cb.PricingUpdated = delegate
+                {
+                    _pricing = Pricing.Load();
+                    CheckCustomPricingWarning();
+                    _scanner.ResetWithPricing(_pricing);
+                    RequestScan();
+                };
+                cb.Apply = delegate
+                {
+                    ApplyConfigChanges(_settingsOldEdge, _settingsOldMonitor);
+                    _settingsOldEdge = _cfg.DockEdge;
+                    _settingsOldMonitor = _cfg.DockMonitor;
+                };
+                _settingsForm = new SettingsForm(_cfg, cb);
+            }
+            return _settingsForm;
+        }
+
         private void OpenSettings()
         {
-            string oldEdge = _cfg.DockEdge, oldMonitor = _cfg.DockMonitor;
-            SettingsCallbacks cb = new SettingsCallbacks();
-            cb.ExportCsv = ExportCsv;
-            cb.Diagnostics = delegate { return Diag.Build(_cfg, _limits, _usage, _probeFailed, _org, _history.Count); };
-            cb.IsOpenCodeSqliteMissing = delegate { return _usage != null && _usage.OpenCodeSqliteMissingCli; };
-            cb.CheckUpdates = delegate { CheckForUpdates(true); };
-            cb.PricingUpdated = delegate
+            if (_settingsForm != null && !_settingsForm.IsDisposed && _settingsForm.Visible)
             {
-                _pricing = Pricing.Load();
-                CheckCustomPricingWarning();
-                _scanner.ResetWithPricing(_pricing);
-                RequestScan();
-            };
-            cb.Apply = delegate
-            {
-                ApplyConfigChanges(oldEdge, oldMonitor);
-                oldEdge = _cfg.DockEdge;
-                oldMonitor = _cfg.DockMonitor;
-            };
-            using (SettingsForm f = new SettingsForm(_cfg, cb))
-            {
-                if (f.ShowDialog() != DialogResult.OK) return;
+                _settingsForm.Activate();
+                return;
             }
-            ApplyConfigChanges(oldEdge, oldMonitor);
+            _settingsOldEdge = _cfg.DockEdge;
+            _settingsOldMonitor = _cfg.DockMonitor;
+            SettingsForm f = EnsureSettingsForm();
+            f.PrepareForOpen();
+            if (f.ShowDialog() != DialogResult.OK) return;
+            ApplyConfigChanges(_settingsOldEdge, _settingsOldMonitor);
         }
 
         private void ShowWizard()
@@ -1297,6 +1448,7 @@ namespace ClaudeUsageWidget
 
             _float.Compact = _cfg.Compact;
             _miCompact.Checked = _cfg.Compact;
+            if (_miZen != null) _miZen.Checked = _cfg.ZenMode;
             ApplyOpacity();
             _float.ClickThrough = _cfg.ClickThrough;
             _miClickThrough.Checked = _cfg.ClickThrough;
@@ -1476,10 +1628,12 @@ namespace ClaudeUsageWidget
                 }
                 else if (cmd == "open_explorer") OpenProjectExplorer();
                 else if (cmd == "toggle_compact") SetCompact(!_float.Compact);
+                else if (cmd == "toggle_zen") SetZenMode(!_cfg.ZenMode);
                 else if (cmd == "copy_status") CopyStatus();
                 else if (cmd == "copy_compact") CopyCompactCommand();
                 else if (cmd == "open_terminal") OpenProjectTerminal();
                 else if (cmd == "open_settings") OpenSettings();
+                else if (cmd == "ack_sessions") AcknowledgeDoneSessions();
             }
             catch (Exception ex) { Log.Write("ipc.cmd", ex); }
         }
@@ -1648,7 +1802,7 @@ namespace ClaudeUsageWidget
                     lock (_dirty) { dirty = new List<string>(_dirty); _dirty.Clear(); }
                     try
                     {
-                        _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessionIds());
+                        _scanner.SyncHookSessions(NotifyCli.GetActiveHookSessions());
                         if (doFull) _scanner.Scan();
                         else if (dirty.Count > 0) _scanner.ScanFiles(dirty);
                     }
@@ -1664,6 +1818,7 @@ namespace ClaudeUsageWidget
                         RunBudget();
                         CheckBurnRate();
                         CheckContextAlert();
+                        CheckConfirmNotifications(snap);
                         RunAlerts();
                     }, null);
                 } while (_scanAgain);
@@ -1784,18 +1939,55 @@ namespace ClaudeUsageWidget
             StatusExporter.Export(_usage, _limits, vm);
         }
 
+        private readonly HashSet<string> _notifiedConfirmIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool _confirmBaselineReady;
+
+        private void CheckConfirmNotifications(UsageSnapshot snap)
+        {
+            if (snap == null || snap.Sessions == null || snap.Sessions.Items == null) return;
+            HashSet<string> currentConfirm = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            SessionActivity newlyConfirmed = null;
+            foreach (SessionActivity sa in snap.Sessions.Items)
+            {
+                if (sa == null || sa.State != "confirm" || string.IsNullOrEmpty(sa.Id)) continue;
+                currentConfirm.Add(sa.Id);
+                if (_confirmBaselineReady && !_notifiedConfirmIds.Contains(sa.Id) && newlyConfirmed == null)
+                    newlyConfirmed = sa;
+            }
+            _notifiedConfirmIds.Clear();
+            foreach (string id in currentConfirm) _notifiedConfirmIds.Add(id);
+            if (!_confirmBaselineReady)
+            {
+                _confirmBaselineReady = true;
+                return;
+            }
+            if (newlyConfirmed == null || !_cfg.HookNotifyInput) return;
+            if (_lastNotifyKind == "input" && (DateTime.Now - _lastNotifyAt).TotalSeconds < 15) return;
+
+            _lastNotifyAt = DateTime.Now;
+            _lastNotifyKind = "input";
+            string proj = string.IsNullOrEmpty(newlyConfirmed.Project) ? newlyConfirmed.Provider : newlyConfirmed.Project;
+            string text = L.T("notify.confirm.sess", newlyConfirmed.Provider, proj);
+            Log.Write("notify confirm " + newlyConfirmed.Provider + " " + proj);
+            ShowBalloon(text, ToolTipIcon.Info);
+            bool quiet = IsQuietNow();
+            if (_cfg.AudioAlertsEnabled && !quiet) AudioAlert.PlayPrompt();
+            if (_cfg.WebhookEnabled && !quiet) WebhookSender.Send(_cfg.GetWebhookUrl(), "AI Confirmation Required", text);
+        }
+
         // ---------------- ikon tray dinamis ----------------
         private void UpdateTrayIcon()
         {
             // Satu angka besar: limit 5 jam, atau limit mingguan (cincin putih) bila mingguan sudah penuh.
             string txt; Color badge; bool weekly;
             TrayText.IconSpec(_limits, _cfg.ScanClaude, _cfg.ScanGemini, _cfg.ScanCodex, out txt, out badge, out weekly);
+            bool hasConfirm = _usage != null && _usage.Sessions != null && _usage.Sessions.ConfirmCount > 0;
 
             Size sz = SystemInformation.SmallIconSize;
             using (Bitmap bmp = new Bitmap(sz.Width, sz.Height))
             {
                 using (Graphics g = Graphics.FromImage(bmp))
-                    TrayIconPainter.Draw(g, Math.Min(sz.Width, sz.Height), txt, badge, weekly);
+                    TrayIconPainter.Draw(g, Math.Min(sz.Width, sz.Height), txt, badge, weekly, hasConfirm);
                 IntPtr h = bmp.GetHicon();
                 Icon newIcon = Icon.FromHandle(h);
                 _tray.Icon = newIcon;
@@ -1982,6 +2174,8 @@ namespace ClaudeUsageWidget
             {
                 if (_float.Visible) SavePosition();
                 _tick.Stop(); _debounce.Stop(); _fsTimer.Stop();
+                if (_prewarmTimer != null) { _prewarmTimer.Stop(); _prewarmTimer.Dispose(); _prewarmTimer = null; }
+                if (_settingsForm != null && !_settingsForm.IsDisposed) { _settingsForm.Dispose(); _settingsForm = null; }
                 if (_hotkey != null) _hotkey.Dispose();
                 if (_logWatcher != null) _logWatcher.Dispose();
                 if (_appWatcher != null) _appWatcher.Dispose();

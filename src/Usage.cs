@@ -221,6 +221,15 @@ namespace ClaudeUsageWidget
         public double CacheHit { get { return InputSide <= 0 ? 0 : (double)CacheRead / InputSide; } }
     }
 
+    internal class ToolUsageRecord
+    {
+        public string Provider;
+        public string Tool;
+        public long Calls;
+        public long Tokens;
+        public double Cost;
+    }
+
     internal class UsageSnapshot
     {
         public Dictionary<string, Tally> Today = new Dictionary<string, Tally>();
@@ -252,6 +261,7 @@ namespace ClaudeUsageWidget
         public Dictionary<string, string> ProjectPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> ProjectProviders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public List<SessionCostRecord> ExpensiveSessions = new List<SessionCostRecord>();
+        public List<ToolUsageRecord> ToolBreakdown = new List<ToolUsageRecord>();
         public bool OpenCodeSqliteMissingCli;
         public int CacheHitFiles, DiskReadFiles;
         public LimitWindow AntigravityFiveHour = new LimitWindow();
@@ -290,6 +300,9 @@ namespace ClaudeUsageWidget
         public DateTime ConfirmAt = DateTime.MinValue;
         public DateTime DoneAt = DateTime.MinValue;
         public DateTime AckAt = DateTime.MinValue;
+        public double SessionCost;
+        public long SessionTokens;
+        public double SessionCacheHit;
     }
 
     internal class SessionStatusSummary
@@ -316,7 +329,7 @@ namespace ClaudeUsageWidget
     internal class UsageScanner
     {
         private const int KeepDays = 30;   // jendela pindai; "7 hari" dan "hari ini" dihitung dari subsetnya
-        private const int CacheFormatVersion = 2;
+        private const int CacheFormatVersion = 3;
         /// <summary>Folder 'projects' yang dipindai (default + folder tambahan + WSL). Diisi TrayApp.</summary>
         public Func<List<string>> Roots;
         public Func<List<string>> GeminiCliRoots;
@@ -339,6 +352,7 @@ namespace ClaudeUsageWidget
         private readonly Dictionary<string, string> _codexFileCwds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, SessionActivity> _sessions = new Dictionary<string, SessionActivity>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, SessionCostRecord> _sessionCosts = new Dictionary<string, SessionCostRecord>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ToolUsageRecord> _tools = new Dictionary<string, ToolUsageRecord>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, CachedFileEntry> _diskCache = new Dictionary<string, CachedFileEntry>(StringComparer.OrdinalIgnoreCase);
         private CachedFileEntry _activeCache;
         private bool _cacheLoaded, _cacheDirty;
@@ -353,9 +367,27 @@ namespace ClaudeUsageWidget
         private static string ProjectName(string cwd)
         {
             if (string.IsNullOrWhiteSpace(cwd)) return "(unknown)";
-            string leaf = cwd.TrimEnd('\\', '/');
-            int i = Math.Max(leaf.LastIndexOf('\\'), leaf.LastIndexOf('/'));
-            if (i >= 0) leaf = leaf.Substring(i + 1);
+            string norm = cwd.TrimEnd('\\', '/').Replace('/', '\\');
+            string[] parts = norm.Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3)
+            {
+                for (int k = parts.Length - 2; k >= 1; k--)
+                {
+                    if (string.Equals(parts[k], "worktrees", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(parts[k], ".worktrees", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int parentIdx = (k >= 2 && string.Equals(parts[k - 1], ".claude", StringComparison.OrdinalIgnoreCase))
+                            ? k - 2
+                            : k - 1;
+                        if (parentIdx >= 0 && parts[parentIdx].IndexOf(':') < 0)
+                        {
+                            string baseName = parts[parentIdx] + " (wt)";
+                            return baseName.Length > 40 ? baseName.Substring(0, 40) : baseName;
+                        }
+                    }
+                }
+            }
+            string leaf = parts.Length > 0 ? parts[parts.Length - 1] : norm;
             if (leaf.Length == 0) return "(unknown)";
             return leaf.Length > 40 ? leaf.Substring(0, 40) : leaf;
         }
@@ -366,7 +398,7 @@ namespace ClaudeUsageWidget
             _days.Clear(); _daysAg.Clear(); _daysCodex.Clear(); _daysGeminiCli.Clear(); _daysOpenCode.Clear();
             _proj.Clear(); _projAg.Clear(); _projCodex.Clear(); _projGeminiCli.Clear(); _projOpenCode.Clear();
             _projPaths.Clear(); _codexFileModels.Clear(); _codexFileCwds.Clear();
-            _sessions.Clear(); _sessionCosts.Clear();
+            _sessions.Clear(); _sessionCosts.Clear(); _tools.Clear();
             _diskCache.Clear(); _activeCache = null; _cacheLoaded = false; _cacheDirty = false;
             _openCodeDbStamp = DateTime.MinValue; _openCodeSqliteMissingCli = false;
             _codexLimitTime = DateTime.MinValue; _codex5h = new LimitWindow(); _codex7d = new LimitWindow();
@@ -745,6 +777,10 @@ namespace ClaudeUsageWidget
             if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0 && !noUsageConfirm) return;
             if (line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) return;
 
+            List<string> turnTools = line.IndexOf("\"tool_use\"", StringComparison.Ordinal) >= 0
+                ? ExtractClaudeToolNames(line)
+                : null;
+
             Dictionary<string, object> o = null;
             try { o = J.Parse(StripContent(line)); }
             catch
@@ -811,7 +847,17 @@ namespace ClaudeUsageWidget
                     RecordUsage("Claude", _days, _proj, local, model, proj, rawCwd, t, skey, false);
                     UpdateContext(t.Input + t.CacheRead + cw, model, local, rawCwd);
                     RecordRecentToken(local, t.Total, false);
+                    if (turnTools != null && turnTools.Count > 0)
+                        RecordTurnTools("Claude", turnTools, t.Total, t.Cost, false);
                 }
+                else if (turnTools != null && turnTools.Count > 0)
+                {
+                    RecordTurnTools("Claude", turnTools, 0, 0, false);
+                }
+            }
+            else if (turnTools != null && turnTools.Count > 0)
+            {
+                RecordTurnTools("Claude", turnTools, 0, 0, false);
             }
 
             if ((DateTime.Now - local).TotalMinutes <= 30 && !IsBackgroundHelperSession(filePath))
@@ -1012,20 +1058,25 @@ namespace ClaudeUsageWidget
             RecordUsage("Antigravity", _daysAg, _projAg, local, model, "Antigravity", null, t, agSkey, false);
             UpdateContext(t.Input + t.CacheRead, model, local, null);
             RecordRecentToken(local, t.Total, true);
+            string tcSlice = ExtractFieldSlice(line, "\"tool_calls\":");
+            bool hasToolCalls = !string.IsNullOrEmpty(tcSlice) && HasNonEmptyArrayField(line, "\"tool_calls\":");
+            if (!hasToolCalls && line.IndexOf("\"truncated_fields\"", StringComparison.Ordinal) >= 0 &&
+                line.IndexOf("\"tool_calls\"", StringComparison.Ordinal) >= 0)
+            {
+                string fullLine = FindFullTranscriptStepLine(filePath, stepIndex);
+                if (fullLine != null)
+                {
+                    tcSlice = ExtractFieldSlice(fullLine, "\"tool_calls\":");
+                    hasToolCalls = !string.IsNullOrEmpty(tcSlice) && HasNonEmptyArrayField(fullLine, "\"tool_calls\":");
+                }
+            }
+            if (hasToolCalls)
+            {
+                List<string> agTools = ExtractAntigravityToolNames(tcSlice);
+                if (agTools.Count > 0) RecordTurnTools("Antigravity", agTools, t.Total, t.Cost, false);
+            }
             if ((DateTime.Now - local).TotalMinutes <= 30 && !IsBackgroundHelperSession(filePath))
             {
-                string tcSlice = ExtractFieldSlice(line, "\"tool_calls\":");
-                bool hasToolCalls = !string.IsNullOrEmpty(tcSlice) && HasNonEmptyArrayField(line, "\"tool_calls\":");
-                if (!hasToolCalls && line.IndexOf("\"truncated_fields\"", StringComparison.Ordinal) >= 0 &&
-                    line.IndexOf("\"tool_calls\"", StringComparison.Ordinal) >= 0)
-                {
-                    string fullLine = FindFullTranscriptStepLine(filePath, stepIndex);
-                    if (fullLine != null)
-                    {
-                        tcSlice = ExtractFieldSlice(fullLine, "\"tool_calls\":");
-                        hasToolCalls = !string.IsNullOrEmpty(tcSlice) && HasNonEmptyArrayField(fullLine, "\"tool_calls\":");
-                    }
-                }
                 bool asksConfirm = hasToolCalls && (
                     ContainsToolName(tcSlice, "ask_question") ||
                     ContainsToolName(tcSlice, "request_user_input") ||
@@ -1352,6 +1403,23 @@ namespace ClaudeUsageWidget
                 });
                 if (scList.Count > 50) scList.RemoveRange(50, scList.Count - 50);
                 s.ExpensiveSessions = scList;
+
+                List<ToolUsageRecord> tList = new List<ToolUsageRecord>();
+                foreach (ToolUsageRecord tr in _tools.Values)
+                {
+                    if (tr.Provider == "Claude" && !ScanClaude) continue;
+                    if (tr.Provider == "Antigravity" && !ScanGemini) continue;
+                    if (tr.Provider == "Codex" && !ScanCodex) continue;
+                    if (tr.Calls > 0)
+                        tList.Add(new ToolUsageRecord { Provider = tr.Provider, Tool = tr.Tool, Calls = tr.Calls, Tokens = tr.Tokens, Cost = tr.Cost });
+                }
+                tList.Sort(delegate(ToolUsageRecord a, ToolUsageRecord b)
+                {
+                    int c = b.Tokens.CompareTo(a.Tokens);
+                    return c != 0 ? c : b.Calls.CompareTo(a.Calls);
+                });
+                if (tList.Count > 60) tList.RemoveRange(60, tList.Count - 60);
+                s.ToolBreakdown = tList;
                 s.OpenCodeSqliteMissingCli = _openCodeSqliteMissingCli;
                 s.CacheHitFiles = CacheHitFiles;
                 s.DiskReadFiles = DiskReadFiles;
@@ -1686,8 +1754,16 @@ namespace ClaudeUsageWidget
             }
         }
 
-        private static SessionActivity CopySessionActivity(SessionActivity sa, string state)
+        private SessionActivity CopySessionActivity(SessionActivity sa, string state)
         {
+            SessionCostRecord sr;
+            double sCost = 0; long sTok = 0; double sCache = 0;
+            if (_sessionCosts.TryGetValue((sa.Provider ?? "") + "|" + (sa.Id ?? ""), out sr))
+            {
+                sCost = sr.Cost;
+                sTok = sr.TotalTokens;
+                sCache = sr.CacheHit;
+            }
             return new SessionActivity
             {
                 Id = sa.Id,
@@ -1701,7 +1777,10 @@ namespace ClaudeUsageWidget
                 UpdatedAt = sa.UpdatedAt,
                 ConfirmAt = sa.ConfirmAt,
                 DoneAt = sa.DoneAt,
-                AckAt = sa.AckAt
+                AckAt = sa.AckAt,
+                SessionCost = sCost,
+                SessionTokens = sTok,
+                SessionCacheHit = sCache
             };
         }
 
@@ -1850,6 +1929,116 @@ namespace ClaudeUsageWidget
                 _activeCache.MergeRow(provider, local.Date, model, proj, rawCwd, t);
                 if (local.Ticks > _activeCache.LastRecordTicks) _activeCache.LastRecordTicks = local.Ticks;
             }
+        }
+
+        private static string ShortToolName(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            string s = raw.Trim();
+            if (s.StartsWith("default_api:", StringComparison.OrdinalIgnoreCase))
+                s = s.Substring(12);
+            if (s.StartsWith("mcp__", StringComparison.OrdinalIgnoreCase))
+                s = "mcp:" + s.Substring(5).Replace("__", "/");
+            if (s.Length > 48) s = s.Substring(0, 48);
+            return s;
+        }
+
+        private static string ReadQuotedStringAfter(string text, int quoteStart)
+        {
+            if (string.IsNullOrEmpty(text) || quoteStart < 0 || quoteStart >= text.Length || text[quoteStart] != '"') return null;
+            StringBuilder sb = new StringBuilder();
+            for (int i = quoteStart + 1; i < text.Length && sb.Length < 100; i++)
+            {
+                char ch = text[i];
+                if (ch == '\\' && i + 1 < text.Length) { i++; sb.Append(text[i]); continue; }
+                if (ch == '"') return sb.ToString();
+                sb.Append(ch);
+            }
+            return null;
+        }
+
+        private static List<string> ExtractClaudeToolNames(string line)
+        {
+            List<string> list = new List<string>();
+            if (string.IsNullOrEmpty(line)) return list;
+            int pos = 0;
+            while (pos < line.Length && list.Count < 16)
+            {
+                int idx = line.IndexOf("\"tool_use\"", pos, StringComparison.Ordinal);
+                if (idx < 0) break;
+                int searchStart = Math.Max(0, idx - 60);
+                int searchEnd = Math.Min(line.Length, idx + 280);
+                int nIdx = line.IndexOf("\"name\"", idx, StringComparison.Ordinal);
+                if (nIdx < 0 || nIdx >= searchEnd) nIdx = line.IndexOf("\"name\"", searchStart, idx - searchStart, StringComparison.Ordinal);
+                if (nIdx >= 0 && nIdx < searchEnd)
+                {
+                    int colon = nIdx + 6;
+                    while (colon < searchEnd && char.IsWhiteSpace(line[colon])) colon++;
+                    if (colon < searchEnd && line[colon] == ':')
+                    {
+                        colon++;
+                        while (colon < searchEnd && char.IsWhiteSpace(line[colon])) colon++;
+                        string name = ShortToolName(ReadQuotedStringAfter(line, colon));
+                        if (!string.IsNullOrEmpty(name)) list.Add(name);
+                    }
+                }
+                pos = idx + 10;
+            }
+            return list;
+        }
+
+        private static List<string> ExtractAntigravityToolNames(string tcSlice)
+        {
+            List<string> list = new List<string>();
+            if (string.IsNullOrEmpty(tcSlice)) return list;
+            int pos = 0;
+            while (pos < tcSlice.Length && list.Count < 16)
+            {
+                int nIdx = tcSlice.IndexOf("\"name\"", pos, StringComparison.Ordinal);
+                if (nIdx < 0) break;
+                int colon = nIdx + 6;
+                while (colon < tcSlice.Length && char.IsWhiteSpace(tcSlice[colon])) colon++;
+                if (colon < tcSlice.Length && tcSlice[colon] == ':')
+                {
+                    colon++;
+                    while (colon < tcSlice.Length && char.IsWhiteSpace(tcSlice[colon])) colon++;
+                    string name = ShortToolName(ReadQuotedStringAfter(tcSlice, colon));
+                    if (!string.IsNullOrEmpty(name)) list.Add(name);
+                }
+                pos = nIdx + 6;
+            }
+            return list;
+        }
+
+        private void RecordTurnTools(string provider, List<string> tools, long turnTokens, double turnCost, bool fromReplay)
+        {
+            if (tools == null || tools.Count == 0) return;
+            int n = tools.Count;
+            long tokPer = n > 0 ? turnTokens / n : 0;
+            double costPer = n > 0 ? turnCost / n : 0;
+            for (int i = 0; i < n; i++)
+            {
+                long tok = tokPer + (i == 0 ? (turnTokens % n) : 0);
+                double cost = costPer;
+                RecordToolAggregate(provider, tools[i], 1, tok, cost, fromReplay);
+            }
+        }
+
+        private void RecordToolAggregate(string provider, string toolName, long calls, long tokens, double cost, bool fromReplay)
+        {
+            if (string.IsNullOrEmpty(toolName)) return;
+            string mapKey = provider + "|" + toolName;
+            ToolUsageRecord tr;
+            if (!_tools.TryGetValue(mapKey, out tr))
+            {
+                tr = new ToolUsageRecord { Provider = provider, Tool = toolName };
+                _tools[mapKey] = tr;
+            }
+            tr.Calls += calls;
+            tr.Tokens += tokens;
+            tr.Cost += cost;
+            if (!fromReplay && _activeCache != null)
+                _activeCache.MergeTool(provider, toolName, calls, tokens, cost);
         }
 
         private void RecordSessionCost(string sessionKey, string provider, string project, string model, Tally t, DateTime local)
@@ -2228,6 +2417,13 @@ namespace ClaudeUsageWidget
             public double Cost, Saved;
         }
 
+        private class CachedToolRow
+        {
+            public string Provider, Tool;
+            public long Calls, Tokens;
+            public double Cost;
+        }
+
         private class CachedFileEntry
         {
             public long Length, LastWriteUtcTicks, Offset, LastRecordTicks;
@@ -2241,8 +2437,23 @@ namespace ClaudeUsageWidget
             public string LastSessState, LastSessProvider, LastSessProj, LastSessCwd;
             public long LastSessTicks;
             public List<CachedTallyRow> Rows = new List<CachedTallyRow>();
+            public List<CachedToolRow> Tools = new List<CachedToolRow>();
             public List<long[]> RecentTokens = new List<long[]>();
             public List<long[]> RecentAgTokens = new List<long[]>();
+
+            public void MergeTool(string provider, string tool, long calls, long tokens, double cost)
+            {
+                for (int i = 0; i < Tools.Count; i++)
+                {
+                    CachedToolRow tr = Tools[i];
+                    if (tr.Provider == provider && tr.Tool == tool)
+                    {
+                        tr.Calls += calls; tr.Tokens += tokens; tr.Cost += cost;
+                        return;
+                    }
+                }
+                Tools.Add(new CachedToolRow { Provider = provider, Tool = tool, Calls = calls, Tokens = tokens, Cost = cost });
+            }
 
             public void MergeRow(string provider, DateTime date, string model, string proj, string rawCwd, Tally t)
             {
@@ -2320,6 +2531,14 @@ namespace ClaudeUsageWidget
                 t.Cost = r.Cost; t.Saved = r.Saved;
                 RecordUsage(r.Provider, DaysMapForProvider(r.Provider), ProjMapForProvider(r.Provider),
                     dt.Date, r.Model, r.Proj, r.RawCwd, t, skey, true);
+            }
+            if (ce.Tools != null)
+            {
+                for (int i = 0; i < ce.Tools.Count; i++)
+                {
+                    CachedToolRow tr = ce.Tools[i];
+                    RecordToolAggregate(tr.Provider, tr.Tool, tr.Calls, tr.Tokens, tr.Cost, true);
+                }
             }
             if (!string.IsNullOrEmpty(ce.CodexModel)) _codexFileModels[filePath] = ce.CodexModel;
             if (!string.IsNullOrEmpty(ce.CodexCwd)) _codexFileCwds[filePath] = ce.CodexCwd;

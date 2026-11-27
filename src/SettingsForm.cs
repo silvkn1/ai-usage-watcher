@@ -61,9 +61,9 @@ namespace ClaudeUsageWidget
         private readonly CheckBox _audioOn = new CheckBox(), _contextOn = new CheckBox();
         private readonly CheckBox _burnRateOn = new CheckBox();
         private readonly NumericUpDown _burnRateTokens = new NumericUpDown(), _cooldownMins = new NumericUpDown();
-        private readonly CheckBox _quietOn = new CheckBox(), _digestOn = new CheckBox(), _contextBar = new CheckBox();
+        private readonly CheckBox _quietOn = new CheckBox(), _digestOn = new CheckBox(), _contextBar = new CheckBox(), _zenMode = new CheckBox();
         private readonly NumericUpDown _quietStart = new NumericUpDown(), _quietEnd = new NumericUpDown(), _digestHour = new NumericUpDown();
-        private readonly ComboBox _cardLayout = new ComboBox(), _pillMode = new ComboBox(), _digestSchedule = new ComboBox();
+        private readonly ComboBox _cardLayout = new ComboBox(), _pillMode = new ComboBox(), _digestSchedule = new ComboBox(), _scale = new ComboBox(), _probeModel = new ComboBox(), _ctxWin = new ComboBox();
         private readonly CheckBox _webhookOn = new CheckBox();
         private readonly TextBox _webhookUrl = new TextBox();
         private readonly Button _webhookTestBtn = new Button();
@@ -72,9 +72,15 @@ namespace ClaudeUsageWidget
         private readonly Panel _content = new Panel();
         private readonly List<Button> _tabBtns = new List<Button>();
         private readonly List<Panel> _pages = new List<Panel>();
+        private readonly List<TableLayoutPanel> _tabTables = new List<TableLayoutPanel>();
+        private readonly bool[] _tabBuilt = new bool[6];
         private int _tab;
         private Button _saveBtn, _cancelBtn, _applyBtn;
         private readonly List<Action> _i18n = new List<Action>();
+        private Dictionary<string, string> _i18nRev;
+        private string _i18nRevLang;
+        private string _builtLang = L.Lang;
+        private bool _appliedLight = Palette.IsLight;
         private bool _i18nCaptured;
 
         public SettingsForm(AppConfig cfg) : this(cfg, null) { }
@@ -83,6 +89,8 @@ namespace ClaudeUsageWidget
         {
             _cfg = cfg;
             _cb = callbacks;
+            _admin.Checked = _cfg.AdminEnabled;
+            _adminData.Checked = _cfg.AdminEnabled;
             Text = L.T("set.title");
             try { Icon ic = AppIcon.Get(); if (ic != null) Icon = ic; } catch { }
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -95,39 +103,54 @@ namespace ClaudeUsageWidget
             Rectangle wa = Screen.PrimaryScreen.WorkingArea;
             ClientSize = new Size(700, Math.Min(560, Math.Max(380, wa.Height - 140)));
 
-            // Urutan penambahan menentukan docking: isi (Fill) dulu, lalu bawah, lalu atas.
-            _content.Dock = DockStyle.Fill;
-            Controls.Add(_content);
-
-            FlowLayoutPanel buttons = new FlowLayoutPanel();
-            buttons.FlowDirection = FlowDirection.RightToLeft; buttons.AutoSize = true; buttons.Dock = DockStyle.Bottom;
-            buttons.Padding = new Padding(12, 8, 12, 10);
-            _cancelBtn = new Button(); _cancelBtn.Text = L.T("set.cancel"); _cancelBtn.DialogResult = DialogResult.Cancel; _cancelBtn.AutoSize = true;
-            _applyBtn = new Button(); _applyBtn.Text = L.T("set.apply"); _applyBtn.AutoSize = true; _applyBtn.Click += OnApply;
-            _saveBtn = new Button(); _saveBtn.Text = L.T("set.save"); _saveBtn.AutoSize = true; _saveBtn.Click += OnSave;
-            buttons.Controls.Add(_cancelBtn);
-            buttons.Controls.Add(_applyBtn);
-            buttons.Controls.Add(_saveBtn);
-            Controls.Add(buttons);
-
-            _tabStrip.Dock = DockStyle.Top; _tabStrip.Height = 40; _tabStrip.WrapContents = false;
-            _tabStrip.Padding = new Padding(10, 4, 10, 0);
-            _tabStrip.Paint += delegate(object s, PaintEventArgs e)
+            SuspendLayout();
+            _tabStrip.SuspendLayout();
+            _content.SuspendLayout();
+            try
             {
-                using (Pen p = new Pen(Palette.Border)) e.Graphics.DrawLine(p, 0, _tabStrip.Height - 1, _tabStrip.Width, _tabStrip.Height - 1);
-            };
-            Controls.Add(_tabStrip);
+                // Urutan penambahan menentukan docking: isi (Fill) dulu, lalu bawah, lalu atas.
+                _content.Dock = DockStyle.Fill;
+                Controls.Add(_content);
 
-            BuildDisplay(AddPage(L.T("tab.display")));
-            BuildBehavior(AddPage(L.T("tab.behavior")));
-            BuildAlerts(AddPage(L.T("tab.alerts")));
-            BuildData(AddPage(L.T("tab.data")));
-            BuildProbe(AddPage(L.T("tab.probe")));
-            BuildAdmin(AddPage(L.T("tab.admin")));
+                FlowLayoutPanel buttons = new FlowLayoutPanel();
+                buttons.SuspendLayout();
+                buttons.FlowDirection = FlowDirection.RightToLeft; buttons.AutoSize = true; buttons.Dock = DockStyle.Bottom;
+                buttons.Padding = new Padding(12, 8, 12, 10);
+                _cancelBtn = new Button(); _cancelBtn.Text = L.T("set.cancel"); _cancelBtn.DialogResult = DialogResult.Cancel; _cancelBtn.AutoSize = true;
+                _applyBtn = new Button(); _applyBtn.Text = L.T("set.apply"); _applyBtn.AutoSize = true; _applyBtn.Click += OnApply;
+                _saveBtn = new Button(); _saveBtn.Text = L.T("set.save"); _saveBtn.AutoSize = true; _saveBtn.Click += OnSave;
+                buttons.Controls.Add(_cancelBtn);
+                buttons.Controls.Add(_applyBtn);
+                buttons.Controls.Add(_saveBtn);
+                buttons.ResumeLayout(false);
+                Controls.Add(buttons);
 
-            AcceptButton = _saveBtn; CancelButton = _cancelBtn;
-            ApplyTheme();
-            SelectTab(0);
+                _tabStrip.Dock = DockStyle.Top; _tabStrip.Height = 40; _tabStrip.WrapContents = false;
+                _tabStrip.Padding = new Padding(10, 4, 10, 0);
+                _tabStrip.Paint += delegate(object s, PaintEventArgs e)
+                {
+                    using (Pen p = new Pen(Palette.Border)) e.Graphics.DrawLine(p, 0, _tabStrip.Height - 1, _tabStrip.Width, _tabStrip.Height - 1);
+                };
+                Controls.Add(_tabStrip);
+
+                AddPage(L.T("tab.display"));
+                AddPage(L.T("tab.behavior"));
+                AddPage(L.T("tab.alerts"));
+                AddPage(L.T("tab.data"));
+                AddPage(L.T("tab.probe"));
+                AddPage(L.T("tab.admin"));
+
+                AcceptButton = _saveBtn; CancelButton = _cancelBtn;
+                EnsureTabBuilt(0);
+                ApplyTheme();
+                SelectTab(0);
+            }
+            finally
+            {
+                _content.ResumeLayout(false);
+                _tabStrip.ResumeLayout(false);
+                ResumeLayout(false);
+            }
         }
 
         // ---------------- tab ----------------
@@ -136,6 +159,7 @@ namespace ClaudeUsageWidget
         private TableLayoutPanel AddPage(string title)
         {
             Panel page = new Panel();
+            page.SuspendLayout();
             page.Dock = DockStyle.Fill; page.AutoScroll = true; page.Padding = new Padding(16, 12, 16, 8); page.Visible = false;
             page.HandleCreated += delegate { DarkUi.ControlTheme(page.Handle, !Palette.IsLight); };   // scrollbar mengikuti tema
             TableLayoutPanel t = new TableLayoutPanel();
@@ -143,8 +167,10 @@ namespace ClaudeUsageWidget
             t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 260));
             page.Controls.Add(t);
+            page.ResumeLayout(false);
             _content.Controls.Add(page);
             _pages.Add(page);
+            _tabTables.Add(t);
 
             Button b = new Button();
             if (_tabFont == null) _tabFont = new Font("Segoe UI", 9.5f);
@@ -162,8 +188,39 @@ namespace ClaudeUsageWidget
             return t;
         }
 
+        private void EnsureTabBuilt(int i)
+        {
+            if (i < 0 || i >= _tabTables.Count || _tabBuilt[i]) return;
+            _tabBuilt[i] = true;
+            Panel page = _pages[i];
+            TableLayoutPanel t = _tabTables[i];
+            page.SuspendLayout();
+            t.SuspendLayout();
+            try
+            {
+                switch (i)
+                {
+                    case 0: BuildDisplay(t); break;
+                    case 1: BuildBehavior(t); break;
+                    case 2: BuildAlerts(t); break;
+                    case 3: BuildData(t); break;
+                    case 4: BuildProbe(t); break;
+                    case 5: BuildAdmin(t); break;
+                }
+                if (i > 0) ThemeControls(page);
+                if (_i18nCaptured)
+                    CaptureControlI18n(page, GetI18nRev());
+            }
+            finally
+            {
+                t.ResumeLayout(false);
+                page.ResumeLayout(true);
+            }
+        }
+
         private void SelectTab(int i)
         {
+            EnsureTabBuilt(i);
             _tab = i;
             for (int k = 0; k < _pages.Count; k++)
             {
@@ -248,8 +305,17 @@ namespace ClaudeUsageWidget
             AddRow(t, L.T("set.backdrop"), _backdrop);
 
             AddCheck(t, _compact, L.T("set.compact"), _cfg.Compact);
+            AddCheck(t, _zenMode, L.T("set.zen"), _cfg.ZenMode);
             AddCheck(t, _click, L.T("set.click"), _cfg.ClickThrough);
             AddCheck(t, _contextBar, L.T("set.contextbar"), _cfg.ShowContextBar);
+
+            _ctxWin.DropDownStyle = ComboBoxStyle.DropDownList; _ctxWin.Width = 220;
+            _ctxWin.Items.Add(L.T("set.ctxwin.auto"));
+            _ctxWin.Items.Add(L.T("set.ctxwin.200"));
+            _ctxWin.Items.Add(L.T("set.ctxwin.400"));
+            _ctxWin.Items.Add(L.T("set.ctxwin.1m"));
+            _ctxWin.SelectedIndex = _cfg.ContextWindowOverride == 200000L ? 1 : (_cfg.ContextWindowOverride == 400000L ? 2 : (_cfg.ContextWindowOverride == 1000000L ? 3 : 0));
+            AddRow(t, L.T("set.ctxwin"), _ctxWin);
 
             _cardLayout.DropDownStyle = ComboBoxStyle.DropDownList; _cardLayout.Width = 220;
             _cardLayout.Items.Add(L.T("set.cardlayout.auto"));
@@ -264,6 +330,14 @@ namespace ClaudeUsageWidget
             _pillMode.Items.Add(L.T("set.pillmode.cost_runway"));
             _pillMode.SelectedIndex = _cfg.MiniPillMode == "highest" ? 1 : (_cfg.MiniPillMode == "cost_runway" ? 2 : 0);
             AddRow(t, L.T("set.pillmode"), _pillMode);
+
+            _scale.DropDownStyle = ComboBoxStyle.DropDownList; _scale.Width = 180;
+            _scale.Items.Add(L.T("set.scale.85"));
+            _scale.Items.Add(L.T("set.scale.100"));
+            _scale.Items.Add(L.T("set.scale.115"));
+            _scale.Items.Add(L.T("set.scale.130"));
+            _scale.SelectedIndex = _cfg.WidgetScale < 0.92 ? 0 : (_cfg.WidgetScale < 1.08 ? 1 : (_cfg.WidgetScale < 1.22 ? 2 : 3));
+            AddRow(t, L.T("set.scale"), _scale);
 
             AddNote(t, L.T("set.h.currency"), "head");
             AddCheck(t, _currencyOn, L.T("set.currency.enable"), _cfg.CurrencyCustomEnabled);
@@ -466,9 +540,8 @@ namespace ClaudeUsageWidget
             {
                 AddNote(t, L.T("set.opencode.sqlite_warn"), "warn");
             }
-            AddCheck(t, _adminData, L.T("set.claude_api"), _cfg.AdminEnabled);
+            AddCheck(t, _adminData, L.T("set.claude_api"), _adminData.Checked);
             _adminData.CheckedChanged += delegate { if (_admin.Checked != _adminData.Checked) _admin.Checked = _adminData.Checked; };
-            _admin.CheckedChanged += delegate { if (_adminData.Checked != _admin.Checked) _adminData.Checked = _admin.Checked; };
 
             AddNote(t, L.T("set.h.ollama"), "head");
             AddCheck(t, _ollamaOn, L.T("set.ollama.enable"), _cfg.OllamaEnabled);
@@ -579,6 +652,10 @@ namespace ClaudeUsageWidget
             _probeMin.Minimum = 5; _probeMin.Maximum = 240; _probeMin.Width = 70;
             _probeMin.Value = Math.Max(5, Math.Min(240, _cfg.ProbeMinMinutes));
             AddRow(t, L.T("set.probe.every"), _probeMin);
+            _probeModel.DropDownStyle = ComboBoxStyle.DropDown; _probeModel.Width = 220;
+            _probeModel.Items.AddRange(new object[] { "claude-haiku-5-5", "claude-haiku-4-5", "claude-sonnet-4-6" });
+            _probeModel.Text = string.IsNullOrEmpty(_cfg.ProbeModel) ? "claude-haiku-5-5" : _cfg.ProbeModel;
+            AddRow(t, L.T("set.probe.model"), _probeModel);
             AddNote(t, L.T("set.probe.note"), "dim");
 
             AddCheck(t, _mirror, L.T("set.mirror"), _cfg.MirrorEnabled);
@@ -598,7 +675,8 @@ namespace ClaudeUsageWidget
 
         private void BuildAdmin(TableLayoutPanel t)
         {
-            AddCheck(t, _admin, L.T("set.admin.enable"), _cfg.AdminEnabled);
+            AddCheck(t, _admin, L.T("set.admin.enable"), _admin.Checked);
+            _admin.CheckedChanged += delegate { if (_adminData.Checked != _admin.Checked) _adminData.Checked = _admin.Checked; };
             _key.UseSystemPasswordChar = true; _key.Width = 260;
             AddRow(t, L.T("set.admin.key"), _key);
             _keyState.AutoSize = true; _keyState.Tag = "dim";
@@ -644,26 +722,35 @@ namespace ClaudeUsageWidget
         // ---------------- tema ----------------
         private void ApplyTheme()
         {
-            BackColor = Palette.Bg; ForeColor = Palette.Text;
-            ThemeControls(this);
-            _tabStrip.BackColor = Palette.Bg;
-            foreach (Button b in _tabBtns)
+            _appliedLight = Palette.IsLight;
+            SuspendLayout();
+            try
             {
-                b.BackColor = Palette.Bg; b.ForeColor = Palette.Dim;
-                b.FlatAppearance.MouseOverBackColor = Palette.Hover; b.FlatAppearance.MouseDownBackColor = Palette.Hover;
+                BackColor = Palette.Bg; ForeColor = Palette.Text;
+                ThemeControls(this);
+                _tabStrip.BackColor = Palette.Bg;
+                foreach (Button b in _tabBtns)
+                {
+                    b.BackColor = Palette.Bg; b.ForeColor = Palette.Dim;
+                    b.FlatAppearance.MouseOverBackColor = Palette.Hover; b.FlatAppearance.MouseDownBackColor = Palette.Hover;
+                }
+                if (_tab >= 0 && _tab < _tabBtns.Count) _tabBtns[_tab].ForeColor = Palette.Text;
+                _saveBtn.BackColor = Palette.Accent; _saveBtn.ForeColor = Color.White;
+                _saveBtn.FlatAppearance.BorderColor = Palette.Accent;
+                if (_applyBtn != null)
+                {
+                    _applyBtn.BackColor = Palette.Surface; _applyBtn.ForeColor = Palette.Text;
+                    _applyBtn.FlatAppearance.BorderColor = Palette.Border;
+                }
+                if (IsHandleCreated) DarkUi.TitleBar(Handle, !Palette.IsLight);
+                foreach (Panel p in _pages)
+                {
+                    if (p.IsHandleCreated) DarkUi.ControlTheme(p.Handle, !Palette.IsLight);
+                }
             }
-            if (_tab >= 0 && _tab < _tabBtns.Count) _tabBtns[_tab].ForeColor = Palette.Text;
-            _saveBtn.BackColor = Palette.Accent; _saveBtn.ForeColor = Color.White;
-            _saveBtn.FlatAppearance.BorderColor = Palette.Accent;
-            if (_applyBtn != null)
+            finally
             {
-                _applyBtn.BackColor = Palette.Surface; _applyBtn.ForeColor = Palette.Text;
-                _applyBtn.FlatAppearance.BorderColor = Palette.Border;
-            }
-            if (IsHandleCreated) DarkUi.TitleBar(Handle, !Palette.IsLight);
-            foreach (Panel p in _pages)
-            {
-                if (p.IsHandleCreated) DarkUi.ControlTheme(p.Handle, !Palette.IsLight);
+                ResumeLayout(false);
             }
             Invalidate(true);
         }
@@ -734,11 +821,10 @@ namespace ClaudeUsageWidget
             }
         }
 
-        private void CaptureI18nBindings()
+        private Dictionary<string, string> GetI18nRev()
         {
-            if (_i18nCaptured) return;
-            _i18nCaptured = true;
-
+            if (_i18nRev != null && string.Equals(_i18nRevLang, L.Lang, StringComparison.OrdinalIgnoreCase))
+                return _i18nRev;
             Dictionary<string, string> rev = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (KeyValuePair<string, string[]> kv in L.All)
             {
@@ -753,9 +839,17 @@ namespace ClaudeUsageWidget
                     if (!string.IsNullOrEmpty(t)) rev[t] = kv.Key;
                 }
             }
+            _i18nRev = rev;
+            _i18nRevLang = L.Lang;
+            return rev;
+        }
 
+        private void CaptureI18nBindings()
+        {
+            if (_i18nCaptured) return;
+            _i18nCaptured = true;
             _i18n.Add(delegate { Text = L.T("set.title"); });
-            CaptureControlI18n(this, rev);
+            CaptureControlI18n(this, GetI18nRev());
         }
 
         private void CaptureControlI18n(Control root, Dictionary<string, string> rev)
@@ -824,13 +918,14 @@ namespace ClaudeUsageWidget
         internal void RefreshI18n()
         {
             CaptureI18nBindings();
+            _builtLang = L.Lang;
             SuspendLayout();
             try
             {
                 foreach (Action a in _i18n) a();
                 _opacityLbl.Text = L.T("set.opacity", _opacity.Value);
-                RefreshHookState();
-                RefreshKeyState();
+                if (_tabBuilt[2]) RefreshHookState();
+                if (_tabBuilt[5]) RefreshKeyState();
             }
             finally
             {
@@ -843,47 +938,73 @@ namespace ClaudeUsageWidget
         // ---------------- simpan & terapkan ----------------
         private bool SaveToConfig()
         {
-            // Konfirmasi eksplisit setiap kali probe dinyalakan (dari mati ke hidup). Default tombol: Tidak.
-            if (_probe.Checked && !_cfg.ProbeEnabled)
+            if (_tabBuilt[4])
             {
-                DialogResult r = MessageBox.Show(this, L.T("msg.probe.body"), L.T("msg.probe.title"),
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-                if (r != DialogResult.Yes) { _probe.Checked = false; SelectTab(4); return false; }
+                // Konfirmasi eksplisit setiap kali probe dinyalakan (dari mati ke hidup). Default tombol: Tidak.
+                if (_probe.Checked && !_cfg.ProbeEnabled)
+                {
+                    DialogResult r = MessageBox.Show(this, L.T("msg.probe.body"), L.T("msg.probe.title"),
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                    if (r != DialogResult.Yes) { _probe.Checked = false; SelectTab(4); return false; }
+                }
             }
-            string key = _key.Text.Trim();
-            if (key.Length > 0 && !key.StartsWith("sk-ant-admin", StringComparison.Ordinal))
+            string key = _tabBuilt[5] ? _key.Text.Trim() : "";
+            if (_tabBuilt[5])
             {
-                SelectTab(5);
-                MessageBox.Show(this, L.T("msg.key.prefix"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
+                if (key.Length > 0 && !key.StartsWith("sk-ant-admin", StringComparison.Ordinal))
+                {
+                    SelectTab(5);
+                    MessageBox.Show(this, L.T("msg.key.prefix"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+                if (_admin.Checked && key.Length == 0 && (_clearKey || string.IsNullOrEmpty(_cfg.AdminKeyProtected)))
+                {
+                    SelectTab(5);
+                    MessageBox.Show(this, L.T("msg.key.required"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
             }
-            if (_admin.Checked && key.Length == 0 && (_clearKey || string.IsNullOrEmpty(_cfg.AdminKeyProtected)))
+            else if (_tabBuilt[3] && _adminData.Checked && string.IsNullOrEmpty(_cfg.AdminKeyProtected))
             {
                 SelectTab(5);
                 MessageBox.Show(this, L.T("msg.key.required"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
-            if (_mirror.Checked && !System.IO.File.Exists(_mirrorPath.Text.Trim()))
+            string pModel = _tabBuilt[4] ? (_probeModel.Text ?? "").Trim() : null;
+            if (_tabBuilt[4])
             {
-                SelectTab(4);
-                MessageBox.Show(this, L.T("msg.mirror.missing"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
+                if (_mirror.Checked && !System.IO.File.Exists(_mirrorPath.Text.Trim()))
+                {
+                    SelectTab(4);
+                    MessageBox.Show(this, L.T("msg.mirror.missing"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+                if (pModel.Length == 0) pModel = "claude-haiku-5-5";
+                if (!CliProbe.IsValidModelName(pModel))
+                {
+                    SelectTab(4);
+                    MessageBox.Show(this, L.T("msg.probe.model_invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
             }
-            if (AlertEngine.ParseThresholds(_alertTh.Text) == null)
+            if (_tabBuilt[2] && AlertEngine.ParseThresholds(_alertTh.Text) == null)
             {
                 SelectTab(2);
                 MessageBox.Show(this, L.T("msg.thresholds.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
-            uint hm, hv;
-            if (_hotkeyOn.Checked && !HotkeyUtil.TryParse(_hotkeyText.Text, out hm, out hv))
+            if (_tabBuilt[1])
             {
-                SelectTab(1);
-                MessageBox.Show(this, L.T("msg.hotkey.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
+                uint hm, hv;
+                if (_hotkeyOn.Checked && !HotkeyUtil.TryParse(_hotkeyText.Text, out hm, out hv))
+                {
+                    SelectTab(1);
+                    MessageBox.Show(this, L.T("msg.hotkey.invalid"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
             }
-            string rawWebhook = _webhookUrl.Text.Trim();
-            if (_webhookOn.Checked || rawWebhook.Length > 0)
+            string rawWebhook = _tabBuilt[2] ? _webhookUrl.Text.Trim() : null;
+            if (_tabBuilt[2] && (_webhookOn.Checked || rawWebhook.Length > 0))
             {
                 Uri dummyUri;
                 string wErr;
@@ -894,50 +1015,35 @@ namespace ClaudeUsageWidget
                     return false;
                 }
             }
-            try { Autostart.Set(_auto.Checked); } catch (Exception ex) { Log.Write("autostart", ex); }
+            if (_tabBuilt[1])
+            {
+                try { Autostart.Set(_auto.Checked); } catch (Exception ex) { Log.Write("autostart", ex); }
+                _cfg.ShowFloating = _showFloat.Checked;
+                _cfg.AlwaysOnTop = _onTop.Checked;
+                _cfg.HideOnFullscreen = _hideFs.Checked;
+                _cfg.AutoUpdateCheck = _autoUpdate.Checked;
+                _cfg.HotkeyEnabled = _hotkeyOn.Checked;
+                _cfg.Hotkey = _hotkeyText.Text.Trim();
+            }
 
+            // Tab 0 (Display) - always built
             _cfg.ShowRemaining = _remaining.Checked;
-            _cfg.HotkeyEnabled = _hotkeyOn.Checked;
-            _cfg.Hotkey = _hotkeyText.Text.Trim();
-            _cfg.AlertsEnabled = _alertsOn.Checked;
-            _cfg.AlertThresholds = string.Join(",", Array.ConvertAll(AlertEngine.ParseThresholds(_alertTh.Text), delegate(int v) { return v.ToString(); }));
-            _cfg.ResetNotify = _resetOn.Checked;
-            _cfg.BudgetDaily = (double)_budgetDay.Value;
-            _cfg.BudgetMonthly = (double)_budgetMonth.Value;
-            _cfg.HookNotifyStop = _stopOn.Checked;
-            _cfg.HookNotifyMinSeconds = (int)_stopSecs.Value;
-            _cfg.HookNotifyInput = _inputOn.Checked;
-            _cfg.ScanClaude = _scanClaude.Checked;
-            _cfg.ScanGemini = _scanGemini.Checked;
-            _cfg.ScanCodex = _scanCodex.Checked;
-            _cfg.ScanGeminiCli = _scanGeminiCli.Checked;
-            _cfg.ScanOpenCode = _scanOpenCode.Checked;
-            _cfg.ScanWsl = _wsl.Checked;
-            _cfg.ShowProjects = _projects.Checked;
-            _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
             _cfg.Language = _lang.SelectedIndex >= 0 && _lang.SelectedIndex < _langCodes.Count ? _langCodes[_lang.SelectedIndex] : "en";
             _cfg.HistoryDays = _histDays.SelectedIndex == 1 ? 30 : 14;
             _cfg.DockEdge = _edge.SelectedIndex >= 0 && _edge.SelectedIndex < Edges.Length ? Edges[_edge.SelectedIndex] : "top";
             _cfg.DockMonitor = _monitor.SelectedIndex >= 0 && _monitor.SelectedIndex < _monitorNames.Count ? _monitorNames[_monitor.SelectedIndex] : "";
             _cfg.Backdrop = _backdrop.SelectedIndex >= 0 && _backdrop.SelectedIndex < Backdrops.Length ? Backdrops[_backdrop.SelectedIndex] : "solid";
             _cfg.OpacityPercent = _opacity.Value;
-            _cfg.ShowFloating = _showFloat.Checked;
             _cfg.Compact = _compact.Checked;
+            _cfg.ZenMode = _zenMode.Checked;
             _cfg.ShowContextBar = _contextBar.Checked;
+            _cfg.ContextWindowOverride = _ctxWin.SelectedIndex == 1 ? 200000L : (_ctxWin.SelectedIndex == 2 ? 400000L : (_ctxWin.SelectedIndex == 3 ? 1000000L : 0));
             _cfg.CardLayout = _cardLayout.SelectedIndex == 2 ? "3col" : (_cardLayout.SelectedIndex == 1 ? "2col" : "auto");
             _cfg.MiniPillMode = _pillMode.SelectedIndex == 1 ? "highest" : (_pillMode.SelectedIndex == 2 ? "cost_runway" : "all");
+            _cfg.WidgetScale = _scale.SelectedIndex == 0 ? 0.85 : (_scale.SelectedIndex == 2 ? 1.15 : (_scale.SelectedIndex == 3 ? 1.30 : 1.0));
             _cfg.DockTop = _dock.Checked;
-            _cfg.AlwaysOnTop = _onTop.Checked;
-            _cfg.HideOnFullscreen = _hideFs.Checked;
-            _cfg.AutoUpdateCheck = _autoUpdate.Checked;
             _cfg.Theme = _theme.SelectedIndex == 1 ? "light" : (_theme.SelectedIndex == 2 ? "system" : "dark");
             _cfg.ClickThrough = _click.Checked;
-            _cfg.AdminEnabled = _admin.Checked;
-            _cfg.ProbeEnabled = _probe.Checked;
-            _cfg.ProbeMinMinutes = (int)_probeMin.Value;
-            _cfg.MirrorEnabled = _mirror.Checked;
-            _cfg.MirrorFilePath = _mirrorPath.Text.Trim();
-
             _cfg.ShowInTaskbar = false;
             _cfg.CurrencyCustomEnabled = _currencyOn.Checked;
             _cfg.CurrencySymbol = _currencySymbol.Text.Trim();
@@ -945,27 +1051,61 @@ namespace ClaudeUsageWidget
             _cfg.CurrencyRate = (double)_currencyRate.Value;
             _cfg.CurrencyShowBoth = _currencyBoth.Checked;
 
-            _cfg.AudioAlertsEnabled = _audioOn.Checked;
-            _cfg.ContextAlertEnabled = _contextOn.Checked;
-            _cfg.BurnRateAlertEnabled = _burnRateOn.Checked;
-            _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
-            _cfg.AlertCooldownMinutes = (int)_cooldownMins.Value;
-            _cfg.QuietHoursEnabled = _quietOn.Checked;
-            _cfg.QuietStartHour = (int)_quietStart.Value;
-            _cfg.QuietEndHour = (int)_quietEnd.Value;
-            _cfg.DigestEnabled = _digestOn.Checked;
-            _cfg.DigestSchedule = _digestSchedule.SelectedIndex == 1 ? "weekly" : "daily";
-            _cfg.DigestHour = (int)_digestHour.Value;
-            _cfg.WebhookEnabled = _webhookOn.Checked;
-            _cfg.SetWebhookUrl(_webhookUrl.Text.Trim());
-            _cfg.OllamaEnabled = _ollamaOn.Checked;
-            _cfg.OllamaPort = (int)_ollamaPort.Value;
-
-            if (_clearKey) { _cfg.SetAdminKey(null); _clearKey = false; }
-            if (key.Length > 0) _cfg.SetAdminKey(key);
-            _cfg.AdminApiKeyIds = _keyIds.Text.Trim();
-            _cfg.AdminWorkspaceIds = _wsIds.Text.Trim();
-            _key.Text = "";
+            if (_tabBuilt[2])
+            {
+                _cfg.AlertsEnabled = _alertsOn.Checked;
+                _cfg.AlertThresholds = string.Join(",", Array.ConvertAll(AlertEngine.ParseThresholds(_alertTh.Text), delegate(int v) { return v.ToString(); }));
+                _cfg.ResetNotify = _resetOn.Checked;
+                _cfg.BudgetDaily = (double)_budgetDay.Value;
+                _cfg.BudgetMonthly = (double)_budgetMonth.Value;
+                _cfg.HookNotifyStop = _stopOn.Checked;
+                _cfg.HookNotifyMinSeconds = (int)_stopSecs.Value;
+                _cfg.HookNotifyInput = _inputOn.Checked;
+                _cfg.AudioAlertsEnabled = _audioOn.Checked;
+                _cfg.ContextAlertEnabled = _contextOn.Checked;
+                _cfg.BurnRateAlertEnabled = _burnRateOn.Checked;
+                _cfg.BurnRateThresholdTokens = (long)_burnRateTokens.Value;
+                _cfg.AlertCooldownMinutes = (int)_cooldownMins.Value;
+                _cfg.QuietHoursEnabled = _quietOn.Checked;
+                _cfg.QuietStartHour = (int)_quietStart.Value;
+                _cfg.QuietEndHour = (int)_quietEnd.Value;
+                _cfg.DigestEnabled = _digestOn.Checked;
+                _cfg.DigestSchedule = _digestSchedule.SelectedIndex == 1 ? "weekly" : "daily";
+                _cfg.DigestHour = (int)_digestHour.Value;
+                _cfg.WebhookEnabled = _webhookOn.Checked;
+                _cfg.SetWebhookUrl(rawWebhook);
+            }
+            if (_tabBuilt[3])
+            {
+                _cfg.ScanClaude = _scanClaude.Checked;
+                _cfg.ScanGemini = _scanGemini.Checked;
+                _cfg.ScanCodex = _scanCodex.Checked;
+                _cfg.ScanGeminiCli = _scanGeminiCli.Checked;
+                _cfg.ScanOpenCode = _scanOpenCode.Checked;
+                _cfg.ScanWsl = _wsl.Checked;
+                _cfg.ShowProjects = _projects.Checked;
+                _cfg.ExtraClaudeDirs = _extraDirs.Text.Trim();
+                _cfg.OllamaEnabled = _ollamaOn.Checked;
+                _cfg.OllamaPort = (int)_ollamaPort.Value;
+            }
+            if (_tabBuilt[4])
+            {
+                _cfg.ProbeEnabled = _probe.Checked;
+                _cfg.ProbeMinMinutes = (int)_probeMin.Value;
+                _cfg.ProbeModel = pModel;
+                _cfg.MirrorEnabled = _mirror.Checked;
+                _cfg.MirrorFilePath = _mirrorPath.Text.Trim();
+            }
+            if (_tabBuilt[3] || _tabBuilt[5])
+                _cfg.AdminEnabled = _tabBuilt[5] ? _admin.Checked : _adminData.Checked;
+            if (_tabBuilt[5])
+            {
+                if (_clearKey) { _cfg.SetAdminKey(null); _clearKey = false; }
+                if (key.Length > 0) _cfg.SetAdminKey(key);
+                _cfg.AdminApiKeyIds = _keyIds.Text.Trim();
+                _cfg.AdminWorkspaceIds = _wsIds.Text.Trim();
+                _key.Text = "";
+            }
             _cfg.Save();
             return true;
         }
@@ -1023,12 +1163,50 @@ namespace ClaudeUsageWidget
             }
         }
 
+        internal void PrewarmHandles()
+        {
+            if (IsDisposed) return;
+            IntPtr h = Handle;
+            ForceChildHandles(_pages[0]);
+            ForceChildHandles(_tabStrip);
+        }
+
+        private static void ForceChildHandles(Control root)
+        {
+            if (root == null) return;
+            foreach (Control c in root.Controls)
+            {
+                IntPtr ch = c.Handle;
+                if (c.HasChildren) ForceChildHandles(c);
+            }
+        }
+
+        internal void PrepareForOpen()
+        {
+            SuspendLayout();
+            try
+            {
+                SelectTab(0);
+                SyncControlsFromConfig();
+                if (!string.Equals(_builtLang, L.Lang, StringComparison.OrdinalIgnoreCase))
+                    RefreshI18n();
+                if (_appliedLight != Palette.IsLight)
+                    ApplyTheme();
+                CenterToScreen();
+            }
+            finally
+            {
+                ResumeLayout(false);
+            }
+        }
+
         private void SyncControlsFromConfig()
         {
             int li = _langCodes.IndexOf(_cfg.Language);
             _lang.SelectedIndex = li >= 0 ? li : 0;
             _theme.SelectedIndex = _cfg.Theme == "light" ? 1 : (_cfg.Theme == "system" ? 2 : 0);
             _opacity.Value = Math.Max(30, Math.Min(100, _cfg.OpacityPercent));
+            _opacityLbl.Text = L.T("set.opacity", _opacity.Value);
             _remaining.Checked = _cfg.ShowRemaining;
             _histDays.SelectedIndex = _cfg.HistoryDays == 30 ? 1 : 0;
             _dock.Checked = _cfg.DockTop;
@@ -1036,50 +1214,83 @@ namespace ClaudeUsageWidget
             int mi = string.IsNullOrEmpty(_cfg.DockMonitor) ? 0 : _monitorNames.IndexOf(_cfg.DockMonitor); _monitor.SelectedIndex = mi >= 0 ? mi : 0;
             int bi = Array.IndexOf(Backdrops, _cfg.Backdrop); _backdrop.SelectedIndex = bi >= 0 ? bi : 0;
             _compact.Checked = _cfg.Compact;
+            _zenMode.Checked = _cfg.ZenMode;
             _click.Checked = _cfg.ClickThrough;
             _contextBar.Checked = _cfg.ShowContextBar;
+            _ctxWin.SelectedIndex = _cfg.ContextWindowOverride == 200000L ? 1 : (_cfg.ContextWindowOverride == 400000L ? 2 : (_cfg.ContextWindowOverride == 1000000L ? 3 : 0));
             _cardLayout.SelectedIndex = _cfg.CardLayout == "3col" ? 2 : (_cfg.CardLayout == "2col" ? 1 : 0);
             _pillMode.SelectedIndex = _cfg.MiniPillMode == "highest" ? 1 : (_cfg.MiniPillMode == "cost_runway" ? 2 : 0);
+            _scale.SelectedIndex = _cfg.WidgetScale < 0.92 ? 0 : (_cfg.WidgetScale < 1.08 ? 1 : (_cfg.WidgetScale < 1.22 ? 2 : 3));
             _currencyOn.Checked = _cfg.CurrencyCustomEnabled;
             _currencySymbol.Text = _cfg.CurrencySymbol ?? "Rp";
             _currencyRate.Value = (decimal)Math.Max(1, Math.Min(10000000, _cfg.CurrencyRate <= 0 ? 16200 : _cfg.CurrencyRate));
             _currencyBoth.Checked = _cfg.CurrencyShowBoth;
-            _showFloat.Checked = _cfg.ShowFloating;
-            _onTop.Checked = _cfg.AlwaysOnTop;
-            _hideFs.Checked = _cfg.HideOnFullscreen;
-            _autoUpdate.Checked = _cfg.AutoUpdateCheck;
-            _hotkeyOn.Checked = _cfg.HotkeyEnabled;
-            _hotkeyText.Text = _cfg.Hotkey ?? "Win+Alt+U";
-            _alertsOn.Checked = _cfg.AlertsEnabled;
-            _alertTh.Text = _cfg.AlertThresholds ?? "80,95";
-            _resetOn.Checked = _cfg.ResetNotify;
-            _audioOn.Checked = _cfg.AudioAlertsEnabled;
-            _contextOn.Checked = _cfg.ContextAlertEnabled;
-            _burnRateOn.Checked = _cfg.BurnRateAlertEnabled;
-            _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
-            _cooldownMins.Value = Math.Max(1, Math.Min(1440, _cfg.AlertCooldownMinutes <= 0 ? 15 : _cfg.AlertCooldownMinutes));
-            _webhookOn.Checked = _cfg.WebhookEnabled;
-            _quietOn.Checked = _cfg.QuietHoursEnabled;
-            _quietStart.Value = Math.Max(0, Math.Min(23, _cfg.QuietStartHour));
-            _quietEnd.Value = Math.Max(0, Math.Min(23, _cfg.QuietEndHour));
-            _digestOn.Checked = _cfg.DigestEnabled;
-            _digestSchedule.SelectedIndex = _cfg.DigestSchedule == "weekly" ? 1 : 0;
-            _digestHour.Value = Math.Max(0, Math.Min(23, _cfg.DigestHour));
-            _scanClaude.Checked = _cfg.ScanClaude;
-            _scanGemini.Checked = _cfg.ScanGemini;
-            _scanCodex.Checked = _cfg.ScanCodex;
-            _scanGeminiCli.Checked = _cfg.ScanGeminiCli;
-            _scanOpenCode.Checked = _cfg.ScanOpenCode;
-            _wsl.Checked = _cfg.ScanWsl;
-            _projects.Checked = _cfg.ShowProjects;
-            _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
-            _ollamaOn.Checked = _cfg.OllamaEnabled;
-            _ollamaPort.Value = _cfg.OllamaPort > 0 && _cfg.OllamaPort <= 65535 ? _cfg.OllamaPort : 11434;
             _admin.Checked = _cfg.AdminEnabled;
-            _probe.Checked = _cfg.ProbeEnabled;
-            _probeMin.Value = Math.Max(5, Math.Min(240, _cfg.ProbeMinMinutes));
-            _mirror.Checked = _cfg.MirrorEnabled;
-            _mirrorPath.Text = _cfg.MirrorFilePath ?? "";
+            _adminData.Checked = _cfg.AdminEnabled;
+            if (_tabBuilt[1])
+            {
+                _showFloat.Checked = _cfg.ShowFloating;
+                try { _auto.Checked = Autostart.IsEnabled; } catch { }
+                _onTop.Checked = _cfg.AlwaysOnTop;
+                _hideFs.Checked = _cfg.HideOnFullscreen;
+                _autoUpdate.Checked = _cfg.AutoUpdateCheck;
+                _hotkeyOn.Checked = _cfg.HotkeyEnabled;
+                _hotkeyText.Text = _cfg.Hotkey ?? "Win+Alt+U";
+            }
+            if (_tabBuilt[2])
+            {
+                _alertsOn.Checked = _cfg.AlertsEnabled;
+                _alertTh.Text = _cfg.AlertThresholds ?? "80,95";
+                _resetOn.Checked = _cfg.ResetNotify;
+                _audioOn.Checked = _cfg.AudioAlertsEnabled;
+                _contextOn.Checked = _cfg.ContextAlertEnabled;
+                _burnRateOn.Checked = _cfg.BurnRateAlertEnabled;
+                _burnRateTokens.Value = Math.Max(1000, Math.Min(10000000, _cfg.BurnRateThresholdTokens <= 0 ? 100000 : _cfg.BurnRateThresholdTokens));
+                _cooldownMins.Value = Math.Max(1, Math.Min(1440, _cfg.AlertCooldownMinutes <= 0 ? 15 : _cfg.AlertCooldownMinutes));
+                _webhookOn.Checked = _cfg.WebhookEnabled;
+                _webhookUrl.Text = _cfg.GetWebhookUrl() ?? "";
+                _quietOn.Checked = _cfg.QuietHoursEnabled;
+                _quietStart.Value = Math.Max(0, Math.Min(23, _cfg.QuietStartHour));
+                _quietEnd.Value = Math.Max(0, Math.Min(23, _cfg.QuietEndHour));
+                _digestOn.Checked = _cfg.DigestEnabled;
+                _digestSchedule.SelectedIndex = _cfg.DigestSchedule == "weekly" ? 1 : 0;
+                _digestHour.Value = Math.Max(0, Math.Min(23, _cfg.DigestHour));
+                _budgetDay.Value = (decimal)Math.Max(0, Math.Min(1000000, _cfg.BudgetDaily));
+                _budgetMonth.Value = (decimal)Math.Max(0, Math.Min(1000000, _cfg.BudgetMonthly));
+                _stopOn.Checked = _cfg.HookNotifyStop;
+                _stopSecs.Value = Math.Max(0, Math.Min(3600, _cfg.HookNotifyMinSeconds));
+                _inputOn.Checked = _cfg.HookNotifyInput;
+                RefreshHookState();
+            }
+            if (_tabBuilt[3])
+            {
+                _scanClaude.Checked = _cfg.ScanClaude;
+                _scanGemini.Checked = _cfg.ScanGemini;
+                _scanCodex.Checked = _cfg.ScanCodex;
+                _scanGeminiCli.Checked = _cfg.ScanGeminiCli;
+                _scanOpenCode.Checked = _cfg.ScanOpenCode;
+                _wsl.Checked = _cfg.ScanWsl;
+                _projects.Checked = _cfg.ShowProjects;
+                _extraDirs.Text = _cfg.ExtraClaudeDirs ?? "";
+                _ollamaOn.Checked = _cfg.OllamaEnabled;
+                _ollamaPort.Value = _cfg.OllamaPort > 0 && _cfg.OllamaPort <= 65535 ? _cfg.OllamaPort : 11434;
+            }
+            if (_tabBuilt[4])
+            {
+                _probe.Checked = _cfg.ProbeEnabled;
+                _probeMin.Value = Math.Max(5, Math.Min(240, _cfg.ProbeMinMinutes));
+                _probeModel.Text = string.IsNullOrEmpty(_cfg.ProbeModel) ? "claude-haiku-5-5" : _cfg.ProbeModel;
+                _mirror.Checked = _cfg.MirrorEnabled;
+                _mirrorPath.Text = _cfg.MirrorFilePath ?? "";
+            }
+            if (_tabBuilt[5])
+            {
+                _clearKey = false;
+                _key.Text = "";
+                RefreshKeyState();
+                _keyIds.Text = _cfg.AdminApiKeyIds ?? "";
+                _wsIds.Text = _cfg.AdminWorkspaceIds ?? "";
+            }
         }
 
         private void OnApply(object sender, EventArgs e)

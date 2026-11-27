@@ -297,6 +297,11 @@ namespace ClaudeUsageWidget
         /// </summary>
         public static void Draw(Graphics g, int size, string text, Color badge, bool weekly)
         {
+            Draw(g, size, text, badge, weekly, false);
+        }
+
+        public static void Draw(Graphics g, int size, string text, Color badge, bool weekly, bool hasConfirm)
+        {
             ResolveFont();
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -341,6 +346,17 @@ namespace ClaudeUsageWidget
                 int bx = (int)Math.Round(size * 0.22), bw = size - 2 * bx;
                 int by = (int)Math.Round(size - areaTop - bar);
                 using (SolidBrush wb = new SolidBrush(TextOn(badge))) g.FillRectangle(wb, bx, by, bw, bar);
+            }
+            if (hasConfirm && size >= 16)
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                int dot = Math.Max(5, (int)Math.Round(size * 0.34));
+                int dx = size - dot - 1;
+                int dy = 0;
+                using (SolidBrush outer = new SolidBrush(Color.FromArgb(24, 24, 28)))
+                    g.FillEllipse(outer, dx - 1, dy, dot + 1, dot + 1);
+                using (SolidBrush cb = new SolidBrush(Palette.ConfirmColor))
+                    g.FillEllipse(cb, dx, dy + 1, Math.Max(3, dot - 1), Math.Max(3, dot - 1));
             }
         }
 

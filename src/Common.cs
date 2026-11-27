@@ -385,5 +385,61 @@ namespace ClaudeUsageWidget
             System.Diagnostics.Process.Start(psi);
             return true;
         }
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hWnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        public static string MatchWindowTitleScore(string title, string hint)
+        {
+            if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(hint)) return null;
+            if (title.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0) return title;
+            return null;
+        }
+
+        public static bool FocusWindow(string hint)
+        {
+            if (string.IsNullOrWhiteSpace(hint)) return false;
+            try
+            {
+                uint selfPid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+                IntPtr best = IntPtr.Zero;
+                int bestScore = 0;
+                EnumWindows(delegate(IntPtr hWnd, IntPtr lp)
+                {
+                    if (!IsWindowVisible(hWnd)) return true;
+                    uint pid;
+                    GetWindowThreadProcessId(hWnd, out pid);
+                    if (pid == selfPid) return true;
+                    int len = GetWindowTextLength(hWnd);
+                    if (len <= 0 || len > 512) return true;
+                    StringBuilder sb = new StringBuilder(len + 1);
+                    if (GetWindowText(hWnd, sb, sb.Capacity) <= 0) return true;
+                    string title = sb.ToString();
+                    if (MatchWindowTitleScore(title, hint) == null) return true;
+                    int sc = 1;
+                    if (title.IndexOf("Antigravity", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        title.IndexOf("Visual Studio Code", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        title.IndexOf("Cursor", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        title.IndexOf("Terminal", StringComparison.OrdinalIgnoreCase) >= 0)
+                        sc = 2;
+                    if (sc > bestScore) { bestScore = sc; best = hWnd; }
+                    return sc < 2;
+                }, IntPtr.Zero);
+                if (best != IntPtr.Zero)
+                {
+                    if (IsIconic(best)) ShowWindow(best, 9); // SW_RESTORE
+                    return SetForegroundWindow(best);
+                }
+            }
+            catch (Exception ex) { Log.Write("focus.window", ex); }
+            return false;
+        }
     }
 }
