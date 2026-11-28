@@ -941,7 +941,7 @@ namespace ClaudeUsageWidget
                 int measW = 0;
                 using (Graphics g = CreateGraphics())
                 {
-                    int segPad = (int)(3 * s) * 2 + (int)(4 * s);
+                    int segPad = (int)(3 * s) * 2 + (int)(8 * s);
                     int badgeW = (_vm != null && _vm.Usage != null && _vm.Usage.Sessions != null)
                         ? MeasureSessionBadgeWidth(g, _vm.Usage.Sessions, s)
                         : 0;
@@ -1250,7 +1250,7 @@ namespace ClaudeUsageWidget
                 textW = Math.Max(0, w - shift);
             }
             TextRenderer.DrawText(g, PillText(col), _fBody, new Rectangle(textX, y, textW, rh), col.TitleColor,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         }
 
         private static void GetProviderSessionFlags(CardCol col, SessionStatusSummary sess, out bool running, out bool confirm, out bool done)
