@@ -1,12 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Logo AI Usage Watcher" width="120" height="120" />
+  <img src="assets/icon.png" alt="Logo AI Usage Watcher" width="88" height="88" />
 </p>
 
 <h1 align="center">AI Usage Watcher</h1>
-
-<p align="center">
-  <em>Pemantau Desktop Kuota, Sesi Aktif &amp; Token Real-Time untuk Claude Code, Google Antigravity, OpenAI Codex CLI, Gemini CLI, OpenCode &amp; Ollama</em>
-</p>
 
 <p align="center">
   <strong>Language / Bahasa:</strong>
@@ -18,12 +14,33 @@
   <a href="https://github.com/silvkn1/ai-usage-watcher/releases"><img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg" alt="Platform" /></a>
   <a href="https://github.com/silvkn1/ai-usage-watcher"><img src="https://img.shields.io/badge/.NET%20Framework-4.8%20(Native)-darkgreen.svg" alt="Framework" /></a>
   <a href="https://github.com/silvkn1/ai-usage-watcher"><img src="https://img.shields.io/badge/dependencies-Zero%20(No%20NuGet%20%2F%20No%20Node)-brightgreen.svg" alt="Dependencies" /></a>
+  <a href="https://github.com/silvkn1/ai-usage-watcher/blob/main/CODE_SIGNING_POLICY.md"><img src="https://img.shields.io/badge/privasi-100%25%20Lokal%20%7C%20Tanpa%20Telemetri-0e8a16.svg" alt="Privasi" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
 </p>
 
-**AI Usage Watcher** adalah widget desktop native Windows yang ringan beserta monitor system tray untuk memantau konsumsi token, estimasi biaya API, status sesi AI aktif, serta batas kuota berjalan (*rate limits*) dari **Claude Code**, **Google Antigravity (Gemini)**, **OpenAI Codex CLI**, **Gemini CLI**, **OpenCode**, dan **Ollama** lokal secara *real-time*.
+<p align="center">
+  Sering tiba-tiba kena limit 5 jam Claude Code di tengah ngoding? <strong>AI Usage Watcher</strong> adalah widget desktop native Windows ringan (~615 KB <code>.exe</code>, tanpa dependensi tambahan) yang menempel rapi sebagai Pill HUD dan memekar otomatis saat disorot kursor. Berbeda dari skrip CLI satu layanan, widget ini memantau <strong>Claude Code, Antigravity, Codex CLI, Gemini CLI, OpenCode &amp; Ollama</strong> sekaligus dengan lencana sesi langsung (<code>?</code> konfirmasi, <code>●</code> berjalan, <code>✓</code> selesai).
+</p>
 
-Dibangun menggunakan C# Windows Forms murni di atas **.NET Framework 4.8** bawaan Windows: satu berkas `.exe` portabel berukuran ringan (~514 KB), tanpa instalasi runtime tambahan, tanpa dependensi Visual Studio/NuGet/Node, dan **tanpa pernah memakan taskbar** (`WS_EX_TOOLWINDOW`).
+<p align="center">
+  <a href="https://github.com/silvkn1/ai-usage-watcher/releases/download/v1.2.3/AIUsageWatcher-1.2.3.0.zip">
+    <img src="https://img.shields.io/badge/⬇_Unduh_v1.2.3_(.zip_·_319_KB)-238636?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Unduh AIUsageWatcher-1.2.3.0.zip" />
+  </a>
+  &nbsp;
+  <a href="https://github.com/silvkn1/ai-usage-watcher/releases/latest">
+    <img src="https://img.shields.io/badge/Catatan_Rilis_%26_SHA256SUMS-1f6feb?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Rilis dan Checksum" />
+  </a>
+</p>
+
+<p align="center">
+  <strong>100% lokal · Tanpa telemetri · Prompt tidak pernah keluar dari PC</strong><br />
+  <sub><code>SHA-256 (AIUsageWatcher-1.2.3.0.zip): f99a9aef9f808d83f3a7df1fdab690d7dcbfd0c77058dbc45988e826ace09d65</code></sub><br />
+  <sub><code>SHA-256 (AIUsageWatcher.exe): d5c1d1394782921d53e20d097c866d57f5bc471727fe87bf9709a36e37f8c8ed</code></sub>
+</p>
+
+<p align="center">
+  <img src="docs/img/demo.gif" alt="Demo AI Usage Watcher — Buka Claude Code, Pill HUD, Hover Dashboard, dan Bar Kuota 5 Jam Berkurang" width="840" />
+</p>
 
 ---
 
@@ -108,7 +125,7 @@ Sebagian besar alat pemantau AI (seperti `ccusage`, `cclimits`, atau skrip statu
 | **Antarmuka (UI)** | **Mini HUD Pill (26px) + Kartu 3-Kolom + Explorer** | Teks terminal (harus diketik) | Bar status terminal | Jendela berat / webview |
 | **Lencana Sesi Langsung** | **Ada** (`?` konfirmasi, `●` berjalan, `✓` selesai + menu jump) | Tidak ada | Tidak ada | Tidak ada |
 | **System Tray Dinamis** | **Ada** (badge % kuota 5 jam, warna dinamis & popup klik kiri) | Tidak ada | Tidak ada | Jarang / ikon statis |
-| **Ukuran Biner** | **~514 KB** (Satu Berkas `.exe` Mandiri) | ~5 - 50 MB (Node.js/npm) | Skrip bash/ps1 | 150 MB - 300 MB+ |
+| **Ukuran Biner** | **~615 KB** (Satu Berkas `.exe` Mandiri · `~319 KB .zip`) | ~5 - 50 MB (Node.js/npm) | Skrip bash/ps1 | 150 MB - 300 MB+ |
 | **Konsumsi Memori (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Menumpang runtime CLI | 0 MB (saat print saja) | 200 MB - 600 MB+ |
 | **Dependensi Eksternal** | **Nol** (Bawaan Windows 10/11) | Perlu Node.js / Python | Perlu wrapper CLI | Perlu Node / Chromium |
 | **Prediksi Habis Kuota (Runway)**| **Ada** (`Sisa waktu: ~3j 43m` + *pacing marker*) | Tidak ada | Tidak ada | Tidak ada |
@@ -190,7 +207,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Kompilasi paket distribusi lengkap (.zip + SHA256SUMS.txt)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Menjalankan 89 automated unit tests
+# Menjalankan 105 automated unit tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -226,9 +243,10 @@ ai-usage-watcher/
 ├── companion/                 # Ekstensi status bar VS Code & Cursor
 ├── statusline/                # Skrip wrapper statusline Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs           # 89 automated unit tests (.NET 4.8 test runner mandiri)
+│   └── UnitTests.cs           # 105 automated unit tests (.NET 4.8 test runner mandiri)
 ├── assets/                    # Aset logo aplikasi (PNG vektor & .ico)
-├── docs/img/                  # Tangkapan layar fitur untuk dokumentasi
+├── docs/img/                  # GIF demo & tangkapan layar fitur dokumentasi
+│   ├── demo.gif               # Animasi demo 12.5d (pill, hover dashboard, bar 5j)
 │   ├── en/                    # Tangkapan layar antarmuka English
 │   └── id/                    # Tangkapan layar antarmuka Bahasa Indonesia
 ├── app.ico                    # Ikon executable bawaan Windows

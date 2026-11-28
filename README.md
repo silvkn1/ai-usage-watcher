@@ -1,12 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="AI Usage Watcher Logo" width="120" height="120" />
+  <img src="assets/icon.png" alt="AI Usage Watcher Logo" width="88" height="88" />
 </p>
 
 <h1 align="center">AI Usage Watcher</h1>
-
-<p align="center">
-  <em>Real-time Desktop Quota, Session &amp; Token Monitor for Claude Code, Google Antigravity, OpenAI Codex CLI, Gemini CLI, OpenCode &amp; Ollama</em>
-</p>
 
 <p align="center">
   <strong>Language / Bahasa:</strong>
@@ -18,12 +14,33 @@
   <a href="https://github.com/silvkn1/ai-usage-watcher/releases"><img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg" alt="Platform" /></a>
   <a href="https://github.com/silvkn1/ai-usage-watcher"><img src="https://img.shields.io/badge/.NET%20Framework-4.8%20(Native)-darkgreen.svg" alt="Framework" /></a>
   <a href="https://github.com/silvkn1/ai-usage-watcher"><img src="https://img.shields.io/badge/dependencies-Zero%20(No%20NuGet%20%2F%20No%20Node)-brightgreen.svg" alt="Dependencies" /></a>
+  <a href="https://github.com/silvkn1/ai-usage-watcher/blob/main/CODE_SIGNING_POLICY.md"><img src="https://img.shields.io/badge/privacy-100%25%20Local%20%7C%20Zero%20Telemetry-0e8a16.svg" alt="Privacy" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
 </p>
 
-**AI Usage Watcher** is a lightweight, native Windows desktop HUD and system tray monitor for tracking token consumption, estimated API costs, active AI session states, and rolling quota rate limits across **Claude Code**, **Google Antigravity (Gemini)**, **OpenAI Codex CLI**, **Gemini CLI**, **OpenCode**, and local **Ollama** in real time.
+<p align="center">
+  Tired of suddenly hitting your 5-hour Claude Code limit mid-session? <strong>AI Usage Watcher</strong> is a single lightweight native Windows widget (~615 KB <code>.exe</code>, zero dependencies) that stays pinned as a slim HUD pill and expands on hover. Unlike single-tool CLI scripts, it monitors <strong>Claude Code, Antigravity, Codex CLI, Gemini CLI, OpenCode &amp; Ollama</strong> together with live session badges (<code>?</code> confirm, <code>●</code> active, <code>✓</code> done).
+</p>
 
-Built with pure C# Windows Forms on the built-in **.NET Framework 4.8** of Windows: single portable executable (~514 KB), zero additional runtime installations, zero external NuGet or Node dependencies, and **zero taskbar clutter** (`WS_EX_TOOLWINDOW`).
+<p align="center">
+  <a href="https://github.com/silvkn1/ai-usage-watcher/releases/download/v1.2.3/AIUsageWatcher-1.2.3.0.zip">
+    <img src="https://img.shields.io/badge/⬇_Download_v1.2.3_(.zip_·_319_KB)-238636?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download AIUsageWatcher-1.2.3.0.zip" />
+  </a>
+  &nbsp;
+  <a href="https://github.com/silvkn1/ai-usage-watcher/releases/latest">
+    <img src="https://img.shields.io/badge/Release_Notes_%26_SHA256SUMS-1f6feb?style=for-the-badge&amp;logo=github&amp;logoColor=white" alt="Releases and Checksums" />
+  </a>
+</p>
+
+<p align="center">
+  <strong>100% local · Zero telemetry · Prompts never leave your PC</strong><br />
+  <sub><code>SHA-256 (AIUsageWatcher-1.2.3.0.zip): f99a9aef9f808d83f3a7df1fdab690d7dcbfd0c77058dbc45988e826ace09d65</code></sub><br />
+  <sub><code>SHA-256 (AIUsageWatcher.exe): d5c1d1394782921d53e20d097c866d57f5bc471727fe87bf9709a36e37f8c8ed</code></sub>
+</p>
+
+<p align="center">
+  <img src="docs/img/demo.gif" alt="AI Usage Watcher Demo — Claude Code session, Mini Pill, Hover Expand, and 5h Quota Bar" width="840" />
+</p>
 
 ---
 
@@ -108,7 +125,7 @@ Most AI monitoring tools (such as `ccusage`, `cclimits`, or CLI statusline scrip
 | **Interface (UI)** | **Mini HUD Pill (26px) + 3-Col/Paged Cards + Explorer** | Terminal text (manual run) | Terminal status bar | Heavy window / webview |
 | **Live Session Badges** | **Yes** (`?` confirm, `●` running, `✓` done + jump menu) | None | None | None |
 | **Dynamic System Tray** | **Yes** (live 5h badge % & color + hover popup) | None | None | Rare / static icon |
-| **Binary Size** | **~514 KB** (Single Standalone `.exe`) | ~5 - 50 MB (Node.js/npm) | Bash/PowerShell scripts | 150 MB - 300 MB+ |
+| **Binary Size** | **~615 KB** (Single Standalone `.exe` · `~319 KB .zip`) | ~5 - 50 MB (Node.js/npm) | Bash/PowerShell scripts | 150 MB - 300 MB+ |
 | **Memory Footprint (RAM)** | **~20 - 35 MB** (Native .NET 4.8) | Absorbed in CLI runtime | 0 MB (print only) | 200 MB - 600 MB+ |
 | **External Dependencies** | **Zero** (Windows 10/11 built-in) | Requires Node.js / Python | Requires CLI wrapper | Requires Node / Chromium |
 | **Runway Quota Forecast** | **Yes** (`Runway: ~3h 43m` + pacing marker) | None | None | None |
@@ -190,7 +207,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 # Compile full distribution release package (.zip + SHA256SUMS.txt)
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Package
 
-# Execute 89 automated unit tests
+# Execute 105 automated unit tests
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
@@ -226,9 +243,10 @@ ai-usage-watcher/
 ├── companion/                 # VS Code & Cursor status bar extension
 ├── statusline/                # Statusline wrapper scripts for Claude Code CLI (PowerShell & Bash)
 ├── tests/
-│   └── UnitTests.cs           # 89 automated unit tests (.NET 4.8 test runner)
+│   └── UnitTests.cs           # 105 automated unit tests (.NET 4.8 test runner)
 ├── assets/                    # Application logo assets (vector PNG & .ico)
-├── docs/img/                  # Feature documentation screenshots
+├── docs/img/                  # Demo GIF & feature documentation screenshots
+│   ├── demo.gif               # 12.5s HUD hover & live 5h quota demo animation
 │   ├── en/                    # English UI screenshots
 │   └── id/                    # Indonesian UI screenshots
 ├── app.ico                    # Windows executable application icon
