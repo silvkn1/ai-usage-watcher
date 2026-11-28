@@ -239,7 +239,7 @@ namespace ClaudeUsageWidget
             {
                 Name = "ai-usage-watcher",
                 Publisher = "silvkn1",
-                Version = "1.2.2",
+                Version = "1.2.3",
                 DisplayName = "AI Usage Watcher Companion",
                 Description = "Live status bar metrics for Claude Code, Antigravity, Codex CLI, Gemini CLI, OpenCode quotas/cost, and Ollama",
                 Engine = "^1.70.0"
