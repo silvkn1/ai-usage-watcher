@@ -518,26 +518,46 @@ namespace Tests
         public static void Test_Real_Antigravity_Brain_Classification()
         {
             Pricing pricing = Pricing.Load();
-            UsageScanner sc = new UsageScanner(pricing);
-            sc.ScanClaude = true;
-            sc.ScanGemini = true;
-            sc.Roots = delegate
+            string tempDir = Path.Combine(Path.GetTempPath(), "cuw_test_agbrain_" + Guid.NewGuid().ToString("N"));
+            string brainLogDir = Path.Combine(tempDir, "brain-id-1\\.system_generated\\logs");
+            Directory.CreateDirectory(brainLogDir);
+            try
             {
-                List<string> r = new List<string>();
-                if (Directory.Exists(Paths.AntigravityBrainDir)) r.Add(Paths.AntigravityBrainDir);
-                return r;
-            };
-            sc.Scan();
-            UsageSnapshot snap = sc.Snapshot();
+                string utcNow = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+                string transcript = Path.Combine(brainLogDir, "transcript.jsonl");
+                File.WriteAllText(transcript,
+                    "{\"type\":\"PLANNER_RESPONSE\",\"model\":\"claude-opus-4-6-thinking\",\"created_at\":\"" + utcNow + "\",\"step_index\":1,\"input_tokens\":1500,\"output_tokens\":300,\"cache_read_tokens\":200}\n",
+                    new System.Text.UTF8Encoding(false));
 
-            // When only Antigravity Brain is scanned, ClaudeToday must be 0!
-            // Even if Antigravity ran claude-opus-4-6-thinking or claude-3-7-sonnet!
-            Assert.Equal(0L, snap.ClaudeToday.Total, "ClaudeToday must be 0 when scanning Antigravity brain");
-            Assert.Equal(0L, snap.ClaudeWeek.Total, "ClaudeWeek must be 0 when scanning Antigravity brain");
-            Assert.True(snap.AntigravityToday.Total > 0, "AntigravityToday must have tokens from Antigravity activity");
+                UsageScanner sc = new UsageScanner(pricing);
+                sc.ScanClaude = true;
+                sc.ScanGemini = true;
+                sc.Roots = delegate { return new List<string> { tempDir }; };
+                sc.Scan();
+                UsageSnapshot snap = sc.Snapshot();
 
-            // Verify opus-4-6-thinking is in TodayAntigravity, NOT in TodayClaude!
-            Assert.False(snap.TodayClaude.ContainsKey("claude-opus-4-6-thinking"), "claude-opus-4-6-thinking must NEVER be in TodayClaude when run in Antigravity");
+                // Even when Antigravity ran claude-opus-4-6-thinking, ClaudeToday must stay 0
+                Assert.Equal(0L, snap.ClaudeToday.Total, "ClaudeToday must be 0 when scanning Antigravity brain");
+                Assert.Equal(0L, snap.ClaudeWeek.Total, "ClaudeWeek must be 0 when scanning Antigravity brain");
+                Assert.True(snap.AntigravityToday.Total > 0, "AntigravityToday must have tokens from Antigravity activity");
+                Assert.False(snap.TodayClaude.ContainsKey("claude-opus-4-6-thinking"), "claude-opus-4-6-thinking must NEVER be in TodayClaude when run in Antigravity");
+
+                if (Directory.Exists(Paths.AntigravityBrainDir))
+                {
+                    UsageScanner realSc = new UsageScanner(pricing);
+                    realSc.ScanClaude = true;
+                    realSc.ScanGemini = true;
+                    realSc.Roots = delegate { return new List<string> { Paths.AntigravityBrainDir }; };
+                    realSc.Scan();
+                    UsageSnapshot realSnap = realSc.Snapshot();
+                    Assert.Equal(0L, realSnap.ClaudeToday.Total, "Real Antigravity brain must never leak into ClaudeToday");
+                    Assert.Equal(0L, realSnap.ClaudeWeek.Total, "Real Antigravity brain must never leak into ClaudeWeek");
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
         }
 
         public static void Test_Antigravity_Alert_Engine()
