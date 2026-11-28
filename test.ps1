@@ -17,6 +17,8 @@ $TestFiles = Get-ChildItem (Join-Path $RootDir "tests\*.cs") | ForEach-Object { 
 $Pricing = Join-Path $RootDir "pricing.json"
 $CompPkg = Join-Path $RootDir "companion\vscode-status-bar\package.json"
 $CompExt = Join-Path $RootDir "companion\vscode-status-bar\extension.js"
+$CompReadme = Join-Path $RootDir "companion\vscode-status-bar\README.md"
+$CompIcon = Join-Path $RootDir "companion\vscode-status-bar\icon.png"
 
 if (-not (Test-Path (Join-Path $RootDir "dist"))) {
     New-Item -ItemType Directory -Path (Join-Path $RootDir "dist") | Out-Null
@@ -28,7 +30,7 @@ $Refs = "System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.F
 $RefArgs = $Refs -join ","
 
 Write-Host "Compiling unit tests..." -ForegroundColor Cyan
-& $Csc /nologo /warn:4 /langversion:5 /target:exe /main:Tests.TestRunner /out:$TestExe "/resource:$Pricing,pricing.json" "/resource:$CompPkg,companion-package.json" "/resource:$CompExt,companion-extension.js" /r:$RefArgs $TestFiles $SrcFiles
+& $Csc /nologo /warn:4 /langversion:5 /target:exe /main:Tests.TestRunner /out:$TestExe "/resource:$Pricing,pricing.json" "/resource:$CompPkg,companion-package.json" "/resource:$CompExt,companion-extension.js" "/resource:$CompReadme,companion-readme.md" "/resource:$CompIcon,companion-icon.png" /r:$RefArgs $TestFiles $SrcFiles
 
 if ($LASTEXITCODE -ne 0) {
     throw "Kompilasi unit test gagal (exit $LASTEXITCODE)."

@@ -1,13 +1,26 @@
 {
   "name": "ai-usage-watcher",
   "displayName": "AI Usage Watcher Companion",
-  "description": "Live status bar metrics for Claude Code, Antigravity, Codex CLI quotas/cost, and Ollama",
-  "version": "1.2.1",
+  "description": "Live status bar metrics for Claude Code, Antigravity, Codex CLI, Gemini CLI, OpenCode quotas/cost, and Ollama",
+  "version": "1.2.2",
   "publisher": "silvkn1",
+  "license": "MIT",
+  "icon": "icon.png",
+  "homepage": "https://github.com/silvkn1/ai-usage-watcher#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/silvkn1/ai-usage-watcher.git"
   },
+  "keywords": [
+    "ai",
+    "claude",
+    "codex",
+    "antigravity",
+    "ollama",
+    "usage",
+    "quota",
+    "status-bar"
+  ],
   "engines": {
     "vscode": "^1.70.0"
   },
