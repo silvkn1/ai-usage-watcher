@@ -12,6 +12,7 @@ namespace ClaudeUsageWidget
         private static readonly string[] Backdrops = { "acrylic", "mica", "mica-alt", "solid" };
 
         private readonly AppConfig _cfg;
+        private readonly string _initialLang = L.Lang;
         private readonly List<Font> _fonts = new List<Font>();
         private Font _btnFont;
         private int _step = 0;
@@ -62,9 +63,6 @@ namespace ClaudeUsageWidget
         internal Panel BodyPanel { get { return _body; } }
         internal Panel FooterPanel { get { return _footer; } }
         internal Button NextButton { get { return _btnNext; } }
-        internal Panel Page1 { get { return _page1; } }
-        internal Panel Page2 { get { return _page2; } }
-        internal Panel Page3 { get { return _page3; } }
 
         // Step 1 controls (AI Providers & Language)
         private readonly ComboBox _cboLang = new ComboBox();
@@ -130,8 +128,11 @@ namespace ClaudeUsageWidget
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
             Font = MakeFont("Segoe UI", 9f);
-            ClientSize = new Size(620, 590);
-            MinimumSize = new Size(580, 540);
+            Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+            int wizW = Math.Min(620, Math.Max(460, wa.Width - 40));
+            int wizH = Math.Min(590, Math.Max(420, wa.Height - 60));
+            ClientSize = new Size(wizW, wizH);
+            MinimumSize = new Size(Math.Min(580, wizW), Math.Min(540, wizH));
             DoubleBuffered = true;
 
             SuspendLayout();
@@ -400,7 +401,9 @@ namespace ClaudeUsageWidget
             portRow.FlowDirection = FlowDirection.LeftToRight;
             portRow.AutoSize = true;
             portRow.WrapContents = false;
-            portRow.Margin = new Padding(22, 6, 0, 0);
+            portRow.Dock = DockStyle.Top;
+            portRow.Margin = new Padding(0);
+            portRow.Padding = new Padding(22, 6, 0, 0);
             _lblOllamaPort.Text = "Port:";
             _lblOllamaPort.Font = MakeFont("Segoe UI", 8.5f);
             _lblOllamaPort.ForeColor = Palette.Dim;
@@ -421,6 +424,7 @@ namespace ClaudeUsageWidget
             portRow.Controls.Add(_numOllamaPort);
             Control cardContainer = _lblOllamaDesc.Parent ?? ollamaCard;
             cardContainer.Controls.Add(portRow);
+            cardContainer.Controls.SetChildIndex(portRow, 0);
             t.Controls.Add(ollamaCard);
 
             _page1.Controls.Add(t);
@@ -813,9 +817,45 @@ namespace ClaudeUsageWidget
             ThemeButton(_btnBack, false);
             ThemeButton(_btnNext, true);
 
+            ThemeCombo(_cboLang);
+            ThemeCombo(_cboTheme);
+            ThemeCombo(_cboBackdrop);
+            ThemeCombo(_cboCardLayout);
+            ThemeCombo(_cboEdge);
+            _numOllamaPort.BackColor = Palette.Surface;
+            _numOllamaPort.ForeColor = Palette.Text;
+
+            if (IsHandleCreated) DarkUi.TitleBar(Handle, !Palette.IsLight);
+            if (_page1.IsHandleCreated) DarkUi.ControlTheme(_page1.Handle, !Palette.IsLight);
+            if (_page2.IsHandleCreated) DarkUi.ControlTheme(_page2.Handle, !Palette.IsLight);
+            if (_page3.IsHandleCreated) DarkUi.ControlTheme(_page3.Handle, !Palette.IsLight);
+
             UpdatePillAppearance(_stepPill1, _step == 0);
             UpdatePillAppearance(_stepPill2, _step == 1);
             UpdatePillAppearance(_stepPill3, _step == 2);
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            DarkUi.TitleBar(Handle, !Palette.IsLight);
+        }
+
+        private static void ThemeCombo(ComboBox cb)
+        {
+            cb.FlatStyle = FlatStyle.Flat;
+            cb.BackColor = Palette.Surface;
+            cb.ForeColor = Palette.Text;
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (DialogResult != DialogResult.OK && !string.IsNullOrEmpty(_initialLang) &&
+                !string.Equals(L.Lang, _initialLang, StringComparison.OrdinalIgnoreCase))
+            {
+                L.Set(_initialLang);
+            }
+            base.OnFormClosing(e);
         }
 
         private void ThemeButton(Button b, bool accent)
@@ -841,13 +881,15 @@ namespace ClaudeUsageWidget
 
         private void SkipWizard()
         {
+            if (!string.IsNullOrEmpty(_initialLang) && !string.Equals(L.Lang, _initialLang, StringComparison.OrdinalIgnoreCase))
+                L.Set(_initialLang);
             _cfg.FirstRunCompleted = true;
             _cfg.Save();
             DialogResult = DialogResult.Cancel;
             Close();
         }
 
-        private void FinishAndSave()
+        private async void FinishAndSave()
         {
             _cfg.FirstRunCompleted = true;
 
@@ -896,8 +938,15 @@ namespace ClaudeUsageWidget
 
             if (_chkCompanion.Checked)
             {
-                string paths, error;
-                CompanionInstaller.Install(out paths, out error);
+                _btnNext.Enabled = false;
+                _btnBack.Enabled = false;
+                _btnSkip.Enabled = false;
+                await System.Threading.Tasks.Task.Run(delegate
+                {
+                    string paths, error;
+                    CompanionInstaller.Install(out paths, out error);
+                });
+                if (IsDisposed) return;
             }
 
             _cfg.Save();

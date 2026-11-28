@@ -33,12 +33,23 @@ $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.
     "/resource:$root\app.ico,app.ico" `
     "/resource:$root\companion\vscode-status-bar\package.json,companion-package.json" `
     "/resource:$root\companion\vscode-status-bar\extension.js,companion-extension.js" `
+    "/resource:$root\companion\vscode-status-bar\README.md,companion-readme.md" `
+    "/resource:$root\companion\vscode-status-bar\icon.png,companion-icon.png" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     /r:System.Net.Http.dll /r:System.Security.dll /r:System.Web.Extensions.dll `
     /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
     $src
 if ($LASTEXITCODE -ne 0) { throw "Build gagal (exit $LASTEXITCODE)." }
-Copy-Item "$dist\AIUsageWatcher.exe" "$dist\ClaudeUsageWidget.exe" -Force
+$legacyExe = Join-Path $dist 'ClaudeUsageWidget.exe'
+if (Test-Path $legacyExe) {
+    try { Remove-Item $legacyExe -Force -ErrorAction Stop }
+    catch {
+        $oldLeg = Join-Path $dist 'ClaudeUsageWidget.exe.old'
+        if (Test-Path $oldLeg) { try { Remove-Item $oldLeg -Force -ErrorAction SilentlyContinue } catch {} }
+        Move-Item $legacyExe $oldLeg -Force
+    }
+}
+Copy-Item "$dist\AIUsageWatcher.exe" $legacyExe -Force
 
 $extra = @(
     (Join-Path $root 'statusline\cuw-statusline.sh'),
@@ -50,6 +61,8 @@ $extra = @(
 )
 foreach ($f in $extra) { Copy-Item $f $dist -Force }
 $compSrc = Join-Path $root 'companion'
+$distComp = Join-Path $dist 'companion'
+if (Test-Path $distComp) { Remove-Item $distComp -Recurse -Force -ErrorAction SilentlyContinue }
 if (Test-Path $compSrc) {
     Copy-Item -Path $compSrc -Destination $dist -Recurse -Force
 }

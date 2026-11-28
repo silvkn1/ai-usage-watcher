@@ -75,8 +75,10 @@ namespace ClaudeUsageWidget
             if (string.Equals(schedule, "weekly", StringComparison.OrdinalIgnoreCase))
             {
                 Calendar cal = CultureInfo.InvariantCulture.Calendar;
-                int wk = cal.GetWeekOfYear(now, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
-                return string.Format(CultureInfo.InvariantCulture, "{0:0000}-W{1:00}", now.Year, wk);
+                // Anchor to Thursday of the Monday-based week so New Year edge dates match ISO week-year.
+                DateTime thu = now.AddDays(3 - (((int)now.DayOfWeek + 6) % 7));
+                int wk = cal.GetWeekOfYear(thu, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+                return string.Format(CultureInfo.InvariantCulture, "{0:0000}-W{1:00}", thu.Year, wk);
             }
             return now.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         }
@@ -225,33 +227,33 @@ namespace ClaudeUsageWidget
     {
         private class St { public DateTime ResetsAt; public HashSet<int> Fired = new HashSet<int>(); public bool Crossed, ResetNotified; }
         private readonly Dictionary<string, St> _s = new Dictionary<string, St>();
-        private bool _baselined;
+        private readonly HashSet<string> _seenWindows = new HashSet<string>(StringComparer.Ordinal);
 
         public List<Alert> Evaluate(RateLimitSnapshot snap, int[] thresholds, bool resetNotify)
         {
             List<Alert> r = new List<Alert>();
             if (snap == null) return r;
-            bool silent = !_baselined;
             if (snap.FileFound)
             {
-                Check("five_hour", snap.FiveHour, thresholds, resetNotify, silent, r);
-                Check("seven_day", snap.SevenDay, thresholds, resetNotify, silent, r);
+                Check("five_hour", snap.FiveHour, thresholds, resetNotify, r);
+                Check("seven_day", snap.SevenDay, thresholds, resetNotify, r);
             }
             if (snap.AntigravityFiveHour != null && snap.AntigravityFiveHour.Available)
-                Check("antigravity_five_hour", snap.AntigravityFiveHour, thresholds, resetNotify, silent, r);
+                Check("antigravity_five_hour", snap.AntigravityFiveHour, thresholds, resetNotify, r);
             if (snap.AntigravitySevenDay != null && snap.AntigravitySevenDay.Available)
-                Check("antigravity_seven_day", snap.AntigravitySevenDay, thresholds, resetNotify, silent, r);
+                Check("antigravity_seven_day", snap.AntigravitySevenDay, thresholds, resetNotify, r);
             if (snap.CodexFiveHour != null && snap.CodexFiveHour.Available)
-                Check("codex_five_hour", snap.CodexFiveHour, thresholds, resetNotify, silent, r);
+                Check("codex_five_hour", snap.CodexFiveHour, thresholds, resetNotify, r);
             if (snap.CodexSevenDay != null && snap.CodexSevenDay.Available)
-                Check("codex_seven_day", snap.CodexSevenDay, thresholds, resetNotify, silent, r);
-            _baselined = true;
+                Check("codex_seven_day", snap.CodexSevenDay, thresholds, resetNotify, r);
             return r;
         }
 
-        private void Check(string name, LimitWindow w, int[] th, bool resetNotify, bool silent, List<Alert> r)
+        private void Check(string name, LimitWindow w, int[] th, bool resetNotify, List<Alert> r)
         {
-            if (!w.Available) return;
+            if (w == null || !w.Available) return;
+            // Baseline each window independently on its first observation so late async feeds don't fire stale startup alerts.
+            bool silent = _seenWindows.Add(name);
             St st;
             _s.TryGetValue(name, out st);
 
@@ -284,10 +286,6 @@ namespace ClaudeUsageWidget
             {
                 st.Crossed = true;
                 if (!silent) { Alert a = new Alert(); a.Window = name; a.Threshold = top; a.Used = w.UsedPercent; a.ResetsAt = w.ResetsAt; r.Add(a); }
-            }
-            else if (w.UsedPercent >= 30)
-            {
-                st.Crossed = true;
             }
         }
 
@@ -393,12 +391,12 @@ namespace ClaudeUsageWidget
 
         private static void PickHigherWindow(LimitWindow cand5, LimitWindow cand7, ref LimitWindow w5, ref LimitWindow w7)
         {
-            if (cand5 == null || !cand5.Available) return;
-            if (w5 == null || !w5.Available || w5.IsStale || (!cand5.IsStale && cand5.UsedPercent > w5.UsedPercent))
-            {
+            if (cand5 != null && cand5.Available &&
+                (w5 == null || !w5.Available || (w5.IsStale && !cand5.IsStale) || (!cand5.IsStale && cand5.UsedPercent > w5.UsedPercent)))
                 w5 = cand5;
+            if (cand7 != null && cand7.Available &&
+                (w7 == null || !w7.Available || (w7.IsStale && !cand7.IsStale) || (!cand7.IsStale && cand7.UsedPercent > w7.UsedPercent)))
                 w7 = cand7;
-            }
         }
 
         private static string Line(LimitWindow w, string withReset, string noReset)
@@ -620,13 +618,15 @@ namespace ClaudeUsageWidget
 
         private static void ConsiderWindow(LimitWindow w, ref double minMins)
         {
-            if (w == null || !w.Available || w.IsStale || w.UsedPercent <= 5) return;
-            double leftPct = Math.Max(0, 100.0 - w.UsedPercent);
-            double elapsed = Pace.ElapsedAt(w, DateTime.Now, Pace.FiveHourSecs);
+            if (w == null || !w.Available || w.IsStale || w.UsedPercent <= 5 || w.UsedPercent >= 100 || w.ResetsAt == DateTime.MinValue) return;
+            double leftPct = 100.0 - w.UsedPercent;
+            DateTime now = DateTime.Now;
+            double elapsed = Pace.ElapsedAt(w, now, Pace.FiveHourSecs);
             if (double.IsNaN(elapsed) || elapsed <= 0.05) return;
             double pctPerMin = w.UsedPercent / (elapsed * 300.0);
             if (pctPerMin <= 0) return;
             double m = leftPct / pctPerMin;
+            if (now.AddMinutes(m) >= w.ResetsAt) return;
             if (m < minMins) minMins = m;
         }
     }
@@ -786,15 +786,18 @@ namespace ClaudeUsageWidget
                 totalCost += d.Cost;
             }
 
+            string curLabel = Opts.CurrencyCustomEnabled && !string.IsNullOrEmpty(Opts.CurrencySymbol) ? Opts.CurrencySymbol : "USD";
             sb.Append("## Monthly Summary\r\n");
             sb.Append("- **Total Requests**: ").Append(totalReqs.ToString("N0", CultureInfo.InvariantCulture)).Append("\r\n");
             sb.Append("- **Total Tokens**: ").Append(Fmt.Tokens(totalTokens)).Append(" (").Append(totalTokens.ToString("N0", CultureInfo.InvariantCulture)).Append(")\r\n");
             sb.Append("- **Estimated Cost (USD)**: ").Append(totalCost.ToString("$0.0000", CultureInfo.InvariantCulture)).Append("\r\n");
-            sb.Append("- **Estimated Cost (IDR)**: ").Append(Fmt.Usd(totalCost)).Append("\r\n\r\n");
+            if (Opts.CurrencyCustomEnabled)
+                sb.Append("- **Estimated Cost (").Append(curLabel).Append(")**: ").Append(Fmt.Usd(totalCost)).Append("\r\n");
+            sb.Append("\r\n");
 
             if (usage != null && usage.Week != null && usage.Week.Count > 0)
             {
-                sb.Append("## Active Models\r\n");
+                sb.Append("## Active Models (Last 7 Days)\r\n");
                 sb.Append("| Model | Requests | Tokens | Cost (Est) |\r\n");
                 sb.Append("| :--- | :--- | :--- | :--- |\r\n");
                 List<KeyValuePair<string, Tally>> sortedModels = new List<KeyValuePair<string, Tally>>(usage.Week);
@@ -810,7 +813,7 @@ namespace ClaudeUsageWidget
             }
 
             sb.Append("## Daily Breakdown\r\n");
-            sb.Append("| Date | Requests | Tokens | Cost (USD) | Cost (IDR) |\r\n");
+            sb.Append("| Date | Requests | Tokens | Cost (USD) | Cost (").Append(curLabel).Append(") |\r\n");
             sb.Append("| :--- | :--- | :--- | :--- | :--- |\r\n");
             if (days.Count == 0)
             {
@@ -848,38 +851,38 @@ namespace ClaudeUsageWidget
                         d["claude_5h_percent"] = Math.Round(rl.FiveHour.UsedPercent, 1);
                         d["five_hour_percent"] = Math.Round(rl.FiveHour.UsedPercent, 1);
                         if (rl.FiveHour.ResetsAt != DateTime.MinValue)
-                            d["claude_5h_resets_at"] = rl.FiveHour.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                            d["claude_5h_resets_at"] = rl.FiveHour.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
                     if (rl.SevenDay != null && rl.SevenDay.Available)
                     {
                         d["claude_7d_percent"] = Math.Round(rl.SevenDay.UsedPercent, 1);
                         d["seven_day_percent"] = Math.Round(rl.SevenDay.UsedPercent, 1);
                         if (rl.SevenDay.ResetsAt != DateTime.MinValue)
-                            d["claude_7d_resets_at"] = rl.SevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                            d["claude_7d_resets_at"] = rl.SevenDay.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
                     if (rl.AntigravityFiveHour != null && rl.AntigravityFiveHour.Available)
                     {
                         d["antigravity_5h_percent"] = Math.Round(rl.AntigravityFiveHour.UsedPercent, 1);
                         if (rl.AntigravityFiveHour.ResetsAt != DateTime.MinValue)
-                            d["antigravity_5h_resets_at"] = rl.AntigravityFiveHour.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                            d["antigravity_5h_resets_at"] = rl.AntigravityFiveHour.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
                     if (rl.AntigravitySevenDay != null && rl.AntigravitySevenDay.Available)
                     {
                         d["antigravity_7d_percent"] = Math.Round(rl.AntigravitySevenDay.UsedPercent, 1);
                         if (rl.AntigravitySevenDay.ResetsAt != DateTime.MinValue)
-                            d["antigravity_7d_resets_at"] = rl.AntigravitySevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                            d["antigravity_7d_resets_at"] = rl.AntigravitySevenDay.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
                     if (rl.CodexFiveHour != null && rl.CodexFiveHour.Available)
                     {
                         d["codex_5h_percent"] = Math.Round(rl.CodexFiveHour.UsedPercent, 1);
                         if (rl.CodexFiveHour.ResetsAt != DateTime.MinValue)
-                            d["codex_5h_resets_at"] = rl.CodexFiveHour.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                            d["codex_5h_resets_at"] = rl.CodexFiveHour.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
                     if (rl.CodexSevenDay != null && rl.CodexSevenDay.Available)
                     {
                         d["codex_7d_percent"] = Math.Round(rl.CodexSevenDay.UsedPercent, 1);
                         if (rl.CodexSevenDay.ResetsAt != DateTime.MinValue)
-                            d["codex_7d_resets_at"] = rl.CodexSevenDay.ResetsAt.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                            d["codex_7d_resets_at"] = rl.CodexSevenDay.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
                     }
                 }
 

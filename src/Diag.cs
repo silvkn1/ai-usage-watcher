@@ -18,10 +18,12 @@ namespace ClaudeUsageWidget
             if (string.IsNullOrEmpty(s)) return s;
             try
             {
+                s = Regex.Replace(s, @"(https?://[^/\s""']+)/[^\s""']+", "$1/<redacted>", RegexOptions.IgnoreCase);
                 string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                 if (!string.IsNullOrEmpty(profile)) s = Regex.Replace(s, Regex.Escape(profile), "%USERPROFILE%", RegexOptions.IgnoreCase);
                 string user = Environment.UserName;
-                if (!string.IsNullOrEmpty(user) && user.Length >= 3) s = Regex.Replace(s, Regex.Escape(user), "<user>", RegexOptions.IgnoreCase);
+                if (!string.IsNullOrEmpty(user) && user.Length >= 3)
+                    s = Regex.Replace(s, @"(?<![A-Za-z0-9_])" + Regex.Escape(user) + @"(?![A-Za-z0-9_])", "<user>", RegexOptions.IgnoreCase);
                 s = Regex.Replace(s, @"S-1-5-21(-\d+){4}", "S-1-5-21-<sid>");
             }
             catch { }
@@ -51,7 +53,7 @@ namespace ClaudeUsageWidget
             {
                 string f = Path.Combine(Paths.ClaudeDir, "settings.json");
                 if (!File.Exists(f)) return "no settings.json";
-                string cmd = J.Str(J.Obj(J.Parse(File.ReadAllText(f, Encoding.UTF8)), "statusLine"), "command") ?? "";
+                string cmd = J.Str(J.Obj(J.Parse(Paths.ReadAllTextShared(f)), "statusLine"), "command") ?? "";
                 return cmd.IndexOf("cuw-statusline", StringComparison.OrdinalIgnoreCase) >= 0 ? "wrapper installed" : (cmd.Length == 0 ? "none" : "other command");
             }
             catch { return "unreadable"; }
@@ -97,6 +99,11 @@ namespace ClaudeUsageWidget
             {
                 b.AppendLine(Window("5h", rl.FiveHour));
                 b.AppendLine(Window("7d", rl.SevenDay));
+                if ((rl.AntigravityFiveHour != null && rl.AntigravityFiveHour.Available) || (rl.AntigravitySevenDay != null && rl.AntigravitySevenDay.Available))
+                {
+                    b.AppendLine(Window("antigravity 5h", rl.AntigravityFiveHour));
+                    b.AppendLine(Window("antigravity 7d", rl.AntigravitySevenDay));
+                }
                 if ((rl.CodexFiveHour != null && rl.CodexFiveHour.Available) || (rl.CodexSevenDay != null && rl.CodexSevenDay.Available))
                 {
                     b.AppendLine(Window("codex 5h", rl.CodexFiveHour));
@@ -115,7 +122,7 @@ namespace ClaudeUsageWidget
             {
                 if (File.Exists(Paths.LogFile))
                 {
-                    string[] lines = File.ReadAllLines(Paths.LogFile, Encoding.UTF8);
+                    string[] lines = Paths.ReadAllLinesShared(Paths.LogFile);
                     for (int i = Math.Max(0, lines.Length - 25); i < lines.Length; i++) b.AppendLine(lines[i]);
                 }
             }

@@ -61,7 +61,7 @@ namespace ClaudeUsageWidget
             try
             {
                 if (!File.Exists(path)) return h;
-                string txt = File.ReadAllText(path, Encoding.UTF8);
+                string txt = Paths.ReadAllTextShared(path);
                 Dictionary<string, object> root = J.Parse(txt);
                 System.Collections.IList arr = J.Arr(root, "days");
                 if (arr != null)
@@ -276,17 +276,28 @@ namespace ClaudeUsageWidget
             lock (Gate) return new List<string>(_codexCache);
         }
 
+        private static Task _inFlight;
+
         private static void EnsureRefreshed()
         {
+            Task waitTask;
             lock (Gate)
             {
-                if ((DateTime.Now - _at).TotalMinutes < 10) return;
-                _at = DateTime.Now;   // jangan ulangi terus saat gagal
+                if (_inFlight != null && !_inFlight.IsCompleted)
+                {
+                    waitTask = _inFlight;
+                }
+                else
+                {
+                    if ((DateTime.UtcNow - _at).TotalMinutes < 10) return;
+                    _at = DateTime.UtcNow;   // jangan ulangi terus saat gagal
+                    _inFlight = Task.Run(delegate { DiscoverAndPublish(); });
+                    waitTask = _inFlight;
+                }
             }
             try
             {
-                Task t = Task.Run(delegate { DiscoverAndPublish(); });
-                if (!t.Wait(8000)) Log.Write("wsl: discovery timeout");
+                if (!waitTask.Wait(8000)) Log.Write("wsl: discovery timeout");
             }
             catch (Exception ex) { Log.Write("wsl", ex); }
         }

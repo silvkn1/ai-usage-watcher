@@ -26,19 +26,35 @@ namespace ClaudeUsageWidget
                 return;
             }
 
-            bool created;
-            using (Mutex mutex = new Mutex(true, @"Local\AIUsageWatcher.SingleInstance", out created))
+            bool waitUpdate = Array.IndexOf(args, "--wait-update") >= 0;
+            bool acquired = false;
+            using (Mutex mutex = new Mutex(false, @"Local\AIUsageWatcher.SingleInstance"))
             {
-                if (!created) return;   // sudah berjalan (mis. autostart + buka manual)
+                try
+                {
+                    acquired = mutex.WaitOne(waitUpdate ? 5000 : 0, false);
+                }
+                catch (AbandonedMutexException)
+                {
+                    acquired = true;
+                }
+                if (!acquired) return;   // sudah berjalan (mis. autostart + buka manual)
 
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log.Write("ui", e.Exception); };
-                AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e) { Log.Write("fatal", e.ExceptionObject as Exception); };
-                SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+                try
+                {
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log.Write("ui", e.Exception); };
+                    AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e) { Log.Write("fatal", e.ExceptionObject as Exception); };
+                    SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
 
-                Application.Run(new TrayApp());
-                GC.KeepAlive(mutex);
+                    Application.Run(new TrayApp());
+                }
+                finally
+                {
+                    try { mutex.ReleaseMutex(); } catch { }
+                    GC.KeepAlive(mutex);
+                }
             }
         }
 
@@ -46,7 +62,17 @@ namespace ClaudeUsageWidget
         {
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             UsageScanner sc = new UsageScanner(Pricing.Load());
-            if (extraRoot != null) sc.Roots = delegate { return new System.Collections.Generic.List<string> { Paths.ProjectsDir, extraRoot }; };
+            sc.CacheFilePath = null;
+            if (extraRoot != null)
+            {
+                var origRoots = sc.Roots;
+                sc.Roots = delegate
+                {
+                    System.Collections.Generic.List<string> r = origRoots != null ? origRoots() : new System.Collections.Generic.List<string>();
+                    r.Add(extraRoot);
+                    return r;
+                };
+            }
             sc.TrackProjects = true;   // mode uji: ikut menghitung per proyek
             sc.Scan();
             long firstMs = sw.ElapsedMilliseconds;
@@ -75,7 +101,8 @@ namespace ClaudeUsageWidget
             Paths.Ensure();
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             string rl, merr = "-";
-            string err = CliProbe.Run("claude-haiku-5-5", out rl);
+            string model = AppConfig.Load().ProbeModel;
+            string err = CliProbe.Run(string.IsNullOrEmpty(model) ? "claude-haiku-5-5" : model, out rl);
             if (err == null && mirror != null) merr = Mirror.Write(mirror, rl) ?? "ok";
             System.IO.File.WriteAllText(outFile, "cli=" + CliProbe.FindClaude() + "\nms=" + sw.ElapsedMilliseconds
                 + "\nerr=" + (err ?? "none") + "\nrl=" + rl + "\nmirror=" + merr + "\n");

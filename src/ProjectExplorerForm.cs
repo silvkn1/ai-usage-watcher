@@ -133,10 +133,9 @@ namespace ClaudeUsageWidget
             g.Clear(Palette.Bg);
             float s = g.DpiX / 96f;
             int pad = (int)(16 * s);
-            int legH = (int)(26 * s);
+            int legRowH = (int)(18 * s);
             int chartTop = pad + (int)(22 * s);
-            int chartBot = Height - legH - (int)(24 * s);
-            if (chartBot <= chartTop + 20) return;
+            int availW0 = Math.Max(40, Width - pad * 2);
 
             double[] provTotals = new double[Providers.Length];
             double peak = 0;
@@ -159,6 +158,20 @@ namespace ClaudeUsageWidget
             using (Font fHead = new Font("Segoe UI Semibold", 9.5f))
             using (Font fSmall = new Font("Segoe UI", 8.25f))
             {
+                int[] legTw = new int[Providers.Length];
+                int legRows = 1;
+                int simX = 0;
+                int swStep = (int)(14 * s);
+                for (int pi = 0; pi < Providers.Length; pi++)
+                {
+                    legTw[pi] = TextRenderer.MeasureText(g, Providers[pi], fSmall, new Size(200, 24), TextFormatFlags.NoPadding).Width + (int)(12 * s);
+                    if (simX > 0 && simX + swStep + legTw[pi] > availW0) { legRows++; simX = 0; }
+                    simX += swStep + legTw[pi];
+                }
+                int legH = (int)(8 * s) + legRows * legRowH;
+                int chartBot = Height - legH - (int)(16 * s);
+                if (chartBot <= chartTop + 20) return;
+
                 List<string> sumParts = new List<string>();
                 for (int pi = 0; pi < Providers.Length; pi++)
                     if (provTotals[pi] > 0) sumParts.Add(Providers[pi] + ": " + Fmt.UsdShort(provTotals[pi]));
@@ -173,11 +186,11 @@ namespace ClaudeUsageWidget
                 }
                 if (_dailyTarget > 0)
                     headText += "  |  " + L.T("proj.trends.target", Fmt.UsdShort(_dailyTarget));
-                TextRenderer.DrawText(g, headText, fHead, new Rectangle(pad, pad, Width - pad * 2, (int)(20 * s)), Palette.Text,
+                TextRenderer.DrawText(g, headText, fHead, new Rectangle(pad, pad, availW0, (int)(20 * s)), Palette.Text,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
 
                 int n = Math.Max(1, _days.Length);
-                int availW = Math.Max(40, Width - pad * 2);
+                int availW = availW0;
                 float slot = availW / (float)n;
                 float bw = Math.Max(3f, slot - 3f * s);
 
@@ -228,23 +241,34 @@ namespace ClaudeUsageWidget
                     }
                 }
 
-                // Legend row
+                // Legend row (wraps cleanly onto extra rows if narrow)
                 int lx = pad;
-                int ly = Height - legH;
+                int ly = Height - legH + (int)(2 * s);
                 for (int pi = 0; pi < Providers.Length; pi++)
                 {
+                    int tw = legTw[pi];
+                    if (lx > pad && lx + (int)(14 * s) + tw > Width - pad)
+                    {
+                        lx = pad;
+                        ly += legRowH;
+                    }
                     bool activeProv = !hasProvFilter || string.Equals(Providers[pi], _providerFilter, StringComparison.OrdinalIgnoreCase);
                     Color swCol = activeProv ? ColorForProvider(Providers[pi]) : ThemeUtil.Blend(ColorForProvider(Providers[pi]), Palette.Track, 0.72);
                     Color lblCol = activeProv ? Palette.Dim : Palette.Gray;
                     using (SolidBrush lb = new SolidBrush(swCol))
                         g.FillRectangle(lb, lx, ly + (int)(5 * s), (int)(10 * s), (int)(10 * s));
                     lx += (int)(14 * s);
-                    int tw = TextRenderer.MeasureText(g, Providers[pi], fSmall, new Size(200, 24), TextFormatFlags.NoPadding).Width + (int)(12 * s);
-                    TextRenderer.DrawText(g, Providers[pi], fSmall, new Rectangle(lx, ly, tw, (int)(20 * s)), lblCol,
-                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                    TextRenderer.DrawText(g, Providers[pi], fSmall, new Rectangle(lx, ly, Math.Min(tw, Math.Max(10, Width - pad - lx)), legRowH), lblCol,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
                     lx += tw;
                 }
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _tip.Dispose();
+            base.Dispose(disposing);
         }
     }
 
@@ -465,7 +489,7 @@ namespace ClaudeUsageWidget
         private readonly List<ProjectRow> _filteredRows = new List<ProjectRow>();
         private ContextMenuStrip _ctxMenu, _sessMenu, _toolMenu;
         private readonly List<Button> _trendRangeBtns = new List<Button>();
-        private Font _boldFont, _tabFont;
+        private Font _baseFont, _boldFont, _tabFont;
         private UsageSnapshot _usageRef;
         private HistoryStore _historyRef;
         private string[] _colTitles;
@@ -478,7 +502,7 @@ namespace ClaudeUsageWidget
             _historyRef = history;
             _trends.SetBudgetForecast(budgetDaily, budgetMonthly, monthCost);
             Text = L.T("proj.window.title");
-            Font = new Font("Segoe UI", 9f);
+            Font = (_baseFont = new Font("Segoe UI", 9f));
             StartPosition = FormStartPosition.CenterScreen;
             Icon = AppIcon.Get();
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -1222,6 +1246,7 @@ namespace ClaudeUsageWidget
                 if (_toolMenu != null) { _toolMenu.Dispose(); _toolMenu = null; }
                 if (_boldFont != null) { _boldFont.Dispose(); _boldFont = null; }
                 if (_tabFont != null) { _tabFont.Dispose(); _tabFont = null; }
+                if (_baseFont != null) { _baseFont.Dispose(); _baseFont = null; }
             }
             base.Dispose(disposing);
         }

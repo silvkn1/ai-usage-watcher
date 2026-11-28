@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -201,7 +202,7 @@ namespace ClaudeUsageWidget
             {
                 if (File.Exists(Paths.ConfigFile))
                 {
-                    AppConfig c = J.Ser.Deserialize<AppConfig>(File.ReadAllText(Paths.ConfigFile, Encoding.UTF8));
+                    AppConfig c = J.Ser.Deserialize<AppConfig>(Paths.ReadAllTextShared(Paths.ConfigFile));
                     if (c != null)
                     {
                         c.Normalize();
@@ -227,18 +228,22 @@ namespace ClaudeUsageWidget
                 DockEdge != "top-center" && DockEdge != "bottom-center")
                 DockEdge = "top";
             if (DockMonitor == null) DockMonitor = "";
-            if (double.IsNaN(BudgetDaily) || BudgetDaily < 0) BudgetDaily = 0;
-            if (double.IsNaN(BudgetMonthly) || BudgetMonthly < 0) BudgetMonthly = 0;
+            if (double.IsNaN(BudgetDaily) || double.IsInfinity(BudgetDaily) || BudgetDaily < 0) BudgetDaily = 0;
+            if (double.IsNaN(BudgetMonthly) || double.IsInfinity(BudgetMonthly) || BudgetMonthly < 0) BudgetMonthly = 0;
             if (HookNotifyMinSeconds < 0 || HookNotifyMinSeconds > 3600) HookNotifyMinSeconds = 30;
             if (AlertEngine.ParseThresholds(AlertThresholds) == null) AlertThresholds = "80,95";
             if (string.IsNullOrWhiteSpace(Hotkey)) Hotkey = "Win+Alt+U";
             if (string.IsNullOrEmpty(CurrencySymbol)) CurrencySymbol = "Rp";
-            if (CurrencyRate <= 0 || double.IsNaN(CurrencyRate)) CurrencyRate = 16200;
+            if (CurrencyRate <= 0 || double.IsNaN(CurrencyRate) || double.IsInfinity(CurrencyRate)) CurrencyRate = 16200;
             if (BurnRateThresholdTokens <= 0) BurnRateThresholdTokens = 100000;
             if (!string.IsNullOrEmpty(WebhookUrl))
             {
-                SetWebhookUrl(WebhookUrl);
-                WebhookUrl = null;
+                string enc = ProtectStr(WebhookUrl);
+                if (!string.IsNullOrEmpty(enc))
+                {
+                    WebhookUrlProtected = enc;
+                    WebhookUrl = null;
+                }
             }
             if (OllamaPort <= 0 || OllamaPort > 65535) OllamaPort = 11434;
             if (Backdrop != "solid" && Backdrop != "acrylic" && Backdrop != "mica" && Backdrop != "mica-alt")
@@ -251,7 +256,7 @@ namespace ClaudeUsageWidget
             if (DigestSchedule != "weekly") DigestSchedule = "daily";
             if (DigestHour < 0 || DigestHour > 23) DigestHour = 18;
             if (LastDigestKey == null) LastDigestKey = "";
-            if (double.IsNaN(WidgetScale) || WidgetScale < 0.80 || WidgetScale > 1.35) WidgetScale = 1.0;
+            if (double.IsNaN(WidgetScale) || double.IsInfinity(WidgetScale) || WidgetScale < 0.80 || WidgetScale > 1.35) WidgetScale = 1.0;
             else if (WidgetScale < 0.92) WidgetScale = 0.85;
             else if (WidgetScale < 1.08) WidgetScale = 1.0;
             else if (WidgetScale < 1.22) WidgetScale = 1.15;
@@ -370,7 +375,8 @@ namespace ClaudeUsageWidget
             if (safe == null) return null;
             string p = Path.Combine(dir, safe + ".json");
             if (!File.Exists(p)) return null;
-            return ImportProfileJson(File.ReadAllText(p, Encoding.UTF8), this);
+            try { return ImportProfileJson(Paths.ReadAllTextShared(p), this); }
+            catch (Exception ex) { Log.Write("profile.load", ex); return null; }
         }
 
         internal static bool DeleteNamedProfileInDir(string name, string dir)
@@ -420,22 +426,30 @@ namespace ClaudeUsageWidget
         public static AppConfig ImportProfileJson(string json, AppConfig preserveSecretsFrom)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
+            Dictionary<string, object> rawKeys = J.Parse(json);
+            if (rawKeys == null) return null;
             AppConfig raw = J.Ser.Deserialize<AppConfig>(json);
             if (raw == null) return null;
             AppConfig dst = preserveSecretsFrom != null
                 ? J.Ser.Deserialize<AppConfig>(J.Ser.Serialize(preserveSecretsFrom))
                 : new AppConfig();
-            dst.ApplyProfileFrom(raw);
+            dst.ApplyProfileFrom(raw, rawKeys);
             return dst;
         }
 
         public void ApplyProfileFrom(AppConfig src)
+        {
+            ApplyProfileFrom(src, null);
+        }
+
+        private void ApplyProfileFrom(AppConfig src, Dictionary<string, object> onlyKeys)
         {
             if (src == null) return;
             foreach (System.Reflection.PropertyInfo p in typeof(AppConfig).GetProperties())
             {
                 if (!p.CanRead || !p.CanWrite) continue;
                 if (!SafeProfileProperties.Contains(p.Name)) continue;
+                if (onlyKeys != null && !onlyKeys.ContainsKey(p.Name)) continue;
                 p.SetValue(this, p.GetValue(src, null), null);
             }
             Normalize();
@@ -457,8 +471,12 @@ namespace ClaudeUsageWidget
         private static string ProtectStr(string plain)
         {
             if (string.IsNullOrEmpty(plain)) return null;
-            byte[] enc = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), Entropy, DataProtectionScope.CurrentUser);
-            return Convert.ToBase64String(enc);
+            try
+            {
+                byte[] enc = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), Entropy, DataProtectionScope.CurrentUser);
+                return Convert.ToBase64String(enc);
+            }
+            catch (Exception ex) { Log.Write("config.protect", ex); return null; }
         }
 
         private static string UnprotectStr(string protectedB64, string logContext)

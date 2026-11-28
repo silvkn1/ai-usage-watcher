@@ -82,6 +82,7 @@ namespace ClaudeUsageWidget
         private readonly List<Action> _i18n = new List<Action>();
         private Dictionary<string, string> _i18nRev;
         private string _i18nRevLang;
+        private Font _baseFont;
         private string _builtLang = L.Lang;
         private bool _appliedLight = Palette.IsLight;
         private bool _i18nCaptured;
@@ -102,7 +103,7 @@ namespace ClaudeUsageWidget
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96f, 96f);
-            Font = new Font("Segoe UI", 9f);
+            Font = (_baseFont = new Font("Segoe UI", 9f));
             Rectangle wa = Screen.PrimaryScreen.WorkingArea;
             ClientSize = new Size(700, Math.Min(560, Math.Max(380, wa.Height - 140)));
 
@@ -345,9 +346,11 @@ namespace ClaudeUsageWidget
             AddNote(t, L.T("set.h.currency"), "head");
             AddCheck(t, _currencyOn, L.T("set.currency.enable"), _cfg.CurrencyCustomEnabled);
             _currencySymbol.Width = 80; _currencySymbol.Text = _cfg.CurrencySymbol ?? "Rp";
+            _currencySymbol.TextChanged += delegate { ApplyCurrencyRateFormat(_currencySymbol.Text); };
             AddRow(t, L.T("set.currency.symbol"), _currencySymbol);
-            _currencyRate.DecimalPlaces = 0; _currencyRate.Minimum = 1; _currencyRate.Maximum = 10000000; _currencyRate.Increment = 100; _currencyRate.Width = 110;
-            _currencyRate.Value = (decimal)Math.Max(1, Math.Min(10000000, _cfg.CurrencyRate <= 0 ? 16200 : _cfg.CurrencyRate));
+            _currencyRate.Minimum = 0.01m; _currencyRate.Maximum = 10000000m; _currencyRate.Width = 110;
+            ApplyCurrencyRateFormat(_cfg.CurrencySymbol);
+            _currencyRate.Value = ClampCurrencyRate(_cfg.CurrencyRate);
 
             Button fetchGoogle = new Button();
             fetchGoogle.Text = L.T("set.currency.google");
@@ -360,20 +363,25 @@ namespace ClaudeUsageWidget
                     string symInput = _currencySymbol.Text.Trim();
                     string curCode = GoogleRateFetcher.NormalizeCurrencyCode(symInput);
                     double r = await GoogleRateFetcher.FetchRateAsync(symInput);
+                    if (IsDisposed) return;
                     double minValid = curCode == "IDR" ? 5000.0 : 0.01;
                     if (r > minValid)
                     {
-                        _currencyRate.DecimalPlaces = curCode == "IDR" ? 0 : 2;
+                        ApplyCurrencyRateFormat(symInput);
                         _currencyRate.Value = Math.Max(_currencyRate.Minimum, Math.Min(_currencyRate.Maximum, (decimal)Math.Round(r, curCode == "IDR" ? 0 : 2)));
                         string dispSym = string.IsNullOrEmpty(symInput) ? curCode : symInput;
-                        MessageBox.Show(this, L.T("set.currency.google_ok", dispSym + " " + r.ToString(curCode == "IDR" ? "N0" : "N2", L.Culture)), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        if (Visible)
+                            MessageBox.Show(this, L.T("set.currency.google_ok", dispSym + " " + r.ToString(curCode == "IDR" ? "N0" : "N2", L.Culture)), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    else
+                    else if (Visible)
                     {
                         MessageBox.Show(this, L.T("set.currency.google_fail"), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
-                finally { fetchGoogle.Enabled = true; }
+                finally
+                {
+                    if (!IsDisposed) fetchGoogle.Enabled = true;
+                }
             };
             FlowLayoutPanel crp = new FlowLayoutPanel();
             crp.AutoSize = true; crp.WrapContents = false;
@@ -419,7 +427,7 @@ namespace ClaudeUsageWidget
             };
             AddRow(t, L.T("tray.update"), btnCheckUpdate);
             AddCheck(t, _hotkeyOn, L.T("set.hotkey.enable"), _cfg.HotkeyEnabled);
-            _hotkeyText.Width = 160; _hotkeyText.Text = _cfg.Hotkey ?? "Ctrl+Alt+U";
+            _hotkeyText.Width = 160; _hotkeyText.Text = _cfg.Hotkey ?? "Win+Alt+U";
             AddRow(t, L.T("set.hotkey.keys"), _hotkeyText);
         }
 
@@ -446,10 +454,7 @@ namespace ClaudeUsageWidget
             Button wavTest = new Button { Text = L.T("set.audio.test"), AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
             wavTest.Click += delegate
             {
-                string prev = AudioAlert.CustomWavPath;
-                AudioAlert.CustomWavPath = _wavPath.Text.Trim();
-                AudioAlert.PlayPrompt();
-                AudioAlert.CustomWavPath = prev;
+                AudioAlert.PlayFile(_wavPath.Text.Trim());
             };
             FlowLayoutPanel wavRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             wavRow.Controls.Add(_wavPath); wavRow.Controls.Add(wavBrowse); wavRow.Controls.Add(wavClear); wavRow.Controls.Add(wavTest);
@@ -646,23 +651,29 @@ namespace ClaudeUsageWidget
                 try
                 {
                     int count = await OfficialPricingFetcher.FetchAndSaveAsync();
+                    if (IsDisposed) return;
                     if (count > 0)
                     {
                         if (_cb != null && _cb.PricingUpdated != null) _cb.PricingUpdated();
-                        MessageBox.Show(this, L.T("set.pricing.fetch_ok", count), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        if (Visible)
+                            MessageBox.Show(this, L.T("set.pricing.fetch_ok", count), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
-                    else
+                    else if (Visible)
                         MessageBox.Show(this, L.T("set.pricing.fetch_fail"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 catch (Exception ex)
                 {
                     Log.Write("pricing.fetch", ex);
-                    MessageBox.Show(this, L.T("set.pricing.fetch_fail"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (!IsDisposed && Visible)
+                        MessageBox.Show(this, L.T("set.pricing.fetch_fail"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 finally
                 {
-                    btnFetchPricing.Enabled = true;
-                    btnFetchPricing.Text = L.T("set.pricing.fetch");
+                    if (!IsDisposed)
+                    {
+                        btnFetchPricing.Enabled = true;
+                        btnFetchPricing.Text = L.T("set.pricing.fetch");
+                    }
                 }
             };
             Button customPricing = new Button(); customPricing.Text = L.T("set.pricing.custom"); customPricing.AutoSize = true;
@@ -670,10 +681,14 @@ namespace ClaudeUsageWidget
             pp.Controls.Add(pricing);
             pp.Controls.Add(customPricing);
             pp.Controls.Add(btnFetchPricing);
+            pp.Margin = new Padding(3, 6, 3, 2);
 
             Label pnote = new Label(); pnote.AutoSize = true; pnote.Tag = "dim"; pnote.Anchor = AnchorStyles.Left;
+            pnote.MaximumSize = new Size(620, 0);
+            pnote.Margin = new Padding(3, 2, 3, 6);
             pnote.Text = L.T("set.pricing.note");
-            t.Controls.Add(pp); t.Controls.Add(pnote);
+            t.Controls.Add(pp); t.SetColumnSpan(pp, 2);
+            t.Controls.Add(pnote); t.SetColumnSpan(pnote, 2);
 
             AddNote(t, L.T("set.h.backup"), "head");
             FlowLayoutPanel bp = new FlowLayoutPanel(); bp.AutoSize = true; bp.WrapContents = false;
@@ -975,6 +990,12 @@ namespace ClaudeUsageWidget
             try
             {
                 foreach (Action a in _i18n) a();
+                if (_monitor.Items.Count > 0)
+                {
+                    int mSel = _monitor.SelectedIndex;
+                    _monitor.Items[0] = L.T("monitor.primary");
+                    if (mSel >= 0 && mSel < _monitor.Items.Count) _monitor.SelectedIndex = mSel;
+                }
                 _opacityLbl.Text = L.T("set.opacity", _opacity.Value);
                 if (_tabBuilt[2]) RefreshHookState();
                 if (_tabBuilt[5]) RefreshKeyState();
@@ -1287,7 +1308,8 @@ namespace ClaudeUsageWidget
             _scale.SelectedIndex = _cfg.WidgetScale < 0.92 ? 0 : (_cfg.WidgetScale < 1.08 ? 1 : (_cfg.WidgetScale < 1.22 ? 2 : 3));
             _currencyOn.Checked = _cfg.CurrencyCustomEnabled;
             _currencySymbol.Text = _cfg.CurrencySymbol ?? "Rp";
-            _currencyRate.Value = (decimal)Math.Max(1, Math.Min(10000000, _cfg.CurrencyRate <= 0 ? 16200 : _cfg.CurrencyRate));
+            ApplyCurrencyRateFormat(_cfg.CurrencySymbol);
+            _currencyRate.Value = ClampCurrencyRate(_cfg.CurrencyRate);
             _currencyBoth.Checked = _cfg.CurrencyShowBoth;
             _admin.Checked = _cfg.AdminEnabled;
             _adminData.Checked = _cfg.AdminEnabled;
@@ -1388,10 +1410,24 @@ namespace ClaudeUsageWidget
             Close();
         }
 
+        private void ApplyCurrencyRateFormat(string sym)
+        {
+            bool isIdr = string.Equals(GoogleRateFetcher.NormalizeCurrencyCode(sym), "IDR", StringComparison.OrdinalIgnoreCase);
+            _currencyRate.DecimalPlaces = isIdr ? 0 : 2;
+            _currencyRate.Increment = isIdr ? 100m : 0.1m;
+        }
+
+        private static decimal ClampCurrencyRate(double rate)
+        {
+            double v = rate <= 0 || double.IsNaN(rate) || double.IsInfinity(rate) ? 16200.0 : rate;
+            return (decimal)Math.Max(0.01, Math.Min(10000000.0, v));
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                if (_baseFont != null) { _baseFont.Dispose(); _baseFont = null; }
                 if (_tabFont != null) { _tabFont.Dispose(); _tabFont = null; }
                 if (_headFont != null) { _headFont.Dispose(); _headFont = null; }
             }

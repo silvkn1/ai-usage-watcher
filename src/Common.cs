@@ -10,7 +10,7 @@ using System.Web.Script.Serialization;
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
 [assembly: System.Reflection.AssemblyTitle("AI Usage Watcher")]
 [assembly: System.Reflection.AssemblyProduct("AI Usage Watcher")]
-[assembly: System.Reflection.AssemblyVersion("1.2.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.2.0")]
 
 namespace ClaudeUsageWidget
 {
@@ -151,6 +151,25 @@ namespace ClaudeUsageWidget
         public static string AppStatusJson { get { return Path.Combine(AppDir, "status.json"); } }
 
         public static void Ensure() { Directory.CreateDirectory(AppDir); }
+
+        public static string ReadAllTextShared(string path)
+        {
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader sr = new StreamReader(fs, Encoding.UTF8, true))
+                return sr.ReadToEnd();
+        }
+
+        public static string[] ReadAllLinesShared(string path)
+        {
+            List<string> lines = new List<string>();
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader sr = new StreamReader(fs, Encoding.UTF8, true))
+            {
+                string line;
+                while ((line = sr.ReadLine()) != null) lines.Add(line);
+            }
+            return lines.ToArray();
+        }
     }
 
     /// <summary>Log lokal minimal: hanya jenis kejadian/eksepsi, tanpa isi prompt atau path proyek.</summary>
@@ -169,6 +188,8 @@ namespace ClaudeUsageWidget
             {
                 lock (Gate)
                 {
+                    string dir = Path.GetDirectoryName(Paths.LogFile);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
                     FileInfo fi = new FileInfo(Paths.LogFile);
                     if (fi.Exists && fi.Length > 256 * 1024) fi.Delete();
                     File.AppendAllText(Paths.LogFile,
@@ -244,12 +265,13 @@ namespace ClaudeUsageWidget
         public static double ToNum(object v)
         {
             if (v == null) return double.NaN;
+            double r;
             if (v is int) return (int)v;
             if (v is long) return (long)v;
             if (v is decimal) return (double)(decimal)v;
-            if (v is double) return (double)v;
-            double r;
-            if (double.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out r)) return r;
+            if (v is double) { r = (double)v; return (double.IsNaN(r) || double.IsInfinity(r)) ? double.NaN : r; }
+            if (double.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out r))
+                return (double.IsNaN(r) || double.IsInfinity(r)) ? double.NaN : r;
             return double.NaN;
         }
     }
@@ -295,7 +317,7 @@ namespace ClaudeUsageWidget
 
         public static string Runway(double minutes)
         {
-            if (minutes <= 0) return L.T("time.now");
+            if (double.IsNaN(minutes) || double.IsInfinity(minutes) || minutes <= 0) return L.T("time.now");
             if (minutes < 60) return string.Format("{0:0}m", minutes);
             int h = (int)(minutes / 60);
             int m = (int)(minutes % 60);
@@ -319,6 +341,8 @@ namespace ClaudeUsageWidget
 
         public static DateTime FromUnix(double secs)
         {
+            if (double.IsNaN(secs) || double.IsInfinity(secs) || secs < -62135596800d || secs > 253402300799d)
+                return DateTime.MinValue;
             return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(secs).ToLocalTime();
         }
     }
@@ -338,9 +362,51 @@ namespace ClaudeUsageWidget
         public static bool IsSafeSearchDir(string dir)
         {
             if (string.IsNullOrWhiteSpace(dir)) return false;
-            string t = dir.Trim();
-            if (t.StartsWith("\\\\", StringComparison.Ordinal) || t.StartsWith(".", StringComparison.Ordinal)) return false;
-            return Path.IsPathRooted(t);
+            string t = dir.Trim().Trim('"');
+            if (t.StartsWith("\\\\", StringComparison.Ordinal) || t.StartsWith("//", StringComparison.Ordinal) || t.StartsWith(".", StringComparison.Ordinal))
+                return false;
+            return t.Length >= 3 &&
+                   ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= 'a' && t[0] <= 'z')) &&
+                   t[1] == ':' &&
+                   (t[2] == '\\' || t[2] == '/');
+        }
+
+        public static bool HasCmdMeta(string s)
+        {
+            return string.IsNullOrEmpty(s) || s.IndexOfAny(new[] { '"', '\r', '\n', '%' }) >= 0;
+        }
+
+        public static void KillTree(System.Diagnostics.Process p)
+        {
+            if (p == null) return;
+            try
+            {
+                int pid = p.Id;
+                System.Diagnostics.ProcessStartInfo tk = new System.Diagnostics.ProcessStartInfo(SystemExe("taskkill.exe"), "/PID " + pid + " /T /F")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (System.Diagnostics.Process kp = System.Diagnostics.Process.Start(tk))
+                {
+                    if (kp != null) kp.WaitForExit(3000);
+                }
+            }
+            catch { }
+            try { if (!p.HasExited) p.Kill(); } catch { }
+        }
+
+        private static string NormalizeLaunchDir(string dir, bool allowPercent)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
+            string full;
+            try { full = Path.GetFullPath(dir); }
+            catch { return null; }
+            if (full.IndexOfAny(allowPercent ? new[] { '"', '\r', '\n' } : new[] { '"', '\r', '\n', '%' }) >= 0)
+                return null;
+            string trimmed = full.TrimEnd('\\', '/');
+            if (trimmed.Length == 2 && trimmed[1] == ':') trimmed += "\\.";
+            return trimmed;
         }
 
         public static string FindExecutableOnPath(params string[] names)
@@ -368,7 +434,7 @@ namespace ClaudeUsageWidget
                 {
                     try
                     {
-                        string t = dir.Trim();
+                        string t = dir.Trim().Trim('"');
                         if (!IsSafeSearchDir(t)) continue;
                         string p = Path.Combine(t, name);
                         if (File.Exists(p)) return p;
@@ -381,39 +447,52 @@ namespace ClaudeUsageWidget
 
         public static void OpenFolder(string dir)
         {
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
-            System.Diagnostics.Process.Start(ExplorerExe, "\"" + dir + "\"");
+            string safe = NormalizeLaunchDir(dir, true);
+            if (safe == null) return;
+            using (System.Diagnostics.Process.Start(ExplorerExe, "\"" + safe + "\"")) { }
         }
 
         public static void OpenTerminal(string dir)
         {
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            string safe = NormalizeLaunchDir(dir, false);
+            if (safe == null) return;
             string wt = FindExecutableOnPath("wt.exe");
             System.Diagnostics.ProcessStartInfo psi;
-            if (!string.IsNullOrEmpty(wt))
-                psi = new System.Diagnostics.ProcessStartInfo(wt, "-d \"" + dir + "\"");
+            if (!string.IsNullOrEmpty(wt) && wt.IndexOfAny(new[] { '"', '\r', '\n' }) < 0)
+                psi = new System.Diagnostics.ProcessStartInfo(wt, "-d \"" + safe + "\"");
             else
-                psi = new System.Diagnostics.ProcessStartInfo(SystemExe("cmd.exe"), "/K cd /d \"" + dir + "\"");
-            psi.WorkingDirectory = dir;
+                psi = new System.Diagnostics.ProcessStartInfo(SystemExe("cmd.exe"), "/K pushd \"" + safe + "\"");
+            psi.WorkingDirectory = safe.StartsWith(@"\\", StringComparison.Ordinal) ? Paths.AppDir : safe;
             psi.UseShellExecute = true;
-            System.Diagnostics.Process.Start(psi);
+            using (System.Diagnostics.Process.Start(psi)) { }
         }
+
+        private static DateTime _hasVsCodeAt = DateTime.MinValue;
+        private static bool _hasVsCodeCached;
 
         public static bool HasVSCode()
         {
-            return FindExecutableOnPath("code.cmd", "code.exe", "cursor.cmd") != null;
+            DateTime now = DateTime.UtcNow;
+            if ((now - _hasVsCodeAt).TotalSeconds < 60.0) return _hasVsCodeCached;
+            bool found = FindExecutableOnPath("code.cmd", "code.exe", "cursor.cmd") != null;
+            _hasVsCodeCached = found;
+            _hasVsCodeAt = now;
+            return found;
         }
 
         public static bool OpenVSCode(string dir)
         {
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
             string exe = FindExecutableOnPath("code.cmd", "code.exe", "cursor.cmd");
             if (string.IsNullOrEmpty(exe)) return false;
-            System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo(exe, "\"" + dir + "\"");
-            psi.WorkingDirectory = dir;
-            psi.UseShellExecute = !exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase);
+            bool isCmd = exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase);
+            if (isCmd && HasCmdMeta(exe)) return false;
+            string safe = NormalizeLaunchDir(dir, !isCmd);
+            if (safe == null) return false;
+            System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo(exe, "\"" + safe + "\"");
+            psi.WorkingDirectory = safe.StartsWith(@"\\", StringComparison.Ordinal) ? Paths.AppDir : safe;
+            psi.UseShellExecute = !isCmd;
             psi.CreateNoWindow = true;
-            System.Diagnostics.Process.Start(psi);
+            using (System.Diagnostics.Process.Start(psi)) { }
             return true;
         }
 

@@ -19,7 +19,7 @@ namespace ClaudeUsageWidget
     /// </summary>
     internal static class LangPacks
     {
-        private static readonly Regex CodeRe = new Regex(@"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$", RegexOptions.Compiled);
+        private static readonly Regex CodeRe = new Regex(@"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$", RegexOptions.Compiled);
         private const long MaxBytes = 256 * 1024;
 
         public static List<LangPackInfo> Discover()
@@ -46,7 +46,7 @@ namespace ClaudeUsageWidget
                         i.Code = code; i.Path = f; i.Name = code;
                         try
                         {
-                            Dictionary<string, object> o = J.Parse(File.ReadAllText(f, Encoding.UTF8));
+                            Dictionary<string, object> o = J.Parse(Paths.ReadAllTextShared(f));
                             if (o == null) continue;
                             string n = J.Str(o, "_name");
                             if (!string.IsNullOrWhiteSpace(n)) i.Name = n.Trim();
@@ -71,7 +71,8 @@ namespace ClaudeUsageWidget
         /// <summary>"en", "id", atau kode paket yang ada.</summary>
         public static bool Exists(string code)
         {
-            if (code == "en" || code == "id") return true;
+            if (string.Equals(code, "en", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(code, "id", StringComparison.OrdinalIgnoreCase)) return true;
             return !string.IsNullOrEmpty(code) && Find(code) != null;
         }
 
@@ -79,9 +80,12 @@ namespace ClaudeUsageWidget
         {
             strings = new Dictionary<string, string>();
             culture = null;
+            if (info == null || string.IsNullOrEmpty(info.Path)) return false;
             try
             {
-                Dictionary<string, object> o = J.Parse(File.ReadAllText(info.Path, Encoding.UTF8));
+                FileInfo fi = new FileInfo(info.Path);
+                if (!fi.Exists || fi.Length > MaxBytes) return false;
+                Dictionary<string, object> o = J.Parse(Paths.ReadAllTextShared(info.Path));
                 if (o == null) return false;
                 foreach (KeyValuePair<string, object> kv in o)
                 {

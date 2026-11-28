@@ -26,9 +26,11 @@ namespace ClaudeUsageWidget
         private readonly FloatingForm _float;
         private readonly ContextMenuStrip _menu;
         private readonly System.Windows.Forms.Timer _tick, _debounce, _fsTimer;
+        private System.Windows.Forms.Timer _updateTimer;
         private FileSystemWatcher _logWatcher, _appWatcher, _geminiWatcher, _codexWatcher, _hooksWatcher, _gemCliWatcher;
         private readonly SynchronizationContext _ui;
         private volatile bool _disposed;
+        private bool _exiting, _companionBusy, _settingsAppliedInDialog;
 
         private void PostUi(Action action)
         {
@@ -205,15 +207,19 @@ namespace ClaudeUsageWidget
 
             if (_cfg.AutoUpdateCheck)
             {
-                System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
-                updateTimer.Interval = 5000;
-                updateTimer.Tick += delegate
+                _updateTimer = new System.Windows.Forms.Timer();
+                _updateTimer.Interval = 5000;
+                _updateTimer.Tick += delegate
                 {
-                    updateTimer.Stop();
-                    updateTimer.Dispose();
-                    CheckForUpdates(false);
+                    if (_updateTimer != null)
+                    {
+                        _updateTimer.Stop();
+                        _updateTimer.Dispose();
+                        _updateTimer = null;
+                    }
+                    if (!_disposed) CheckForUpdates(false);
                 };
-                updateTimer.Start();
+                _updateTimer.Start();
             }
 
             _debounce = new System.Windows.Forms.Timer();
@@ -264,7 +270,7 @@ namespace ClaudeUsageWidget
         /// <summary>Klik kiri ikon tray: buka/tutup jendela detail tepat di atas ikon. Widget yang ter-pin di tepi tidak disentuh.</summary>
         private void OnTrayClick()
         {
-            if (_popup != null && _popup.Visible) { _popup.Hide(); _popupHiddenAt = DateTime.Now; return; }
+            if (_popup != null && !_popup.IsDisposed && _popup.Visible) { _popup.Hide(); _popupHiddenAt = DateTime.Now; return; }
             // Klik pada ikon saat popup terbuka lebih dulu membuat popup kehilangan fokus (tertutup); jangan buka lagi oleh klik yang sama.
             if ((DateTime.Now - _popupHiddenAt).TotalMilliseconds < 400) return;
             ShowPopup();
@@ -272,7 +278,7 @@ namespace ClaudeUsageWidget
 
         private void ShowPopup()
         {
-            if (_popup == null)
+            if (_popup == null || _popup.IsDisposed)
             {
                 _popup = new FloatingForm(true);
                 _popup.Backdrop = _cfg.Backdrop;
@@ -295,7 +301,8 @@ namespace ClaudeUsageWidget
         private void ResetPopup()
         {
             if (_popup == null) return;
-            _popup.Hide(); _popup.Dispose(); _popup = null;
+            if (!_popup.IsDisposed) { _popup.Hide(); _popup.Dispose(); }
+            _popup = null;
         }
 
         /// <summary>Posisi ikon tray yang diklik; bila tak tersedia, sekitar kursor saat klik.</summary>
@@ -745,22 +752,23 @@ namespace ClaudeUsageWidget
                             stat += string.Format(" · {0}%", (int)Math.Round(item.SessionCacheHit * 100));
                         lbl += "  (" + stat + ")";
                     }
-                    ToolStripMenuItem mi = new ToolStripMenuItem(icon + lbl);
+                    ToolStripMenuItem mi = new ToolStripMenuItem(MenuText(icon + lbl));
                     bool dirOk = !string.IsNullOrEmpty(item.Cwd) && Directory.Exists(item.Cwd);
                     string focusHint = !string.IsNullOrEmpty(item.Project) ? item.Project : item.Provider;
                     mi.Click += delegate { FocusOrOpenSession(focusHint, item.Cwd, item.Provider); };
                     if (!string.IsNullOrEmpty(focusHint))
                     {
-                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.focus", focusHint), null, delegate
+                        mi.DropDownItems.Add(new ToolStripMenuItem(MenuText(L.T("sess.menu.focus", focusHint)), null, delegate
                         {
                             FocusOrOpenSession(focusHint, item.Cwd, item.Provider);
                         }));
                     }
                     if (dirOk)
                     {
-                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.term", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenTerminal(item.Cwd); }));
-                        mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.folder", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenFolder(item.Cwd); }));
-                        if (hasCode) mi.DropDownItems.Add(new ToolStripMenuItem(L.T("sess.menu.vscode", item.Project ?? item.Provider), null, delegate { ProcessHelper.OpenVSCode(item.Cwd); }));
+                        string pName = item.Project ?? item.Provider;
+                        mi.DropDownItems.Add(new ToolStripMenuItem(MenuText(L.T("sess.menu.term", pName)), null, delegate { ProcessHelper.OpenTerminal(item.Cwd); }));
+                        mi.DropDownItems.Add(new ToolStripMenuItem(MenuText(L.T("sess.menu.folder", pName)), null, delegate { ProcessHelper.OpenFolder(item.Cwd); }));
+                        if (hasCode) mi.DropDownItems.Add(new ToolStripMenuItem(MenuText(L.T("sess.menu.vscode", pName)), null, delegate { ProcessHelper.OpenVSCode(item.Cwd); }));
                     }
                     if (item.State != "running")
                     {
@@ -816,8 +824,8 @@ namespace ClaudeUsageWidget
             if (_sepProject != null) _sepProject.Visible = hasCwd;
             if (hasCwd)
             {
-                _miOpenFolder.Text = L.T("tray.openfolder", proj ?? "Project");
-                _miOpenTerminal.Text = L.T("tray.openterminal", proj ?? "Project");
+                _miOpenFolder.Text = MenuText(L.T("tray.openfolder", proj ?? "Project"));
+                _miOpenTerminal.Text = MenuText(L.T("tray.openterminal", proj ?? "Project"));
             }
         }
 
@@ -947,7 +955,15 @@ namespace ClaudeUsageWidget
             _miReport = new ToolStripMenuItem(L.T("tray.exportreport"), null, delegate { ExportMonthlyReport(); });
             _miCsv = new ToolStripMenuItem(L.T("tray.exportcsv"), null, delegate { ExportCsv(); });
             _miJson = new ToolStripMenuItem(L.T("tray.exportjson"), null, delegate { ExportJson(); });
-            _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate { Process.Start(ProcessHelper.ExplorerExe, "\"" + Paths.AppDir + "\""); });
+            _miData = new ToolStripMenuItem(L.T("tray.datafolder"), null, delegate
+            {
+                try
+                {
+                    Paths.Ensure();
+                    Process.Start(ProcessHelper.ExplorerExe, "\"" + Paths.AppDir + "\"");
+                }
+                catch (Exception ex) { Log.Write("open.data", ex); }
+            });
             _miCompanion = new ToolStripMenuItem(L.T("tray.companion"), null, delegate { InstallCompanion(); });
 
             _miToolsGroup.DropDownItems.Add(_miProjects);
@@ -1063,7 +1079,7 @@ namespace ClaudeUsageWidget
                 foreach (string name in saved)
                 {
                     string profName = name;
-                    _miProfiles.DropDownItems.Add(new ToolStripMenuItem(profName, null, delegate
+                    _miProfiles.DropDownItems.Add(new ToolStripMenuItem(MenuText(profName), null, delegate
                     {
                         AppConfig loaded = _cfg.LoadNamedProfile(profName);
                         if (loaded != null) ApplyLoadedProfile(profName, loaded);
@@ -1080,7 +1096,7 @@ namespace ClaudeUsageWidget
                 foreach (string name in saved)
                 {
                     string profName = name;
-                    delMenu.DropDownItems.Add(new ToolStripMenuItem(profName, null, delegate
+                    delMenu.DropDownItems.Add(new ToolStripMenuItem(MenuText(profName), null, delegate
                     {
                         AppConfig.DeleteNamedProfileInDir(profName, Paths.ProfilesDir);
                         PopulateProfilesMenu();
@@ -1104,6 +1120,7 @@ namespace ClaudeUsageWidget
         private void PromptSaveProfile()
         {
             using (Form dlg = new Form())
+            using (Font dlgFont = new Font("Segoe UI", 9f))
             {
                 dlg.Text = L.T("tray.profiles.prompt.title");
                 try { Icon ic = AppIcon.Get(); if (ic != null) dlg.Icon = ic; } catch { }
@@ -1111,17 +1128,27 @@ namespace ClaudeUsageWidget
                 dlg.MaximizeBox = false; dlg.MinimizeBox = false; dlg.ShowInTaskbar = false;
                 dlg.StartPosition = FormStartPosition.CenterScreen;
                 dlg.AutoScaleMode = AutoScaleMode.Dpi;
-                dlg.ClientSize = new Size(340, 125);
+                dlg.AutoScaleDimensions = new SizeF(96f, 96f);
+                dlg.AutoSize = true;
+                dlg.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                dlg.Padding = new Padding(14);
+                dlg.Font = dlgFont;
                 dlg.BackColor = Palette.Bg; dlg.ForeColor = Palette.Text;
                 DarkUi.TitleBar(dlg.Handle, !Palette.IsLight);
 
-                Label lbl = new Label { Text = L.T("tray.profiles.prompt.label"), AutoSize = true, Left = 14, Top = 14, ForeColor = Palette.Text };
-                TextBox tb = new TextBox { Left = 14, Top = 38, Width = 310, BackColor = Palette.Surface, ForeColor = Palette.Text, BorderStyle = BorderStyle.FixedSingle };
-                Button ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 80, Left = 158, Top = 78, FlatStyle = FlatStyle.Flat, BackColor = Palette.Accent, ForeColor = Color.White };
-                ok.FlatAppearance.BorderSize = 0;
-                Button cancel = new Button { Text = L.T("set.cancel"), DialogResult = DialogResult.Cancel, Width = 80, Left = 244, Top = 78, FlatStyle = FlatStyle.Flat, BackColor = Palette.Surface, ForeColor = Palette.Text };
+                TableLayoutPanel t = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, Margin = new Padding(0) };
+                t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                Label lbl = new Label { Text = L.T("tray.profiles.prompt.label"), AutoSize = true, UseMnemonic = false, ForeColor = Palette.Text, Margin = new Padding(0, 0, 0, 6) };
+                TextBox tb = new TextBox { Width = 310, BackColor = Palette.Surface, ForeColor = Palette.Text, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 0, 0, 12) };
+                FlowLayoutPanel btns = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, AutoSize = true, WrapContents = false, Dock = DockStyle.Fill, Margin = new Padding(0) };
+                Button cancel = new Button { Text = L.T("set.cancel"), DialogResult = DialogResult.Cancel, AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Palette.Surface, ForeColor = Palette.Text };
                 cancel.FlatAppearance.BorderColor = Palette.Border;
-                dlg.Controls.AddRange(new Control[] { lbl, tb, ok, cancel });
+                Button ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Palette.Accent, ForeColor = Color.White, Margin = new Padding(0, 0, 8, 0) };
+                ok.FlatAppearance.BorderSize = 0;
+                btns.Controls.Add(cancel);
+                btns.Controls.Add(ok);
+                t.Controls.Add(lbl); t.Controls.Add(tb); t.Controls.Add(btns);
+                dlg.Controls.Add(t);
                 dlg.AcceptButton = ok; dlg.CancelButton = cancel;
                 if (dlg.ShowDialog() != DialogResult.OK) return;
 
@@ -1157,7 +1184,15 @@ namespace ClaudeUsageWidget
             _cfg.DockTop = true;
             _cfg.DockEdge = edge;
             _cfg.DockMonitor = monitorDevice;
+            if (!_cfg.ShowFloating)
+            {
+                _cfg.ShowFloating = true;
+                _miShow.Checked = true;
+                _hiddenByFs = false;
+                ApplyVisibility();
+            }
             _float.SnapTo(edge, monitorDevice);
+            ApplyTopMost(true);
             _cfg.DockCenterX = _float.DockCenterX;
             _cfg.DockCenterY = _float.DockCenterY;
             _cfg.HasDockX = true;
@@ -1171,16 +1206,26 @@ namespace ClaudeUsageWidget
 
         private void InstallCompanion()
         {
-            string paths;
-            string error;
-            if (CompanionInstaller.Install(out paths, out error))
+            if (_companionBusy) return;
+            _companionBusy = true;
+            if (_miCompanion != null) _miCompanion.Enabled = false;
+            Task.Run(delegate
             {
-                MessageBox.Show(L.T("companion.success", paths), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            else
-            {
-                MessageBox.Show(L.T("companion.fail", error), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+                string paths = null, error = null;
+                bool ok = false;
+                try { ok = CompanionInstaller.Install(out paths, out error); }
+                catch (Exception ex) { error = ex.Message; }
+                PostUi(delegate
+                {
+                    _companionBusy = false;
+                    if (_miCompanion != null && !_exiting) _miCompanion.Enabled = true;
+                    if (_disposed) return;
+                    if (ok)
+                        MessageBox.Show(L.T("companion.success", paths), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    else
+                        MessageBox.Show(L.T("companion.fail", error), L.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                });
+            });
         }
 
         /// <summary>Pilihan user (ShowFloating) terpisah dari sembunyi otomatis saat layar penuh.
@@ -1428,6 +1473,7 @@ namespace ClaudeUsageWidget
                 };
                 cb.Apply = delegate
                 {
+                    _settingsAppliedInDialog = true;
                     ApplyConfigChanges(_settingsOldEdge, _settingsOldMonitor);
                     _settingsOldEdge = _cfg.DockEdge;
                     _settingsOldMonitor = _cfg.DockMonitor;
@@ -1446,10 +1492,11 @@ namespace ClaudeUsageWidget
             }
             _settingsOldEdge = _cfg.DockEdge;
             _settingsOldMonitor = _cfg.DockMonitor;
+            _settingsAppliedInDialog = false;
             SettingsForm f = EnsureSettingsForm();
             f.PrepareForOpen();
             if (f.ShowDialog() != DialogResult.OK) return;
-            ApplyConfigChanges(_settingsOldEdge, _settingsOldMonitor);
+            if (!_settingsAppliedInDialog) ApplyConfigChanges(_settingsOldEdge, _settingsOldMonitor);
         }
 
         private void ShowWizard()
@@ -1469,106 +1516,85 @@ namespace ClaudeUsageWidget
             {
                 string repoUrl = "https://github.com/" + AutoUpdater.DefaultRepo;
                 using (Form dlg = new Form())
+                using (Font dlgFont = new Font("Segoe UI", 9f))
+                using (Font titleFont = new Font("Segoe UI", 12f, FontStyle.Bold))
                 {
-                    dlg.Text = L.T("about.title");
-                    try { Icon ic = AppIcon.Get(); if (ic != null) dlg.Icon = ic; } catch { }
-                    dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-                    dlg.MaximizeBox = false;
-                    dlg.MinimizeBox = false;
-                    dlg.ShowInTaskbar = false;
-                    dlg.StartPosition = FormStartPosition.CenterScreen;
-                    dlg.AutoScaleMode = AutoScaleMode.Dpi;
-                    dlg.ClientSize = new Size(430, 235);
-                    dlg.BackColor = Palette.Bg;
-                    dlg.ForeColor = Palette.Text;
-                    dlg.Font = new Font("Segoe UI", 9f);
-                    DarkUi.TitleBar(dlg.Handle, !Palette.IsLight);
-
-                    PictureBox pic = new PictureBox();
-                    pic.Size = new Size(42, 42);
-                    pic.Location = new Point(20, 20);
-                    pic.SizeMode = PictureBoxSizeMode.StretchImage;
-                    try { Icon ic = AppIcon.Get(); if (ic != null) pic.Image = ic.ToBitmap(); } catch { }
-                    dlg.Controls.Add(pic);
-
-                    Label title = new Label();
-                    title.Text = L.AppFullName;
-                    title.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
-                    title.ForeColor = Palette.Text;
-                    title.AutoSize = true;
-                    title.Location = new Point(74, 18);
-                    dlg.Controls.Add(title);
-
-                    Label ver = new Label();
-                    ver.Text = L.T("about.version", AutoUpdater.CurrentVersionStr);
-                    ver.ForeColor = Palette.Accent;
-                    ver.AutoSize = true;
-                    ver.Location = new Point(74, 44);
-                    dlg.Controls.Add(ver);
-
-                    Label desc = new Label();
-                    desc.Text = L.T("about.desc");
-                    desc.UseMnemonic = false;
-                    desc.ForeColor = Palette.Dim;
-                    desc.Location = new Point(20, 76);
-                    desc.Size = new Size(390, 48);
-                    dlg.Controls.Add(desc);
-
-                    Label repoLbl = new Label();
-                    repoLbl.Text = L.T("about.repo");
-                    repoLbl.ForeColor = Palette.Dim;
-                    repoLbl.AutoSize = true;
-                    repoLbl.Location = new Point(20, 134);
-                    dlg.Controls.Add(repoLbl);
-
-                    LinkLabel link = new LinkLabel();
-                    link.Text = repoUrl;
-                    link.AutoSize = true;
-                    link.Location = new Point(20, 152);
-                    link.LinkColor = Palette.Accent;
-                    link.ActiveLinkColor = Palette.Text;
-                    link.VisitedLinkColor = Palette.Accent;
-                    link.LinkClicked += delegate
+                    Bitmap logoBmp = null;
+                    try
                     {
-                        if (AutoUpdater.IsTrustedUpdateUrl(repoUrl))
+                        dlg.Text = L.T("about.title");
+                        try { Icon ic = AppIcon.Get(); if (ic != null) { dlg.Icon = ic; logoBmp = ic.ToBitmap(); } } catch { }
+                        dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                        dlg.MaximizeBox = false;
+                        dlg.MinimizeBox = false;
+                        dlg.ShowInTaskbar = false;
+                        dlg.StartPosition = FormStartPosition.CenterScreen;
+                        dlg.AutoScaleMode = AutoScaleMode.Dpi;
+                        dlg.AutoScaleDimensions = new SizeF(96f, 96f);
+                        dlg.AutoSize = true;
+                        dlg.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                        dlg.Padding = new Padding(18);
+                        dlg.BackColor = Palette.Bg;
+                        dlg.ForeColor = Palette.Text;
+                        dlg.Font = dlgFont;
+                        DarkUi.TitleBar(dlg.Handle, !Palette.IsLight);
+
+                        TableLayoutPanel root = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, Margin = new Padding(0) };
+                        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+                        FlowLayoutPanel head = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 12) };
+                        PictureBox pic = new PictureBox { Size = new Size(42, 42), SizeMode = PictureBoxSizeMode.StretchImage, Margin = new Padding(0, 0, 12, 0), Image = logoBmp };
+                        TableLayoutPanel headTxt = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0) };
+                        Label title = new Label { Text = L.AppFullName, Font = titleFont, ForeColor = Palette.Text, AutoSize = true, UseMnemonic = false, Margin = new Padding(0, 0, 0, 2) };
+                        Label ver = new Label { Text = L.T("about.version", AutoUpdater.CurrentVersionStr), ForeColor = Palette.Accent, AutoSize = true, UseMnemonic = false, Margin = new Padding(0) };
+                        headTxt.Controls.Add(title); headTxt.Controls.Add(ver);
+                        head.Controls.Add(pic); head.Controls.Add(headTxt);
+                        root.Controls.Add(head);
+
+                        Label desc = new Label { Text = L.T("about.desc"), UseMnemonic = false, ForeColor = Palette.Dim, AutoSize = true, MaximumSize = new Size(390, 0), Margin = new Padding(0, 0, 0, 12) };
+                        root.Controls.Add(desc);
+
+                        Label repoLbl = new Label { Text = L.T("about.repo"), UseMnemonic = false, ForeColor = Palette.Dim, AutoSize = true, Margin = new Padding(0, 0, 0, 2) };
+                        root.Controls.Add(repoLbl);
+
+                        LinkLabel link = new LinkLabel { Text = repoUrl, AutoSize = true, Margin = new Padding(0, 0, 0, 16), LinkColor = Palette.Accent, ActiveLinkColor = Palette.Text, VisitedLinkColor = Palette.Accent };
+                        link.LinkClicked += delegate
                         {
-                            try { Process.Start(new ProcessStartInfo(repoUrl) { UseShellExecute = true }); } catch { }
-                        }
-                    };
-                    dlg.Controls.Add(link);
+                            if (AutoUpdater.IsTrustedUpdateUrl(repoUrl))
+                            {
+                                try { Process.Start(new ProcessStartInfo(repoUrl) { UseShellExecute = true }); } catch { }
+                            }
+                        };
+                        root.Controls.Add(link);
 
-                    Button btnUpdate = new Button();
-                    btnUpdate.Text = L.T("tray.update").Replace("...", "");
-                    btnUpdate.AutoSize = true;
-                    btnUpdate.Location = new Point(20, 190);
-                    btnUpdate.Click += delegate { dlg.Close(); CheckForUpdates(true); };
+                        FlowLayoutPanel btns = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+                        Button btnUpdate = new Button { Text = L.T("tray.update").Replace("...", ""), AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+                        btnUpdate.Click += delegate { dlg.Close(); CheckForUpdates(true); };
 
-                    Button btnCopy = new Button();
-                    btnCopy.Text = L.T("about.copy");
-                    btnCopy.AutoSize = true;
-                    btnCopy.Location = new Point(170, 190);
-                    btnCopy.Click += delegate
+                        Button btnCopy = new Button { Text = L.T("about.copy"), AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+                        btnCopy.Click += delegate
+                        {
+                            try
+                            {
+                                Clipboard.SetText(L.AppFullName + " v" + AutoUpdater.CurrentVersionStr + " (" + repoUrl + ")");
+                                ShowBalloon(L.T("about.copied"), ToolTipIcon.Info);
+                            }
+                            catch { }
+                        };
+
+                        Button btnClose = new Button { Text = L.T("about.close"), AutoSize = true, DialogResult = DialogResult.OK, Margin = new Padding(0) };
+                        btns.Controls.Add(btnUpdate); btns.Controls.Add(btnCopy); btns.Controls.Add(btnClose);
+                        root.Controls.Add(btns);
+
+                        dlg.Controls.Add(root);
+                        dlg.AcceptButton = btnClose;
+                        dlg.CancelButton = btnClose;
+                        dlg.ShowDialog();
+                    }
+                    finally
                     {
-                        try
-                        {
-                            Clipboard.SetText(L.AppFullName + " v" + AutoUpdater.CurrentVersionStr + " (" + repoUrl + ")");
-                            ShowBalloon(L.T("about.copied"), ToolTipIcon.Info);
-                        }
-                        catch { }
-                    };
-
-                    Button btnClose = new Button();
-                    btnClose.Text = L.T("about.close");
-                    btnClose.AutoSize = true;
-                    btnClose.DialogResult = DialogResult.OK;
-                    btnClose.Location = new Point(332, 190);
-
-                    dlg.Controls.Add(btnUpdate);
-                    dlg.Controls.Add(btnCopy);
-                    dlg.Controls.Add(btnClose);
-                    dlg.AcceptButton = btnClose;
-                    dlg.CancelButton = btnClose;
-                    dlg.ShowDialog();
+                        if (logoBmp != null) logoBmp.Dispose();
+                    }
                 }
             }
             catch (Exception ex)
@@ -2024,7 +2050,7 @@ namespace ClaudeUsageWidget
 
         private async void MaybeFetchOrg(bool force)
         {
-            if (!_cfg.AdminEnabled || _orgBusy) return;
+            if (_disposed || !_cfg.AdminEnabled || _orgBusy) return;
             if (!force && DateTime.Now < _orgNext) return;
             if (force && _org != null && (DateTime.Now - _org.FetchedAt).TotalMinutes < 5) return;   // jangan membanjiri API
             _orgBusy = true;
@@ -2032,45 +2058,58 @@ namespace ClaudeUsageWidget
             {
                 string key = _cfg.GetAdminKey();
                 _org = await AdminApi.FetchMonthCost(key, _cfg.AdminApiKeyIds, _cfg.AdminWorkspaceIds);
+                if (_disposed) return;
                 if (!_org.Ok) Log.Write("adminapi: " + _org.Error);
             }
             catch (Exception ex) { Log.Write("adminapi", ex); }
             finally { _orgBusy = false; _orgNext = DateTime.Now.AddHours(1); }
-            Refresh();
+            if (!_disposed) Refresh();
         }
 
         private async void MaybeFetchGoogleRate(bool force)
         {
-            if (!_cfg.CurrencyCustomEnabled || !GoogleRateFetcher.ShouldRefresh(force)) return;
-            string cur = GoogleRateFetcher.NormalizeCurrencyCode(_cfg.CurrencySymbol);
-            double rate = await GoogleRateFetcher.FetchRateAsync(cur);
-            double minValid = cur == "IDR" ? 5000.0 : 0.01;
-            if (rate > minValid)
+            if (_disposed || !_cfg.CurrencyCustomEnabled || !GoogleRateFetcher.ShouldRefresh(force)) return;
+            try
             {
-                _cfg.CurrencyRate = Math.Round(rate, cur == "IDR" ? 2 : 4);
-                Opts.CurrencyRate = _cfg.CurrencyRate;
-                _cfg.Save();
-                Refresh();
+                string cur = GoogleRateFetcher.NormalizeCurrencyCode(_cfg.CurrencySymbol);
+                double rate = await GoogleRateFetcher.FetchRateAsync(cur);
+                if (_disposed) return;
+                double minValid = cur == "IDR" ? 5000.0 : 0.01;
+                if (rate > minValid)
+                {
+                    _cfg.CurrencyRate = Math.Round(rate, cur == "IDR" ? 2 : 4);
+                    Opts.CurrencyRate = _cfg.CurrencyRate;
+                    _cfg.Save();
+                    Refresh();
+                }
             }
+            catch (Exception ex) { Log.Write("rate.google", ex); }
         }
 
         private async void MaybeFetchOfficialPricing(bool force)
         {
+            if (_disposed) return;
             if (force || OfficialPricingFetcher.ShouldAutoRefresh())
             {
-                int count = await OfficialPricingFetcher.FetchAndSaveAsync();
-                if (count > 0)
+                try
                 {
-                    _pricing = Pricing.Load();
-                    _scanner.ResetWithPricing(_pricing);
-                    RequestScan();
+                    int count = await OfficialPricingFetcher.FetchAndSaveAsync();
+                    if (_disposed) return;
+                    if (count > 0)
+                    {
+                        _pricing = Pricing.Load();
+                        _scanner.ResetWithPricing(_pricing);
+                        RequestScan();
+                    }
                 }
+                catch (Exception ex) { Log.Write("pricing.official", ex); }
             }
         }
 
         private DateTime _lastOllamaCheck = DateTime.MinValue;
         private async void MaybeCheckOllama(bool force)
         {
+            if (_disposed) return;
             if (!_cfg.OllamaEnabled)
             {
                 if (OllamaProbe.Current != null && OllamaProbe.Current.Online)
@@ -2090,6 +2129,7 @@ namespace ClaudeUsageWidget
             try
             {
                 OllamaStatus cur = await OllamaProbe.CheckAsync(_cfg.OllamaPort);
+                if (_disposed) return;
                 if (cur != null && (force || cur.Online != wasOnline || cur.ModelCount != wasCount ||
                                     cur.LoadedCount != wasLoaded || cur.TotalVramBytes != wasVram))
                     Refresh();
@@ -2122,9 +2162,10 @@ namespace ClaudeUsageWidget
 
         private void Refresh()
         {
+            if (_disposed) return;
             ViewModel vm = BuildVm();
             _float.SetData(vm);
-            if (_popup != null && _popup.Visible) { _popup.SetData(vm); PositionPopup(); }
+            if (_popup != null && !_popup.IsDisposed && _popup.Visible) { _popup.SetData(vm); PositionPopup(); }
             UpdateTrayIcon();
             StatusExporter.Export(_usage, _limits, vm);
         }
@@ -2235,17 +2276,12 @@ namespace ClaudeUsageWidget
 
             AutoUpdater.CheckForUpdatesAsync(delegate(ReleaseInfo rel)
             {
-                if (_float != null && _float.IsHandleCreated)
+                PostUi(delegate
                 {
-                    try
-                    {
-                        _float.BeginInvoke(new Action(delegate { _updateCheckBusy = false; HandleUpdateResult(rel, manual); }));
-                        return;
-                    }
-                    catch { }
-                }
-                _updateCheckBusy = false;
-                HandleUpdateResult(rel, manual);
+                    _updateCheckBusy = false;
+                    if (_disposed) return;
+                    HandleUpdateResult(rel, manual);
+                });
             });
         }
 
@@ -2310,16 +2346,8 @@ namespace ClaudeUsageWidget
                     });
                     if (ok)
                     {
-                        try
-                        {
-                            if (_tray != null)
-                            {
-                                _tray.Visible = false;
-                                _tray.Dispose();
-                            }
-                        }
-                        catch { }
-                        Environment.Exit(0);
+                        PostUi(delegate { ExitThread(); });
+                        return;
                     }
                     _updateApplying = false;
                 }
@@ -2327,24 +2355,17 @@ namespace ClaudeUsageWidget
                 {
                     _updateApplying = false;
                     Log.Write("update.apply", ex);
-                    if (_float != null && _float.IsHandleCreated)
+                    PostUi(delegate
                     {
-                        try
+                        if (_disposed) return;
+                        DialogResult dr = MessageBox.Show(
+                            L.T("update.failed", ex.Message),
+                            L.T("update.title"), MessageBoxButtons.YesNo, MessageBoxIcon.Error);
+                        if (dr == DialogResult.Yes && AutoUpdater.IsTrustedUpdateUrl(rel.HtmlUrl))
                         {
-                            _float.BeginInvoke(new Action(delegate
-                            {
-                                DialogResult dr = MessageBox.Show(
-                                    L.T("update.failed", ex.Message),
-                                    L.T("update.title"), MessageBoxButtons.YesNo, MessageBoxIcon.Error);
-                                if (dr == DialogResult.Yes && AutoUpdater.IsTrustedUpdateUrl(rel.HtmlUrl))
-                                {
-                                    try { Process.Start(new ProcessStartInfo(rel.HtmlUrl) { UseShellExecute = true }); } catch { }
-                                }
-                            }));
-                            return;
+                            try { Process.Start(new ProcessStartInfo(rel.HtmlUrl) { UseShellExecute = true }); } catch { }
                         }
-                        catch { }
-                    }
+                    });
                 }
             });
         }
@@ -2360,11 +2381,16 @@ namespace ClaudeUsageWidget
 
         protected override void ExitThreadCore()
         {
+            if (_exiting) return;
+            _exiting = true;
             try
             {
                 _disposed = true;
-                if (_float.Visible) SavePosition();
-                _tick.Stop(); _debounce.Stop(); _fsTimer.Stop();
+                if (_float != null && !_float.IsDisposed && _float.Visible) SavePosition();
+                _tick.Stop(); _tick.Dispose();
+                _debounce.Stop(); _debounce.Dispose();
+                _fsTimer.Stop(); _fsTimer.Dispose();
+                if (_updateTimer != null) { _updateTimer.Stop(); _updateTimer.Dispose(); _updateTimer = null; }
                 if (_prewarmTimer != null) { _prewarmTimer.Stop(); _prewarmTimer.Dispose(); _prewarmTimer = null; }
                 if (_settingsForm != null && !_settingsForm.IsDisposed) { _settingsForm.Dispose(); _settingsForm = null; }
                 if (_popup != null && !_popup.IsDisposed) { _popup.Dispose(); _popup = null; }
@@ -2375,12 +2401,13 @@ namespace ClaudeUsageWidget
                 if (_codexWatcher != null) _codexWatcher.Dispose();
                 if (_gemCliWatcher != null) _gemCliWatcher.Dispose();
                 if (_hooksWatcher != null) _hooksWatcher.Dispose();
-                if (_sessionJumpMenu != null) _sessionJumpMenu.Dispose();
+                if (_sessionJumpMenu != null) { _sessionJumpMenu.Dispose(); _sessionJumpMenu = null; }
                 _tray.Visible = false;
                 _tray.Dispose();
+                if (_menu != null) _menu.Dispose();
                 if (_icon != null) _icon.Dispose();
-                if (_iconHandle != IntPtr.Zero) DestroyIcon(_iconHandle);
-                _float.Close();
+                if (_iconHandle != IntPtr.Zero) { DestroyIcon(_iconHandle); _iconHandle = IntPtr.Zero; }
+                if (_float != null && !_float.IsDisposed) _float.Close();
             }
             catch { }
             base.ExitThreadCore();

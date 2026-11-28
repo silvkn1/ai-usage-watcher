@@ -13,8 +13,11 @@ $ErrorActionPreference = 'Continue'
 $appDir = Join-Path $env:LOCALAPPDATA 'AIUsageWatcher'
 $legacyAppDir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageWidget'
 
-Get-Process AIUsageWatcher, ClaudeUsageWidget -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 500
+$procs = Get-Process AIUsageWatcher, ClaudeUsageWidget -ErrorAction SilentlyContinue
+if ($procs) {
+    $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+    $procs | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+}
 
 # Statusline: lepas hanya bila memang terpasang (ada chain file atau perintah wrapper kita).
 $claudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
@@ -47,21 +50,52 @@ if (Test-Path $legacyInstallDir) {
     Remove-Item $legacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($extParent in @(
-    (Join-Path $env:USERPROFILE '.vscode\extensions'),
-    (Join-Path $env:USERPROFILE '.cursor\extensions'),
-    (Join-Path $env:USERPROFILE '.antigravity\extensions'),
-    (Join-Path $env:USERPROFILE '.windsurf\extensions'))) {
-    $extDir = Join-Path $extParent 'ai-usage-watcher'
-    if (Test-Path $extDir) {
-        Remove-Item $extDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "Ekstensi editor dihapus: $extDir"
+foreach ($extEntry in @(
+    @{ Root = (Join-Path $env:USERPROFILE '.vscode\extensions'); Cli = @((Join-Path $env:LOCALAPPDATA 'Programs\Microsoft VS Code\bin\code.cmd'), (Join-Path $env:ProgramFiles 'Microsoft VS Code\bin\code.cmd')) },
+    @{ Root = (Join-Path $env:USERPROFILE '.cursor\extensions'); Cli = @((Join-Path $env:LOCALAPPDATA 'Programs\cursor\resources\app\bin\cursor.cmd')) },
+    @{ Root = (Join-Path $env:USERPROFILE '.antigravity\extensions'); Cli = @((Join-Path $env:LOCALAPPDATA 'Programs\Antigravity\bin\antigravity.cmd')) },
+    @{ Root = (Join-Path $env:USERPROFILE '.windsurf\extensions'); Cli = @((Join-Path $env:LOCALAPPDATA 'Programs\Windsurf\bin\windsurf.cmd')) })) {
+    $extParent = $extEntry.Root
+    $cli = $extEntry.Cli | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($cli) {
+        try { & $cli --uninstall-extension silvkn1.ai-usage-watcher 2>$null | Out-Null } catch {}
+    }
+    if (Test-Path $extParent) {
+        foreach ($cand in @(Get-ChildItem $extParent -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'ai-usage-watcher' -or $_.Name -like 'silvkn1.ai-usage-watcher-*' })) {
+            Remove-Item $cand.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "Ekstensi editor dihapus: $($cand.FullName)"
+        }
+        $extJson = Join-Path $extParent 'extensions.json'
+        if (Test-Path $extJson) {
+            try {
+                $arr = Get-Content $extJson -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($arr -is [System.Array]) {
+                    $filtered = @($arr | Where-Object {
+                        $idVal = if ($_.identifier) { $_.identifier.id } else { $null }
+                        $idVal -ne 'silvkn1.ai-usage-watcher' -and $_.relativeLocation -ne 'ai-usage-watcher' -and $_.relativeLocation -notlike 'silvkn1.ai-usage-watcher-*'
+                    })
+                    if ($filtered.Count -ne $arr.Count) {
+                        $outJson = ConvertTo-Json -InputObject $filtered -Depth 10 -Compress
+                        if (-not $outJson.StartsWith('[')) { $outJson = '[' + $outJson + ']' }
+                        [IO.File]::WriteAllText($extJson, $outJson, [Text.UTF8Encoding]::new($false))
+                    }
+                }
+            } catch {}
+        }
     }
 }
 
 if ($RemoveData) {
-    if (Test-Path $appDir) { Remove-Item $appDir -Recurse -Force; Write-Host "Data dihapus: $appDir" }
-    if (Test-Path $legacyAppDir) { Remove-Item $legacyAppDir -Recurse -Force; Write-Host "Data legacy dihapus: $legacyAppDir" }
+    if (Test-Path $appDir) {
+        Remove-Item $appDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $appDir) { Write-Warning "Sebagian data masih terkunci di: $appDir" }
+        else { Write-Host "Data dihapus: $appDir" }
+    }
+    if (Test-Path $legacyAppDir) {
+        Remove-Item $legacyAppDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $legacyAppDir) { Write-Warning "Sebagian data legacy masih terkunci di: $legacyAppDir" }
+        else { Write-Host "Data legacy dihapus: $legacyAppDir" }
+    }
 } elseif ((Test-Path $appDir) -or (Test-Path $legacyAppDir)) {
     Write-Host "Data dipertahankan (pakai -RemoveData untuk menghapus)"
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 using System.Windows.Forms;
 using ClaudeUsageWidget;
@@ -3214,9 +3215,15 @@ namespace Tests
                 string fakeMp3 = Path.Combine(profDir, "beep.mp3");
                 File.WriteAllBytes(fakeMp3, new byte[64]);
                 Assert.False(AudioAlert.IsValidWavFile(fakeMp3), "Non-WAV file must be rejected");
+                string badWav = Path.Combine(profDir, "bad.wav");
+                File.WriteAllBytes(badWav, new byte[64]);
+                Assert.False(AudioAlert.IsValidWavFile(badWav), "Garbage .wav without RIFF/WAVE header must be rejected");
                 string goodWav = Path.Combine(profDir, "ok.wav");
-                File.WriteAllBytes(goodWav, new byte[64]);
-                Assert.True(AudioAlert.IsValidWavFile(goodWav), "Valid sized .wav file must pass");
+                byte[] wavBytes = new byte[64];
+                wavBytes[0] = (byte)'R'; wavBytes[1] = (byte)'I'; wavBytes[2] = (byte)'F'; wavBytes[3] = (byte)'F';
+                wavBytes[8] = (byte)'W'; wavBytes[9] = (byte)'A'; wavBytes[10] = (byte)'V'; wavBytes[11] = (byte)'E';
+                File.WriteAllBytes(goodWav, wavBytes);
+                Assert.True(AudioAlert.IsValidWavFile(goodWav), "Valid sized .wav file with RIFF/WAVE header must pass");
             }
             finally
             {
@@ -3440,6 +3447,458 @@ namespace Tests
             finally
             {
                 try { Directory.Delete(tmp, true); } catch { }
+            }
+        }
+
+        public static void Test_Companion_Vsix_And_ExtensionsJson()
+        {
+            string pkgJson = File.ReadAllText(Path.Combine("companion", "vscode-status-bar", "package.json"));
+            string extJs = File.ReadAllText(Path.Combine("companion", "vscode-status-bar", "extension.js"));
+            string readmeMd = File.ReadAllText(Path.Combine("companion", "vscode-status-bar", "README.md"));
+            byte[] iconPng = File.ReadAllBytes(Path.Combine("companion", "vscode-status-bar", "icon.png"));
+
+            byte[] vsix = CompanionInstaller.BuildVsix(pkgJson, extJs, readmeMd, iconPng);
+            Assert.True(vsix != null && vsix.Length > 200, "VSIX bytes must be non-empty");
+            using (MemoryStream ms = new MemoryStream(vsix))
+            using (ZipArchive zip = new ZipArchive(ms, ZipArchiveMode.Read))
+            {
+                ZipArchiveEntry ctEntry = zip.GetEntry("[Content_Types].xml");
+                Assert.NotNull(ctEntry, "VSIX must include [Content_Types].xml");
+                using (StreamReader cr = new StreamReader(ctEntry.Open()))
+                {
+                    Assert.True(cr.ReadToEnd().Contains("image/png"), "[Content_Types].xml must declare image/png");
+                }
+                ZipArchiveEntry manEntry = zip.GetEntry("extension.vsixmanifest");
+                Assert.NotNull(manEntry, "VSIX must include extension.vsixmanifest");
+                Assert.NotNull(zip.GetEntry("extension/package.json"), "VSIX must include extension/package.json");
+                Assert.NotNull(zip.GetEntry("extension/extension.js"), "VSIX must include extension/extension.js");
+                Assert.NotNull(zip.GetEntry("extension/README.md"), "VSIX must include extension/README.md");
+                Assert.NotNull(zip.GetEntry("extension/icon.png"), "VSIX must include extension/icon.png");
+                using (StreamReader sr = new StreamReader(manEntry.Open()))
+                {
+                    string manifest = sr.ReadToEnd();
+                    Assert.True(manifest.Contains("Microsoft.VisualStudio.Code"), "VSIX manifest must target VS Code");
+                    Assert.True(manifest.Contains("Publisher=\"silvkn1\""), "VSIX manifest must include publisher");
+                    Assert.True(manifest.Contains("Microsoft.VisualStudio.Services.Content.Details"), "VSIX manifest must register README.md asset");
+                    Assert.True(manifest.Contains("Microsoft.VisualStudio.Services.Icons.Default"), "VSIX manifest must register icon.png asset");
+                }
+            }
+
+            string root = Path.Combine(Path.GetTempPath(), "cuw_vsix_root_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(root);
+                string legacyDir = Path.Combine(root, "ai-usage-watcher");
+                Directory.CreateDirectory(legacyDir);
+                File.WriteAllText(Path.Combine(legacyDir, "package.json"), "{}");
+
+                string ejPath = Path.Combine(root, "extensions.json");
+                string existingEj = "[{\"identifier\":{\"id\":\"other.ext\"},\"version\":\"1.0.0\",\"relativeLocation\":\"other.ext-1.0.0\"},{\"identifier\":{\"id\":\"silvkn1.ai-usage-watcher\"},\"version\":\"1.0.0\",\"relativeLocation\":\"ai-usage-watcher\"}]";
+                File.WriteAllText(ejPath, existingEj);
+
+                bool reg = CompanionInstaller.InstallRootUnpacked(root, pkgJson, extJs, readmeMd, iconPng);
+                Assert.True(reg, "InstallRootUnpacked must register extension in extensions.json");
+                Assert.False(Directory.Exists(legacyDir), "Legacy unregistered ai-usage-watcher folder must be removed");
+
+                string[] dirs = Directory.GetDirectories(root, "silvkn1.ai-usage-watcher-*");
+                Assert.Equal(1, dirs.Length, "Versioned folder silvkn1.ai-usage-watcher-<ver> must exist");
+                Assert.True(File.Exists(Path.Combine(dirs[0], "extension.js")), "extension.js must exist inside versioned folder");
+                Assert.True(File.Exists(Path.Combine(dirs[0], "README.md")), "README.md must exist inside versioned folder");
+                Assert.True(File.Exists(Path.Combine(dirs[0], "icon.png")), "icon.png must exist inside versioned folder");
+
+                string updatedEj = File.ReadAllText(ejPath);
+                Assert.True(updatedEj.Contains("other.ext"), "Pre-existing extensions in extensions.json must be preserved");
+                Assert.True(updatedEj.Contains("silvkn1.ai-usage-watcher"), "New extension id must be registered in extensions.json");
+                Assert.False(updatedEj.Contains("\"relativeLocation\":\"ai-usage-watcher\""), "Legacy relativeLocation entry must be replaced");
+
+                File.WriteAllText(Path.Combine(dirs[0], "extension.js"), "// stale");
+                CompanionInstaller.SyncInRoots(new[] { root }, pkgJson, extJs, readmeMd, iconPng);
+                Assert.True(File.ReadAllText(Path.Combine(dirs[0], "extension.js")).Contains("createStatusBarItem"), "SyncInRoots must refresh versioned folder");
+            }
+            finally
+            {
+                try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
+            }
+        }
+
+        public static void Test_Audit_Cycle1_Process_Atomic_And_Mirror()
+        {
+            Assert.False(ProcessHelper.IsSafeSearchDir("//attacker/share"), "Must reject forward-slash UNC PATH");
+            Assert.False(ProcessHelper.IsSafeSearchDir(@"\\attacker\share"), "Must reject backslash UNC PATH");
+            Assert.False(ProcessHelper.IsSafeSearchDir(@"\relative"), "Must reject root-relative PATH");
+            Assert.False(ProcessHelper.IsSafeSearchDir(@"C:rel"), "Must reject drive-relative PATH");
+            Assert.False(ProcessHelper.IsSafeSearchDir("."), "Must reject dot PATH");
+            Assert.True(ProcessHelper.IsSafeSearchDir("\"" + @"C:\Program Files\Git\bin" + "\""), "Must accept quoted absolute drive path");
+
+            Assert.True(ProcessHelper.HasCmdMeta(@"C:\a\b%TEMP%\x.cmd"), "Must detect percent expansion");
+            Assert.True(ProcessHelper.HasCmdMeta("C:\\a\\\"b.cmd"), "Must detect double quote");
+            Assert.False(ProcessHelper.HasCmdMeta(@"C:\Program Files\Microsoft VS Code\bin\code.cmd"), "Valid path must pass HasCmdMeta");
+
+            Assert.Equal(DateTime.MinValue, Fmt.FromUnix(double.NaN), "NaN unix timestamp must map to MinValue");
+            Assert.Equal(DateTime.MinValue, Fmt.FromUnix(double.PositiveInfinity), "Infinity unix timestamp must map to MinValue");
+            Assert.Equal(L.T("time.now"), Fmt.Runway(double.NaN), "NaN runway must not overflow");
+
+            // Mirror must skip "rate_limits": inside JSON string values and update root key cleanly
+            string dir = Path.Combine(Path.GetTempPath(), "cuw_c1_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string mirrorPath = Path.Combine(dir, "status.json");
+                string orig = "{\"note\":\"ignored \\\"rate_limits\\\":123\",\"rate_limits\" : {\"five_hour\":{\"used_percentage\":5}}}";
+                AtomicFile.Write(mirrorPath, orig);
+                string merr = Mirror.Write(mirrorPath, "{\"five_hour\":{\"used_percentage\":42}}");
+                Assert.True(merr == null, "Mirror.Write should succeed: " + merr);
+                string written = Paths.ReadAllTextShared(mirrorPath);
+                Assert.True(written.Contains("ignored \\\"rate_limits\\\":123"), "Quoted rate_limits text must stay untouched");
+                Dictionary<string, object> parsed = J.Parse(written);
+                Assert.Equal(42.0, J.Num(J.Obj(J.Obj(parsed, "rate_limits"), "five_hour"), "used_percentage"));
+
+                // New version must not be downgraded by SyncInRoots
+                string root = Path.Combine(dir, "extroot");
+                string newer = Path.Combine(root, "silvkn1.ai-usage-watcher-9.9.9");
+                Directory.CreateDirectory(newer);
+                File.WriteAllText(Path.Combine(newer, "extension.js"), "// newer");
+                CompanionInstaller.SyncInRoots(new[] { root }, "{\"publisher\":\"silvkn1\",\"name\":\"ai-usage-watcher\",\"version\":\"1.2.1\"}", "// old", null, null);
+                Assert.Equal("// newer", File.ReadAllText(Path.Combine(newer, "extension.js")), "SyncInRoots must preserve newer installed version");
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch { }
+            }
+        }
+
+        public static void Test_Audit_Cycle2_Webhook_Hooks_And_Sources()
+        {
+            Uri u; string err;
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://localhost./hook", out u, out err), "Trailing dot localhost must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://[::127.0.0.1]/hook", out u, out err), "IPv4-compatible ::/96 IPv6 must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://[64:ff9b::10.0.0.1]/hook", out u, out err), "NAT64 64:ff9b::/96 IPv6 must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://[2002:7f00:0001::]/hook", out u, out err), "6to4 2002::/16 IPv6 must be rejected");
+            Assert.False(WebhookSender.IsSafeWebhookUrl("https://[2001::1]/hook", out u, out err), "Teredo 2001::/32 IPv6 must be rejected");
+
+            Dictionary<string, object> pj = new Dictionary<string, object>();
+            pj["badFloat"] = double.NaN;
+            pj["ok"] = 1.5;
+            string written = PrettyJson.Write(pj);
+            Dictionary<string, object> pjBack = J.Parse(written);
+            Assert.NotNull(pjBack, "PrettyJson with NaN must produce valid JSON");
+            Assert.False(written.Contains("NaN"), "NaN must serialize as null, not NaN literal");
+
+            Assert.True(HookInstaller.Install("") != null, "HookInstaller must reject empty exePath");
+
+            NotifyEvents.Write("stop\"bad", 12, 1700000000L, "sid\"x");
+            Dictionary<string, object> taken = NotifyEvents.TryTake();
+            Assert.NotNull(taken, "NotifyEvents.TryTake must claim and parse serialized event");
+            Assert.Equal("stop\"bad", J.Str(taken, "kind"));
+            Assert.Equal("sid\"x", J.Str(taken, "sid"));
+            Assert.True(NotifyEvents.TryTake() == null, "Second TryTake must return null after atomic claim");
+        }
+
+        public static void Test_Audit_Cycle3_Logic_Cache_And_Config()
+        {
+            // 1. DigestScheduler New Year ISO week-year
+            Assert.Equal("2022-W52", DigestScheduler.ComputePeriodKey("weekly", new DateTime(2023, 1, 1)),
+                "2023-01-01 Sunday belongs to ISO week 2022-W52");
+            Assert.Equal("2025-W01", DigestScheduler.ComputePeriodKey("weekly", new DateTime(2024, 12, 30)),
+                "2024-12-30 Monday belongs to ISO week 2025-W01");
+
+            // 2. AlertEngine per-window late-provider baseline must not fire stale alert
+            AlertEngine ae = new AlertEngine();
+            int[] th = new[] { 80, 95 };
+            RateLimitSnapshot s1 = new RateLimitSnapshot
+            {
+                FileFound = true,
+                FiveHour = new LimitWindow { Available = true, UsedPercent = 10, ResetsAt = DateTime.Now.AddHours(3) }
+            };
+            Assert.Equal(0, ae.Evaluate(s1, th, true).Count, "Initial window evaluation must baseline silently");
+            s1.AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 85, ResetsAt = DateTime.Now.AddHours(3) };
+            Assert.Equal(0, ae.Evaluate(s1, th, true).Count, "Late-arriving Antigravity window above threshold must baseline silently");
+            s1.AntigravityFiveHour.UsedPercent = 96;
+            List<Alert> fired = ae.Evaluate(s1, th, true);
+            Assert.Equal(1, fired.Count, "Crossing higher threshold after baseline must fire alert");
+            Assert.Equal("antigravity_five_hour", fired[0].Window);
+            Assert.Equal(95, fired[0].Threshold);
+
+            // 3. TrayText.IconSpec preserves 100% 7d weekly badge even when a sibling 5h window is lower
+            RateLimitSnapshot ts = new RateLimitSnapshot();
+            ts.FiveHour = new LimitWindow { Available = true, UsedPercent = 20 };
+            ts.SevenDay = new LimitWindow { Available = true, UsedPercent = 100 };
+            string iconText; System.Drawing.Color badge; bool weekly;
+            TrayText.IconSpec(ts, true, false, false, out iconText, out badge, out weekly);
+            Assert.True(weekly, "100% seven-day window must select weekly ring");
+            Assert.Equal(Opts.ShowRemaining ? "0" : "100", iconText);
+
+            // 4. RunwayEstimator ignores >=100% window and respects remaining runway on active <100% window
+            RateLimitSnapshot rw = new RateLimitSnapshot
+            {
+                FiveHour = new LimitWindow { Available = true, UsedPercent = 100, ResetsAt = DateTime.Now.AddHours(1) },
+                CodexFiveHour = new LimitWindow { Available = true, UsedPercent = 70, ResetsAt = DateTime.Now.AddMinutes(150) }
+            };
+            UsageSnapshot rwUsage = new UsageSnapshot { TokensLast10m = 10000 };
+            double mins = RunwayEstimator.EstimateMinutes(rw, rwUsage);
+            Assert.True(mins > 50 && mins < 80, "RunwayEstimator should skip exhausted 100% sibling and estimate active 70% window: " + mins);
+
+            // 5. StatusExporter converts Local DateTime resets_at to UTC 'Z'
+            RateLimitSnapshot expRl = new RateLimitSnapshot
+            {
+                FiveHour = new LimitWindow { Available = true, UsedPercent = 30, ResetsAt = new DateTime(2026, 5, 1, 12, 0, 0, DateTimeKind.Local) }
+            };
+            UsageSnapshot expU = new UsageSnapshot { TodayTotal = new Tally { Input = 100 } };
+            StatusExporter.Export(expU, expRl, new ViewModel());
+            Dictionary<string, object> expObj = J.Parse(Paths.ReadAllTextShared(Paths.AppStatusJson));
+            string expectedUtc = expRl.FiveHour.ResetsAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+            Assert.Equal(expectedUtc, J.Str(expObj, "claude_5h_resets_at"), "StatusExporter must serialize resets_at in UTC");
+
+            // 6. AppConfig.ImportProfileJson applies only keys present in JSON
+            AppConfig origCfg = new AppConfig();
+            origCfg.Language = "id";
+            origCfg.WidgetScale = 1.3;
+            origCfg.Compact = false;
+            AppConfig overlaid = AppConfig.ImportProfileJson("{\"Compact\":true}", origCfg);
+            Assert.NotNull(overlaid);
+            Assert.True(overlaid.Compact, "Specified key Compact must update");
+            Assert.Equal("id", overlaid.Language, "Omitted key Language must be preserved");
+            Assert.Equal(1.3, overlaid.WidgetScale, "Omitted key WidgetScale must be preserved");
+
+            // 7. Diag.Redact redacts URL path tokens and respects user word boundary
+            string redUrl = Diag.Redact("https://hooks.example.com/services/T00/B00/secret?token=abc");
+            Assert.False(redUrl.Contains("secret"), "URL path/query token must be redacted");
+            Assert.True(redUrl.Contains("<redacted>"), "URL path should be replaced with <redacted>");
+            string user = Environment.UserName;
+            if (!string.IsNullOrEmpty(user) && user.Length >= 3)
+            {
+                string rUser = Diag.Redact("folder " + user + " done");
+                Assert.True(rUser.Contains("<user>"), "Standalone username must be redacted");
+            }
+
+            // 8. LangPacks.Exists handles case-insensitive built-in language codes
+            Assert.True(LangPacks.Exists("ID"), "LangPacks.Exists must match built-in 'id' case-insensitively");
+            Assert.True(LangPacks.Exists("EN"), "LangPacks.Exists must match built-in 'en' case-insensitively");
+
+            // 9. UsageScanner: whole-JSON cache replay + in-session growth without double-counting,
+            //    and Claude assistant message quoting "type":"user" is not misclassified as user prompt
+            string tmp = Path.Combine(Path.GetTempPath(), "cuw_c3_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tmp);
+            try
+            {
+                string claudeRoot = Path.Combine(tmp, "claude");
+                string gemRoot = Path.Combine(tmp, "gemcli");
+                Directory.CreateDirectory(claudeRoot);
+                Directory.CreateDirectory(gemRoot);
+                string cacheFile = Path.Combine(tmp, "scan-cache.json");
+
+                string utcNow = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+                string claudeJsonl = Path.Combine(claudeRoot, "sess1.jsonl");
+                File.WriteAllText(claudeJsonl,
+                    "{\"type\":\"assistant\",\"timestamp\":\"" + utcNow + "\",\"message\":{\"id\":\"c1\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"example \\\"type\\\":\\\"user\\\" literal\"}],\"usage\":{\"input_tokens\":200,\"output_tokens\":100}}}\n",
+                    new System.Text.UTF8Encoding(false));
+
+                string gemFile = Path.Combine(gemRoot, "session-1.json");
+                File.WriteAllText(gemFile,
+                    "{\"sessionId\":\"g1\",\"messages\":[{\"id\":\"m1\",\"type\":\"gemini\",\"model\":\"gemini-2.5-flash\",\"timestamp\":\"" + utcNow + "\",\"tokens\":{\"input\":300,\"output\":50,\"cached\":0,\"total\":350}}]}",
+                    new System.Text.UTF8Encoding(false));
+
+                Pricing pr = Pricing.Load();
+                UsageScanner sA = new UsageScanner(pr);
+                sA.CacheFilePath = cacheFile;
+                sA.ScanClaude = true; sA.ScanGemini = false; sA.ScanCodex = false;
+                sA.ScanGeminiCli = true; sA.ScanOpenCode = false; sA.ScanCline = false; sA.ScanCopilot = false;
+                sA.Roots = delegate { return new List<string> { claudeRoot }; };
+                sA.GeminiCliRoots = delegate { return new List<string> { gemRoot }; };
+                sA.OpenCodeDirs = delegate { return new List<string>(); };
+                sA.ClineRoots = delegate { return new List<string>(); };
+                sA.CopilotDirs = delegate { return new List<string>(); };
+                sA.Scan();
+                UsageSnapshot snapA = sA.Snapshot();
+                Assert.Equal(1L, snapA.ClaudeToday.Requests, "Claude assistant message mentioning type:user must still count");
+                Assert.Equal(1L, snapA.GeminiCliToday.Requests, "Gemini CLI first scan should count 1 request");
+                Assert.True(File.Exists(cacheFile), "Scan cache file must be written");
+
+                // Restart scanner (cache hit), then append a 2nd Gemini CLI message in-session
+                UsageScanner sB = new UsageScanner(pr);
+                sB.CacheFilePath = cacheFile;
+                sB.ScanClaude = true; sB.ScanGemini = false; sB.ScanCodex = false;
+                sB.ScanGeminiCli = true; sB.ScanOpenCode = false; sB.ScanCline = false; sB.ScanCopilot = false;
+                sB.Roots = delegate { return new List<string> { claudeRoot }; };
+                sB.GeminiCliRoots = delegate { return new List<string> { gemRoot }; };
+                sB.OpenCodeDirs = delegate { return new List<string>(); };
+                sB.ClineRoots = delegate { return new List<string>(); };
+                sB.CopilotDirs = delegate { return new List<string>(); };
+                sB.Scan();
+                Assert.Equal(2, sB.CacheHitFiles, "Second scanner must hit disk cache for unchanged files");
+
+                File.WriteAllText(gemFile,
+                    "{\"sessionId\":\"g1\",\"messages\":[" +
+                    "{\"id\":\"m1\",\"type\":\"gemini\",\"model\":\"gemini-2.5-flash\",\"timestamp\":\"" + utcNow + "\",\"tokens\":{\"input\":300,\"output\":50,\"cached\":0,\"total\":350}}," +
+                    "{\"id\":\"m2\",\"type\":\"gemini\",\"model\":\"gemini-2.5-flash\",\"timestamp\":\"" + utcNow + "\",\"tokens\":{\"input\":400,\"output\":60,\"cached\":0,\"total\":460}}]}",
+                    new System.Text.UTF8Encoding(false));
+                sB.Scan();
+                UsageSnapshot snapB = sB.Snapshot();
+                Assert.Equal(2L, snapB.GeminiCliToday.Requests, "In-session whole-JSON growth after cache hit must NOT double-count m1");
+            }
+            finally
+            {
+                try { Directory.Delete(tmp, true); } catch { }
+            }
+        }
+
+        public static void Test_Audit_Cycle4_UI_Lifecycle_And_Layout()
+        {
+            string origLang = L.Lang;
+            bool hadCfg = File.Exists(Paths.ConfigFile);
+            byte[] prevCfgBytes = hadCfg ? File.ReadAllBytes(Paths.ConfigFile) : null;
+            bool prevCurEn = Opts.CurrencyCustomEnabled;
+            double prevCurRate = Opts.CurrencyRate;
+            string prevCurSym = Opts.CurrencySymbol;
+            string prevPillMode = Opts.MiniPillMode;
+
+            try
+            {
+                L.Set("en");
+
+                // 1. TrayApp disposed popup recovery & idempotent ExitThreadCore
+                using (TrayApp app = new TrayApp())
+                {
+                    MethodInfo miShowPopup = typeof(TrayApp).GetMethod("ShowPopup", BindingFlags.NonPublic | BindingFlags.Instance);
+                    MethodInfo miRefresh = typeof(TrayApp).GetMethod("Refresh", BindingFlags.NonPublic | BindingFlags.Instance);
+                    MethodInfo miExit = typeof(TrayApp).GetMethod("ExitThreadCore", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiPopup = typeof(TrayApp).GetField("_popup", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiMenu = typeof(TrayApp).GetField("_menu", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiUpdTimer = typeof(TrayApp).GetField("_updateTimer", BindingFlags.NonPublic | BindingFlags.Instance);
+
+                    miShowPopup.Invoke(app, null);
+                    FloatingForm pop1 = fiPopup.GetValue(app) as FloatingForm;
+                    Assert.NotNull(pop1, "_popup must be created on ShowPopup");
+                    pop1.Dispose();
+                    miRefresh.Invoke(app, null);
+                    miShowPopup.Invoke(app, null);
+                    FloatingForm pop2 = fiPopup.GetValue(app) as FloatingForm;
+                    Assert.NotNull(pop2, "ShowPopup must recover when previous popup was disposed");
+                    Assert.False(pop2.IsDisposed, "Recovered popup must not be disposed");
+
+                    miExit.Invoke(app, null);
+                    miExit.Invoke(app, null);
+                    ContextMenuStrip menu = fiMenu.GetValue(app) as ContextMenuStrip;
+                    Assert.True(menu == null || menu.IsDisposed, "_menu must be disposed on exit");
+                    Assert.True(fiUpdTimer.GetValue(app) == null, "_updateTimer must be cleaned up on exit");
+                }
+
+                // 2. FloatingForm: SnapTo primary monitor reset & compact height + MiniPill dynamic width + double-click interactive guard
+                using (FloatingForm f = new FloatingForm())
+                {
+                    IntPtr h = f.Handle;
+                    f.SnapTo("top-right", "CUSTOM_MON_2");
+                    Assert.Equal("CUSTOM_MON_2", f.MonitorName);
+                    f.SnapTo("top-left", "");
+                    Assert.Equal("", f.MonitorName, "Empty monitor name must reset MonitorName back to primary");
+                    Assert.True(f.Height < 80, "SnapTo must collapse into compact pill height, got " + f.Height);
+
+                    // Mini pill widens for large localized currency figures
+                    Opts.CurrencyCustomEnabled = true;
+                    Opts.CurrencyRate = 16200;
+                    Opts.CurrencySymbol = "Rupiah";
+                    Opts.MiniPillMode = "all";
+                    ViewModel vm = new ViewModel();
+                    vm.ScanClaude = true; vm.ScanGemini = true;
+                    vm.Usage = new UsageSnapshot
+                    {
+                        TodayTotal = new Tally { Cost = 1000.0, Input = 1000000 },
+                        ClaudeWeek = new Tally { Input = 1000000 },
+                        AntigravityWeek = new Tally { Input = 1000000 }
+                    };
+                    vm.Limits = new RateLimitSnapshot
+                    {
+                        FileFound = true,
+                        FiveHour = new LimitWindow { Available = true, UsedPercent = 40 },
+                        AntigravityFiveHour = new LimitWindow { Available = true, UsedPercent = 25 }
+                    };
+                    f.SetData(vm);
+                    Assert.True(f.Width > 260, "Mini pill must dynamically widen for large formatted currency, got " + f.Width);
+
+                    // Interactive header button must ignore e.Clicks == 2 (no CompactToggled)
+                    f.DockTop = false;
+                    f.Compact = false;
+                    using (Bitmap bmp = new Bitmap(f.Width, f.Height))
+                        f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
+                    FieldInfo fiSetRect = typeof(FloatingForm).GetField("_titleSettingsRect", BindingFlags.NonPublic | BindingFlags.Instance);
+                    Rectangle setRect = (Rectangle)fiSetRect.GetValue(f);
+                    Assert.False(setRect.IsEmpty, "_titleSettingsRect must be populated after paint");
+                    bool compactToggled = false;
+                    f.CompactToggled += delegate { compactToggled = true; };
+                    MethodInfo miMouseDown = typeof(FloatingForm).GetMethod("OnMouseDown", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miMouseDown.Invoke(f, new object[] { new MouseEventArgs(MouseButtons.Left, 2, setRect.X + setRect.Width / 2, setRect.Y + setRect.Height / 2, 0) });
+                    Assert.False(compactToggled, "Double-clicking title Settings button must not toggle compact mode");
+                }
+
+                // 3. SetupWizardForm: Ollama portRow non-overlap, WorkingArea cap, ComboBox dark theme, language revert on Skip
+                using (SetupWizardForm wiz = new SetupWizardForm(new AppConfig { Language = "en" }))
+                {
+                    wiz.StartPosition = FormStartPosition.Manual;
+                    wiz.Location = new Point(-3000, -3000);
+                    wiz.Show();
+                    Application.DoEvents();
+                    Assert.True(wiz.Height <= Screen.PrimaryScreen.WorkingArea.Height, "Wizard height must fit within screen working area");
+
+                    FieldInfo fiPort = typeof(SetupWizardForm).GetField("_numOllamaPort", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiDesc = typeof(SetupWizardForm).GetField("_lblOllamaDesc", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiCboLang = typeof(SetupWizardForm).GetField("_cboLang", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiLangCodes = typeof(SetupWizardForm).GetField("_langCodes", BindingFlags.NonPublic | BindingFlags.Instance);
+                    NumericUpDown numPort = fiPort.GetValue(wiz) as NumericUpDown;
+                    Label lblDesc = fiDesc.GetValue(wiz) as Label;
+                    Control portRow = numPort.Parent;
+                    Assert.Equal(DockStyle.Top, portRow.Dock, "Ollama portRow must use DockStyle.Top");
+                    int portTopScreen = portRow.PointToScreen(Point.Empty).Y;
+                    int descBottomScreen = lblDesc.PointToScreen(new Point(0, lblDesc.Height)).Y;
+                    Assert.True(portTopScreen >= descBottomScreen,
+                        string.Format("portRow top ({0}) must be >= lblOllamaDesc bottom ({1})", portTopScreen, descBottomScreen));
+
+                    ComboBox cboLang = fiCboLang.GetValue(wiz) as ComboBox;
+                    Assert.Equal(FlatStyle.Flat, cboLang.FlatStyle, "Wizard ComboBoxes must use FlatStyle.Flat for dark theme");
+                    List<string> codes = fiLangCodes.GetValue(wiz) as List<string>;
+                    int idIdx = codes.IndexOf("id");
+                    cboLang.SelectedIndex = idIdx;
+                    Assert.Equal("id", L.Lang, "Selecting language in wizard updates live preview");
+
+                    MethodInfo miSkip = typeof(SetupWizardForm).GetMethod("SkipWizard", BindingFlags.NonPublic | BindingFlags.Instance);
+                    miSkip.Invoke(wiz, null);
+                    Assert.Equal("en", L.Lang, "Skipping wizard must revert temporary language preview");
+                }
+
+                // 4. SettingsForm: sub-1.0 currency rate decimals, _monitor live i18n, and _baseFont disposal
+                using (SettingsForm sf = new SettingsForm(new AppConfig { CurrencySymbol = "EUR", CurrencyRate = 0.92, Language = "en" }))
+                {
+                    IntPtr sh = sf.Handle;
+                    FieldInfo fiRate = typeof(SettingsForm).GetField("_currencyRate", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiMon = typeof(SettingsForm).GetField("_monitor", BindingFlags.NonPublic | BindingFlags.Instance);
+                    FieldInfo fiBaseFont = typeof(SettingsForm).GetField("_baseFont", BindingFlags.NonPublic | BindingFlags.Instance);
+                    NumericUpDown rateNum = fiRate.GetValue(sf) as NumericUpDown;
+                    ComboBox monBox = fiMon.GetValue(sf) as ComboBox;
+
+                    Assert.Equal(0.01m, rateNum.Minimum, "Currency rate must allow values < 1 such as EUR/GBP");
+                    Assert.Equal(2, rateNum.DecimalPlaces, "Non-IDR currency rate must preserve 2 decimal places");
+                    Assert.Equal(0.92m, rateNum.Value, "SettingsForm must preserve 0.92 currency rate without rounding to 1");
+
+                    L.Set("id");
+                    sf.RefreshI18n();
+                    Assert.Equal(L.T("monitor.primary"), monBox.Items[0].ToString(), "_monitor primary item must update live on i18n refresh");
+
+                    sf.Dispose();
+                    Assert.True(fiBaseFont.GetValue(sf) == null, "_baseFont must be disposed and nulled");
+                }
+            }
+            finally
+            {
+                Opts.CurrencyCustomEnabled = prevCurEn;
+                Opts.CurrencyRate = prevCurRate;
+                Opts.CurrencySymbol = prevCurSym;
+                Opts.MiniPillMode = prevPillMode;
+                L.Set(origLang);
+                try
+                {
+                    if (hadCfg) File.WriteAllBytes(Paths.ConfigFile, prevCfgBytes);
+                    else if (File.Exists(Paths.ConfigFile)) File.Delete(Paths.ConfigFile);
+                }
+                catch { }
             }
         }
     }

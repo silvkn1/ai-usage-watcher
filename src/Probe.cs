@@ -27,7 +27,7 @@ namespace ClaudeUsageWidget
                 {
                     try
                     {
-                        string t = dir.Trim();
+                        string t = dir.Trim().Trim('"');
                         if (!ProcessHelper.IsSafeSearchDir(t)) continue;
                         string p = Path.Combine(t, name);
                         if (File.Exists(p)) return p;
@@ -99,13 +99,15 @@ namespace ClaudeUsageWidget
             if (exe == null) return L.T("perr.notfound");
             if (!IsValidModelName(model)) model = "claude-haiku-5-5";
             string settingsPath = SettingsFile();
-            if (settingsPath.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0) return L.T("perr.start", "InvalidPath");
+            if (ProcessHelper.HasCmdMeta(settingsPath) || exe.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0 ||
+                (exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) && ProcessHelper.HasCmdMeta(exe)))
+                return L.T("perr.start", "InvalidPath");
 
             string args = "-p ok --settings \"" + settingsPath + "\" --strict-mcp-config --tools \"\" --model " + model
                           + " --output-format stream-json --verbose --no-session-persistence";
             ProcessStartInfo psi;
             if (exe.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
-                psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /s /c \"\"" + exe + "\" " + args + "\"");
+                psi = new ProcessStartInfo(ProcessHelper.SystemExe("cmd.exe"), "/d /s /c \"\"" + exe + "\" " + args + "\"");
             else
                 psi = new ProcessStartInfo(exe, args);
             psi.UseShellExecute = false;
@@ -130,7 +132,9 @@ namespace ClaudeUsageWidget
                     if (e.Data == null) return;
                     if (e.Data.IndexOf("\"rate_limit_event\"", StringComparison.Ordinal) >= 0
                         || e.Data.IndexOf("\"type\":\"result\"", StringComparison.Ordinal) >= 0
-                        || e.Data.IndexOf("\"subtype\":\"init\"", StringComparison.Ordinal) >= 0)
+                        || e.Data.IndexOf("\"type\": \"result\"", StringComparison.Ordinal) >= 0
+                        || e.Data.IndexOf("\"subtype\":\"init\"", StringComparison.Ordinal) >= 0
+                        || e.Data.IndexOf("\"subtype\": \"init\"", StringComparison.Ordinal) >= 0)
                         lock (gate) keep.Add(e.Data);
                 };
                 p.ErrorDataReceived += delegate { };
@@ -141,7 +145,7 @@ namespace ClaudeUsageWidget
                 p.BeginErrorReadLine();
                 if (!p.WaitForExit(90 * 1000))
                 {
-                    try { p.Kill(); } catch { }
+                    ProcessHelper.KillTree(p);
                     return L.T("perr.timeout");
                 }
                 p.WaitForExit();
@@ -207,29 +211,48 @@ namespace ClaudeUsageWidget
 
     internal static class AtomicFile
     {
-        /// <summary>Tulis ke file sementara di folder yang sama lalu tukar (File.Replace) agar pembaca tidak melihat file setengah jadi.</summary>
+        /// <summary>Tulis ke file sementara unik di folder yang sama lalu tukar (File.Replace) agar pembaca tidak melihat file setengah jadi.</summary>
         public static void Write(string path, string content)
         {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             Encoding utf8NoBom = new UTF8Encoding(false);
-            string tmp = path + ".cuw.tmp";
+            int pid;
+            using (Process cur = Process.GetCurrentProcess()) pid = cur.Id;
+            string tmp = path + ".cuw." + pid + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(tmp, content, utf8NoBom);
             try
             {
-                File.WriteAllText(tmp, content, utf8NoBom);
-                if (File.Exists(path)) File.Replace(tmp, path, null);
-                else File.Move(tmp, path);
-                return;
+                for (int attempt = 0; attempt < 4; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(path)) File.Replace(tmp, path, null);
+                        else File.Move(tmp, path);
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        if (attempt < 3) System.Threading.Thread.Sleep(20);
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        if (attempt < 3) System.Threading.Thread.Sleep(20);
+                    }
+                }
+                // Fallback when OS/security filter (e.g. Defender/AppContainer ACL) blocks rename/replace.
+                File.WriteAllText(path, content, utf8NoBom);
             }
-            catch
+            finally
             {
                 try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
             }
-            File.WriteAllText(path, content, utf8NoBom);
         }
     }
 
     /// <summary>
     /// Cermin rate_limits ke file JSON lain (mis. file status untuk mod Windhawk) setelah probe berhasil.
-    /// Hanya mengganti nilai "rate_limits" di teks file; sisanya tetap identik byte demi byte.
+    /// Hanya mengganti nilai "rate_limits" di root objek JSON; sisanya tetap identik byte demi byte.
     /// File tidak pernah dibuat baru, dan dilewati bila isinya tidak bisa di-parse (mungkin sedang ditulis).
     /// </summary>
     internal static class Mirror
@@ -238,35 +261,74 @@ namespace ClaudeUsageWidget
         {
             if (string.IsNullOrEmpty(path)) return "empty path";
             if (!File.Exists(path)) return "file does not exist";
-            string text;
-            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (StreamReader r = new StreamReader(fs, new UTF8Encoding(false), true))
-                text = r.ReadToEnd();
+            try { if (J.Parse(rateLimitsJson) == null) return "invalid rate_limits JSON"; }
+            catch { return "invalid rate_limits JSON"; }
+
+            string text = Paths.ReadAllTextShared(path);
             try { if (J.Parse(text) == null) return "not a JSON object"; }
             catch { return "invalid JSON (maybe being written)"; }
 
-            const string Key = "\"rate_limits\":";
-            string updated;
-            int k = text.IndexOf(Key, StringComparison.Ordinal);
-            if (k >= 0)
-            {
-                int v = k + Key.Length;
-                while (v < text.Length && char.IsWhiteSpace(text[v])) v++;
-                int end = UsageScanner.SkipValue(text, v);
-                if (end <= v) return "malformed rate_limits value";
-                updated = text.Substring(0, v) + rateLimitsJson + text.Substring(end);
-            }
-            else
+            int valStart, valEnd;
+            if (!FindRootPropertyValueSpan(text, "rate_limits", out valStart, out valEnd))
             {
                 int last = text.LastIndexOf('}');
                 if (last < 0) return "not a JSON object";
                 string before = text.Substring(0, last).TrimEnd();
-                string sep = before.EndsWith("{") ? "" : ",";
-                updated = before + sep + Key + rateLimitsJson + text.Substring(last);
+                string sep = before.EndsWith("{", StringComparison.Ordinal) ? "" : ",";
+                string appended = before + sep + "\"rate_limits\":" + rateLimitsJson + text.Substring(last);
+                try { J.Parse(appended); } catch { return "spliced result is invalid"; }
+                AtomicFile.Write(path, appended);
+                return null;
             }
+            if (valEnd <= valStart) return "malformed rate_limits value";
+            string updated = text.Substring(0, valStart) + rateLimitsJson + text.Substring(valEnd);
             try { J.Parse(updated); } catch { return "spliced result is invalid"; }
             AtomicFile.Write(path, updated);
             return null;
+        }
+
+        private static bool FindRootPropertyValueSpan(string s, string targetKey, out int valStart, out int valEnd)
+        {
+            valStart = -1; valEnd = -1;
+            int i = 0;
+            while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
+            if (i >= s.Length || s[i] != '{') return false;
+            int depth = 0;
+            while (i < s.Length)
+            {
+                char c = s[i];
+                if (c == '"')
+                {
+                    int keyEnd = UsageScanner.SkipValue(s, i);
+                    string rawKey = s.Substring(i, Math.Max(0, keyEnd - i));
+                    bool isTarget = false;
+                    if (depth == 1)
+                    {
+                        try
+                        {
+                            object dec = J.Ser.DeserializeObject(rawKey);
+                            isTarget = string.Equals(dec as string, targetKey, StringComparison.Ordinal);
+                        }
+                        catch { }
+                    }
+                    int j = keyEnd;
+                    while (j < s.Length && char.IsWhiteSpace(s[j])) j++;
+                    if (isTarget && j < s.Length && s[j] == ':')
+                    {
+                        j++;
+                        while (j < s.Length && char.IsWhiteSpace(s[j])) j++;
+                        int end = UsageScanner.SkipValue(s, j);
+                        if (end > j) { valStart = j; valEnd = end; return true; }
+                        return false;
+                    }
+                    i = keyEnd;
+                    continue;
+                }
+                if (c == '{' || c == '[') depth++;
+                else if (c == '}' || c == ']') depth--;
+                i++;
+            }
+            return false;
         }
     }
 }

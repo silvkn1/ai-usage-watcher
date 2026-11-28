@@ -16,6 +16,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $src = $PSScriptRoot
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $files = 'AIUsageWatcher.exe', 'cuw-statusline.sh', 'cuw-statusline.ps1', 'install-statusline.ps1', 'uninstall.ps1', 'README.md'
 
 $rel = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue).Release
@@ -23,15 +24,18 @@ if (-not $rel -or $rel -lt 528040) { throw '.NET Framework 4.8 diperlukan (bawaa
 foreach ($f in $files) { if (-not (Test-Path (Join-Path $src $f))) { throw "File paket tidak lengkap: $f" } }
 
 # Hentikan instance yang sedang berjalan agar exe bisa ditimpa.
-Get-Process AIUsageWatcher, ClaudeUsageWidget -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 500
+$procs = Get-Process AIUsageWatcher, ClaudeUsageWidget -ErrorAction SilentlyContinue
+if ($procs) {
+    $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+    $procs | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+}
 
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 foreach ($f in $files) { Copy-Item (Join-Path $src $f) (Join-Path $InstallDir $f) -Force }
 Copy-Item (Join-Path $InstallDir 'AIUsageWatcher.exe') (Join-Path $InstallDir 'ClaudeUsageWidget.exe') -Force
 $compSrc = Join-Path $src 'companion'
 if (Test-Path $compSrc) { Copy-Item -Path $compSrc -Destination $InstallDir -Recurse -Force }
-$exe = Join-Path $InstallDir 'AIUsageWatcher.exe'
+$exe = [IO.Path]::GetFullPath((Join-Path $InstallDir 'AIUsageWatcher.exe'))
 Write-Host "Terpasang di: $InstallDir"
 
 if (-not $NoShortcut) {
@@ -50,6 +54,7 @@ $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $existing = (Get-ItemProperty $runKey -Name AIUsageWatcher -ErrorAction SilentlyContinue).AIUsageWatcher
 $legacy = (Get-ItemProperty $runKey -Name ClaudeUsageWidget -ErrorAction SilentlyContinue).ClaudeUsageWidget
 if ($Autostart -or $existing -or $legacy) {
+    if (-not (Test-Path $runKey)) { New-Item -Path $runKey -Force | Out-Null }
     Set-ItemProperty $runKey -Name AIUsageWatcher -Value ('"' + $exe + '"')
     if ($legacy) { Remove-ItemProperty $runKey -Name ClaudeUsageWidget -ErrorAction SilentlyContinue }
     Write-Host 'Autostart aktif.'

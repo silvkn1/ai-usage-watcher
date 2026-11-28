@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ClaudeUsageWidget
@@ -123,6 +124,7 @@ namespace ClaudeUsageWidget
         public double MonthUsd;
         public List<KeyValuePair<string, double>> ByModel = new List<KeyValuePair<string, double>>();
         public string Endpoint;
+        public bool Truncated;
         public DateTime FetchedAt = DateTime.MinValue;
     }
 
@@ -177,16 +179,20 @@ namespace ClaudeUsageWidget
             using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get,
                 "/v1/organizations/analytics/cost?starting_at=" + Uri.EscapeDataString(start) + "&group_by[]=model&limit=5"))
             {
-                req.Headers.Add("x-api-key", adminKey);
-                req.Headers.Add("anthropic-version", "2023-06-01");
-                req.Headers.Add("anthropic-beta", "analytics-usage-cost-2026-08-24");
-                using (HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false))
+                try
                 {
-                    string body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    StringBuilder sb = new StringBuilder("HTTP " + (int)resp.StatusCode + "\n");
-                    try { Describe(J.Ser.DeserializeObject(body), "", sb, 0); } catch { sb.Append("(not JSON)\n"); }
-                    return sb.ToString();
+                    req.Headers.Add("x-api-key", adminKey);
+                    req.Headers.Add("anthropic-version", "2023-06-01");
+                    req.Headers.Add("anthropic-beta", "analytics-usage-cost-2026-08-24");
+                    using (HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false))
+                    {
+                        string body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        StringBuilder sb = new StringBuilder("HTTP " + (int)resp.StatusCode + "\n");
+                        try { Describe(J.Ser.DeserializeObject(body), "", sb, 0); } catch { sb.Append("(not JSON)\n"); }
+                        return sb.ToString();
+                    }
                 }
+                catch (Exception ex) { return ex.GetType().Name + ": " + ex.Message + "\n"; }
             }
         }
 
@@ -232,11 +238,14 @@ namespace ClaudeUsageWidget
                 string url = query + (page == null ? "" : "&page=" + Uri.EscapeDataString(page));
                 using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, url))
                 {
-                    req.Headers.Add("x-api-key", key);
-                    req.Headers.Add("anthropic-version", "2023-06-01");
-                    if (analytics) req.Headers.Add("anthropic-beta", "analytics-usage-cost-2026-08-24");
                     HttpResponseMessage resp;
-                    try { resp = await Http.SendAsync(req).ConfigureAwait(false); }
+                    try
+                    {
+                        req.Headers.Add("x-api-key", key);
+                        req.Headers.Add("anthropic-version", "2023-06-01");
+                        if (analytics) req.Headers.Add("anthropic-beta", "analytics-usage-cost-2026-08-24");
+                        resp = await Http.SendAsync(req).ConfigureAwait(false);
+                    }
                     catch (Exception ex) { return L.T("aerr.network", ex.GetType().Name); }
                     using (resp)
                     {
@@ -249,6 +258,7 @@ namespace ClaudeUsageWidget
                         bool hasMore = o != null && o.TryGetValue("has_more", out more) && more is bool && (bool)more;
                         page = J.Str(o, "next_page");
                         if (!hasMore || string.IsNullOrEmpty(page)) break;
+                        if (i == 19) res.Truncated = true;
                     }
                 }
             }
@@ -290,7 +300,7 @@ namespace ClaudeUsageWidget
     {
         private static readonly HttpClient Http = new HttpClient();
         private static DateTime _lastFetch = DateTime.MinValue;
-        private static bool _busy;
+        private static int _busy;
 
         static GoogleRateFetcher()
         {
@@ -315,8 +325,7 @@ namespace ClaudeUsageWidget
 
         public static async Task<double> FetchRateAsync(string currencySymbol = "IDR")
         {
-            if (_busy) return 0;
-            _busy = true;
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return 0;
             try
             {
                 string cur = NormalizeCurrencyCode(currencySymbol);
@@ -343,7 +352,7 @@ namespace ClaudeUsageWidget
             }
             finally
             {
-                _busy = false;
+                Interlocked.Exchange(ref _busy, 0);
             }
             return 0;
         }
@@ -360,7 +369,7 @@ namespace ClaudeUsageWidget
     {
         private static readonly HttpClient Http = new HttpClient();
         private static DateTime _lastFetch = DateTime.MinValue;
-        private static bool _busy;
+        private static int _busy;
 
         static OfficialPricingFetcher()
         {
@@ -381,8 +390,7 @@ namespace ClaudeUsageWidget
 
         public static async Task<int> FetchAndSaveAsync()
         {
-            if (_busy) return 0;
-            _busy = true;
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return 0;
             try
             {
                 Dictionary<string, double[]> models = new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
@@ -427,10 +435,13 @@ namespace ClaudeUsageWidget
                 try
                 {
                     string html = await Http.GetStringAsync("https://platform.claude.com/docs/en/about-claude/pricing");
-                    MatchCollection mc = Regex.Matches(html, @"href=""/docs/en/models/([^""]+)/overview"">(Claude [^<]+)</a>.*?\$([0-9.]+).*?\$([0-9.]+)", RegexOptions.Singleline);
+                    MatchCollection mc = Regex.Matches(html,
+                        @"href=""/docs/en/models/([a-z0-9._-]+)/overview"">(Claude [^<]+)</a>(?:(?!</tr\b).){0,500}?\$([0-9.]+)(?:(?!</tr\b).){0,200}?\$([0-9.]+)",
+                        RegexOptions.Singleline | RegexOptions.IgnoreCase, TimeSpan.FromSeconds(2));
                     foreach (Match m in mc)
                     {
                         string slug = m.Groups[1].Value.Trim().ToLowerInvariant();
+                        if (!Regex.IsMatch(slug, @"^[a-z0-9._-]+$")) continue;
                         string prefix = slug.StartsWith("claude-") ? slug : "claude-" + slug;
                         double input, output;
                         if (double.TryParse(m.Groups[3].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out input) &&
@@ -490,8 +501,8 @@ namespace ClaudeUsageWidget
                     string p = prefixes[i];
                     double[] vals = models[p];
                     string line = string.Format(CultureInfo.InvariantCulture,
-                        "    {{ \"prefix\": \"{0}\", \"input\": {1}, \"output\": {2}, \"cache_write_5m\": {3}, \"cache_write_1h\": {4}, \"cache_read\": {5}, \"verifikasi\": \"official\" }}{6}",
-                        p, vals[0], vals[1], vals[2], vals[3], vals[4], (i < prefixes.Count - 1 ? "," : ""));
+                        "    {{ \"prefix\": {0}, \"input\": {1}, \"output\": {2}, \"cache_write_5m\": {3}, \"cache_write_1h\": {4}, \"cache_read\": {5}, \"verifikasi\": \"official\" }}{6}",
+                        J.Ser.Serialize(p), vals[0], vals[1], vals[2], vals[3], vals[4], (i < prefixes.Count - 1 ? "," : ""));
                     sb.AppendLine(line);
                 }
                 sb.AppendLine("  ]");
@@ -508,7 +519,7 @@ namespace ClaudeUsageWidget
             }
             finally
             {
-                _busy = false;
+                Interlocked.Exchange(ref _busy, 0);
             }
             return 0;
         }
@@ -525,7 +536,7 @@ namespace ClaudeUsageWidget
     {
         private static readonly HttpClient Http;
         private static DateTime _lastFetch = DateTime.MinValue;
-        private static bool _busy;
+        private static int _busy;
 
         static AntigravityRateFetcher()
         {
@@ -542,11 +553,11 @@ namespace ClaudeUsageWidget
 
         public static async Task<bool> FetchAndSaveAsync(int portOverride = 0)
         {
-            if (_busy) return false;
-            _busy = true;
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
             try
             {
                 int port = portOverride;
+                bool useHttps = false;
                 string token = null;
 
                 // 1. Temukan hub_*.json di daemon directory (~/.gemini/antigravity/daemon)
@@ -568,15 +579,21 @@ namespace ClaudeUsageWidget
                                 {
                                     try
                                     {
-                                        string json = File.ReadAllText(files[i], Encoding.UTF8);
+                                        string json = Paths.ReadAllTextShared(files[i]);
                                         Dictionary<string, object> o = J.Parse(json);
                                         if (o != null)
                                         {
                                             double p = J.Num(o, "httpPort");
-                                            if (double.IsNaN(p) || p <= 0) p = J.Num(o, "httpsPort");
-                                            if (!double.IsNaN(p) && p > 0)
+                                            bool httpsFallback = false;
+                                            if (double.IsNaN(p) || p <= 0 || p > 65535)
+                                            {
+                                                p = J.Num(o, "httpsPort");
+                                                httpsFallback = true;
+                                            }
+                                            if (!double.IsNaN(p) && p > 0 && p <= 65535)
                                             {
                                                 port = (int)p;
+                                                useHttps = httpsFallback;
                                                 token = J.Str(o, "csrfToken");
                                                 break;
                                             }
@@ -590,10 +607,11 @@ namespace ClaudeUsageWidget
                     catch (Exception ex) { Log.Write("antigravity.daemon", ex); }
                 }
 
-                if (port <= 0) return false;
+                if (port <= 0 || port > 65535) return false;
 
                 // 2. Query RetrieveUserQuotaSummary via Connect-RPC
-                string url = "http://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
+                string scheme = useHttps ? "https" : "http";
+                string url = scheme + "://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
                 string body = "{\"metadata\":{\"ideName\":\"antigravity\",\"extensionName\":\"antigravity\",\"locale\":\"en\"}}";
                 using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, url))
                 {
@@ -602,18 +620,18 @@ namespace ClaudeUsageWidget
                     if (!string.IsNullOrEmpty(token))
                         req.Headers.Add("X-Codeium-Csrf-Token", token);
 
-                    HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false);
-                    if (!resp.IsSuccessStatusCode)
+                    using (HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false))
                     {
-                        return await FetchGetUserStatusFallbackAsync(port, token).ConfigureAwait(false);
+                        if (!resp.IsSuccessStatusCode)
+                            return await FetchGetUserStatusFallbackAsync(port, token, useHttps).ConfigureAwait(false);
+
+                        string respText = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        bool ok = ParseAndSaveQuotaSummary(respText);
+                        if (!ok) return await FetchGetUserStatusFallbackAsync(port, token, useHttps).ConfigureAwait(false);
+
+                        _lastFetch = DateTime.Now;
+                        return true;
                     }
-
-                    string respText = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    bool ok = ParseAndSaveQuotaSummary(respText);
-                    if (!ok) return await FetchGetUserStatusFallbackAsync(port, token).ConfigureAwait(false);
-
-                    _lastFetch = DateTime.Now;
-                    return true;
                 }
             }
             catch (Exception ex)
@@ -623,7 +641,7 @@ namespace ClaudeUsageWidget
             }
             finally
             {
-                _busy = false;
+                Interlocked.Exchange(ref _busy, 0);
             }
         }
 
@@ -724,11 +742,11 @@ namespace ClaudeUsageWidget
             }
         }
 
-        private static async Task<bool> FetchGetUserStatusFallbackAsync(int port, string token)
+        private static async Task<bool> FetchGetUserStatusFallbackAsync(int port, string token, bool useHttps)
         {
             try
             {
-                string url = "http://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/GetUserStatus";
+                string url = (useHttps ? "https" : "http") + "://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/GetUserStatus";
                 string body = "{\"metadata\":{\"ideName\":\"antigravity\",\"extensionName\":\"antigravity\",\"locale\":\"en\"}}";
                 using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, url))
                 {
@@ -737,11 +755,12 @@ namespace ClaudeUsageWidget
                     if (!string.IsNullOrEmpty(token))
                         req.Headers.Add("X-Codeium-Csrf-Token", token);
 
-                    HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false);
-                    if (!resp.IsSuccessStatusCode) return false;
-
-                    string respText = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    return ParseAndSaveUserStatus(respText);
+                    using (HttpResponseMessage resp = await Http.SendAsync(req).ConfigureAwait(false))
+                    {
+                        if (!resp.IsSuccessStatusCode) return false;
+                        string respText = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        return ParseAndSaveUserStatus(respText);
+                    }
                 }
             }
             catch (Exception ex)
@@ -898,7 +917,8 @@ namespace ClaudeUsageWidget
     /// </summary>
     internal static class OllamaProbe
     {
-        public static OllamaStatus Current = new OllamaStatus();
+        private static readonly HttpClient Http = new HttpClient();
+        public static volatile OllamaStatus Current = new OllamaStatus();
 
         public static OllamaStatus ParseResponse(string json)
         {
@@ -959,41 +979,20 @@ namespace ClaudeUsageWidget
 
         private static async Task<string> FetchGetAsync(string url, int timeoutMs)
         {
-            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
-            req.Method = "GET";
-            req.Timeout = timeoutMs;
-            req.ReadWriteTimeout = timeoutMs;
-            using (WebResponse resp = await req.GetResponseAsync())
-            using (Stream s = resp.GetResponseStream())
-            using (StreamReader r = new StreamReader(s, Encoding.UTF8))
-                return await r.ReadToEndAsync();
-        }
-
-        public static async Task<OllamaStatus> CheckAsync(int port, int timeoutMs = 1500)
-        {
-            if (port <= 0 || port > 65535) port = 11434;
-            string tagsUrl = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/tags", port);
-            OllamaStatus st = await CheckAsync(tagsUrl, timeoutMs);
-            if (st != null && st.Online)
+            using (CancellationTokenSource cts = new CancellationTokenSource(Math.Max(100, timeoutMs)))
+            using (HttpResponseMessage resp = await Http.GetAsync(url, cts.Token).ConfigureAwait(false))
             {
-                try
-                {
-                    string psUrl = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/ps", port);
-                    string psJson = await FetchGetAsync(psUrl, timeoutMs);
-                    ParsePsResponse(psJson, st);
-                    Current = st;
-                }
-                catch { }
+                resp.EnsureSuccessStatusCode();
+                return await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
             }
-            return st;
         }
 
-        public static async Task<OllamaStatus> CheckAsync(string endpoint = "http://127.0.0.1:11434/api/tags", int timeoutMs = 1500)
+        private static async Task<OllamaStatus> FetchTagsUnpublishedAsync(string endpoint, int timeoutMs)
         {
             OllamaStatus st = new OllamaStatus();
             try
             {
-                string json = await FetchGetAsync(endpoint, timeoutMs);
+                string json = await FetchGetAsync(endpoint, timeoutMs).ConfigureAwait(false);
                 st = ParseResponse(json);
             }
             catch
@@ -1001,6 +1000,32 @@ namespace ClaudeUsageWidget
                 st.Online = false;
             }
             st.LastChecked = DateTime.Now;
+            return st;
+        }
+
+        public static async Task<OllamaStatus> CheckAsync(int port, int timeoutMs = 1500)
+        {
+            if (port <= 0 || port > 65535) port = 11434;
+            string tagsUrl = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/tags", port);
+            OllamaStatus st = await FetchTagsUnpublishedAsync(tagsUrl, timeoutMs).ConfigureAwait(false);
+            if (st != null && st.Online)
+            {
+                try
+                {
+                    string psUrl = string.Format(CultureInfo.InvariantCulture, "http://127.0.0.1:{0}/api/ps", port);
+                    string psJson = await FetchGetAsync(psUrl, timeoutMs).ConfigureAwait(false);
+                    ParsePsResponse(psJson, st);
+                }
+                catch { }
+            }
+            // Publish only once after LoadedModels/TotalVramBytes are complete to prevent reader races.
+            Current = st;
+            return st;
+        }
+
+        public static async Task<OllamaStatus> CheckAsync(string endpoint = "http://127.0.0.1:11434/api/tags", int timeoutMs = 1500)
+        {
+            OllamaStatus st = await FetchTagsUnpublishedAsync(endpoint, timeoutMs).ConfigureAwait(false);
             Current = st;
             return st;
         }

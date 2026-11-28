@@ -37,8 +37,9 @@ New-Item -ItemType Directory -Force $appDir | Out-Null
 
 if (Test-Path $settings) {
     $raw = [IO.File]::ReadAllText($settings, $utf8)
-    Copy-Item $settings ("$settings.bak-cuw-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    $json = $raw | ConvertFrom-Json
+    Copy-Item $settings ("$settings.bak-cuw-" + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    $json = if ($raw.Trim()) { $raw | ConvertFrom-Json } else { New-Object PSObject }
+    if ($null -eq $json) { $json = New-Object PSObject }
 } else {
     New-Item -ItemType Directory -Force $claudeDir | Out-Null
     $json = New-Object PSObject
@@ -46,18 +47,30 @@ if (Test-Path $settings) {
 
 $bashWrapper = Join-Path $appDir 'cuw-statusline.sh'
 $psWrapper   = Join-Path $appDir 'cuw-statusline.ps1'
+$psExe       = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $bashCmd = 'bash "' + ($bashWrapper -replace '\\', '/') + '"'
-$psCmd   = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + ($psWrapper -replace '\\', '/') + '"'
+$psCmd   = '"' + $psExe + '" -NoProfile -ExecutionPolicy Bypass -File "' + ($psWrapper -replace '\\', '/') + '"'
+$legacyPsCmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + ($psWrapper -replace '\\', '/') + '"'
 
 $current = $null
-if ($json.PSObject.Properties['statusLine']) { $current = $json.statusLine.command }
-$isOurs = ($current -eq $bashCmd) -or ($current -eq $psCmd)
+$slProp = $json.PSObject.Properties['statusLine']
+if ($null -ne $slProp -and $null -ne $slProp.Value) { $current = $slProp.Value.command }
+$isOurs = ($current -eq $bashCmd) -or ($current -eq $psCmd) -or ($current -eq $legacyPsCmd)
 
 if ($Uninstall) {
     if (Test-Path $chainFile) {
         $orig = [IO.File]::ReadAllText($chainFile, $utf8).Trim()
-        if ($orig) { $json.statusLine.command = $orig } elseif ($isOurs) { $json.PSObject.Properties.Remove('statusLine') }
-        Remove-Item $chainFile
+        if ($orig) {
+            if ($null -ne $slProp -and $null -ne $slProp.Value) {
+                $json.statusLine.command = $orig
+            } else {
+                $json.PSObject.Properties.Remove('statusLine')
+                $json | Add-Member statusLine ([pscustomobject]@{ type = 'command'; command = $orig })
+            }
+        } elseif ($isOurs) {
+            $json.PSObject.Properties.Remove('statusLine')
+        }
+        Remove-Item $chainFile -Force
     } elseif ($isOurs) {
         $json.PSObject.Properties.Remove('statusLine')
     }
@@ -73,10 +86,11 @@ if ($Uninstall) {
     } elseif (-not $current) {
         [IO.File]::WriteAllText($chainFile, '', $utf8)
     }
-    if ($json.PSObject.Properties['statusLine']) {
+    if ($null -ne $slProp -and $null -ne $slProp.Value) {
         $json.statusLine.command = $wrapperCmd
         if (-not $json.statusLine.type) { $json.statusLine | Add-Member type 'command' }
     } else {
+        $json.PSObject.Properties.Remove('statusLine')
         $json | Add-Member statusLine ([pscustomobject]@{ type = 'command'; command = $wrapperCmd })
     }
     Write-Host "Pembungkus statusline ($Shell) dipasang. Perintah lama disimpan di: $chainFile"
@@ -84,5 +98,16 @@ if ($Uninstall) {
 
 $out = $json | ConvertTo-Json -Depth 100
 $null = $out | ConvertFrom-Json   # validasi sebelum menulis
-[IO.File]::WriteAllText($settings, $out, $utf8)
+$tmpSettings = $settings + '.tmp.' + $PID + '.' + [Guid]::NewGuid().ToString('N')
+[IO.File]::WriteAllText($tmpSettings, $out, $utf8)
+try {
+    try {
+        if (Test-Path $settings) { [IO.File]::Replace($tmpSettings, $settings, $null) }
+        else { [IO.File]::Move($tmpSettings, $settings) }
+    } catch {
+        [IO.File]::WriteAllText($settings, $out, $utf8)
+    }
+} finally {
+    if (Test-Path $tmpSettings) { Remove-Item $tmpSettings -Force -ErrorAction SilentlyContinue }
+}
 if (-not $Uninstall) { Write-Host 'Kirim satu pesan di Claude Code CLI agar snapshot limit terisi.' }

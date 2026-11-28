@@ -23,14 +23,21 @@ flat="${input//[$'\r\n']/}"
 re='"rate_limits":[[:space:]]*\{([[:space:]]*"[a-z_]+":[[:space:]]*\{[^{}]*\}[[:space:]]*,?)*[[:space:]]*\}'
 if [[ $flat =~ $re ]]; then
   [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null
-  printf -v now '%(%s)T' -1
-  tmp="$dir/ratelimits.json.tmp"
+  if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+    printf -v now '%(%s)T' -1
+  else
+    now=$(date +%s)
+  fi
+  tmp="$dir/ratelimits.json.$$.tmp"
   { printf '{"captured_at":%s,%s}' "$now" "${BASH_REMATCH[0]}" > "$tmp" && mv -f "$tmp" "$dir/ratelimits.json"; } 2>/dev/null
 fi
 
 chain="$dir/statusline-chain.txt"
 if [ -s "$chain" ]; then
   cmd=$(<"$chain")
-  printf '%s' "$input" | eval "$cmd"
+  cmd="${cmd//$'\r'/}"
+  if [ -n "$cmd" ]; then
+    printf '%s' "$input" | eval "$cmd"
+  fi
 fi
 exit 0

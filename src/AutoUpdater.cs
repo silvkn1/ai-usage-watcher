@@ -255,7 +255,7 @@ namespace ClaudeUsageWidget
             try
             {
                 string useRepo = (repo ?? DefaultRepo).Trim();
-                if (!Regex.IsMatch(useRepo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+                if (!Regex.IsMatch(useRepo, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") || useRepo.Contains(".."))
                     return null;
                 string url = "https://api.github.com/repos/" + useRepo + "/releases/latest";
                 using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
@@ -305,12 +305,15 @@ namespace ClaudeUsageWidget
                             throw new InvalidDataException("Archive entry attempts path traversal: " + e.FullName);
 
                         string normName = e.FullName.TrimStart('/', '\\');
-                        if (string.Equals(normName, "AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(normName, targetExeName, StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(normName, targetExeName, StringComparison.OrdinalIgnoreCase))
                         {
                             exeEntry = e;
                         }
-                        else
+                        else if (exeEntry == null && string.Equals(normName, "AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            exeEntry = e;
+                        }
+                        else if (!string.Equals(normName, "AIUsageWatcher.exe", StringComparison.OrdinalIgnoreCase))
                         {
                             auxEntries.Add(new KeyValuePair<ZipArchiveEntry, string>(e, destPath));
                         }
@@ -323,11 +326,49 @@ namespace ClaudeUsageWidget
                     if (!IsValidExecutable(extractedExe))
                         throw new InvalidDataException("Downloaded file is not a valid Windows executable.");
 
-                    for (int i = 0; i < auxEntries.Count; i++)
+                    string stageDir = Path.Combine(targetDir, "update-aux-" + Guid.NewGuid().ToString("N"));
+                    List<KeyValuePair<string, string>> staged = new List<KeyValuePair<string, string>>();
+                    List<KeyValuePair<string, string>> backups = new List<KeyValuePair<string, string>>();
+                    try
                     {
-                        string dest = auxEntries[i].Value;
-                        Directory.CreateDirectory(Path.GetDirectoryName(dest));
-                        auxEntries[i].Key.ExtractToFile(dest, true);
+                        for (int i = 0; i < auxEntries.Count; i++)
+                        {
+                            string dest = auxEntries[i].Value;
+                            string rel = dest.Substring(fullTargetDir.Length);
+                            string stagePath = Path.Combine(stageDir, rel);
+                            Directory.CreateDirectory(Path.GetDirectoryName(stagePath));
+                            auxEntries[i].Key.ExtractToFile(stagePath, true);
+                            staged.Add(new KeyValuePair<string, string>(stagePath, dest));
+                        }
+                        for (int i = 0; i < staged.Count; i++)
+                        {
+                            string stagePath = staged[i].Key;
+                            string dest = staged[i].Value;
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                            if (File.Exists(dest))
+                            {
+                                string bak = stageDir + "\\bak_" + i;
+                                File.Copy(dest, bak, true);
+                                backups.Add(new KeyValuePair<string, string>(bak, dest));
+                                File.Replace(stagePath, dest, null);
+                            }
+                            else
+                            {
+                                File.Move(stagePath, dest);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        for (int i = 0; i < backups.Count; i++)
+                        {
+                            try { File.Copy(backups[i].Key, backups[i].Value, true); } catch { }
+                        }
+                        throw;
+                    }
+                    finally
+                    {
+                        try { if (Directory.Exists(stageDir)) Directory.Delete(stageDir, true); } catch { }
                     }
                 }
                 return extractedExe;
@@ -362,10 +403,14 @@ namespace ClaudeUsageWidget
                 try { target = typeof(AutoUpdater).Assembly.Location; } catch { }
                 if (string.IsNullOrEmpty(target) || !File.Exists(target))
                 {
-                    using (Process p = Process.GetCurrentProcess())
+                    try
                     {
-                        target = p.MainModule.FileName;
+                        using (Process p = Process.GetCurrentProcess())
+                        {
+                            if (p.MainModule != null) target = p.MainModule.FileName;
+                        }
                     }
+                    catch { }
                 }
             }
 
@@ -376,15 +421,20 @@ namespace ClaudeUsageWidget
             string tempFile = Path.Combine(targetDir, "update-" + Guid.NewGuid().ToString("N") + ".tmp");
             string downloadFile = tempFile;
             string exeToInstall = null;
+            const long MaxUpdateBytes = 100L * 1024 * 1024;
 
             try
             {
                 if (onProgress != null) onProgress(10, L.T("update.downloading", release.AssetName ?? "update"));
 
-                using (HttpResponseMessage resp = SendWithTrustedRedirects(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None))
+                using (CancellationTokenSource dlCts = new CancellationTokenSource(TimeSpan.FromMinutes(3)))
+                using (HttpResponseMessage resp = SendWithTrustedRedirects(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead, dlCts.Token))
+                using (dlCts.Token.Register(delegate { try { resp.Dispose(); } catch { } }))
                 {
                     resp.EnsureSuccessStatusCode();
                     long totalBytes = resp.Content.Headers.ContentLength ?? -1;
+                    if (totalBytes > MaxUpdateBytes)
+                        throw new InvalidDataException("Update package exceeds maximum allowed size.");
 
                     using (Stream input = resp.Content.ReadAsStreamAsync().Result)
                     using (FileStream output = new FileStream(downloadFile, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -394,8 +444,12 @@ namespace ClaudeUsageWidget
                         long totalRead = 0;
                         while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
                         {
-                            output.Write(buffer, 0, read);
+                            if (dlCts.IsCancellationRequested)
+                                throw new TimeoutException("Update download timed out.");
                             totalRead += read;
+                            if (totalRead > MaxUpdateBytes)
+                                throw new InvalidDataException("Update package exceeds maximum allowed size.");
+                            output.Write(buffer, 0, read);
                             if (totalBytes > 0 && onProgress != null)
                             {
                                 int pct = 10 + (int)(totalRead * 70 / totalBytes);
@@ -467,9 +521,10 @@ namespace ClaudeUsageWidget
 
                 ProcessStartInfo psi = new ProcessStartInfo();
                 psi.FileName = target;
+                psi.Arguments = "--wait-update";
                 psi.WorkingDirectory = targetDir;
                 psi.UseShellExecute = true;
-                Process.Start(psi);
+                using (Process started = Process.Start(psi)) { }
 
                 return true;
             }
@@ -506,11 +561,16 @@ namespace ClaudeUsageWidget
                     string txt = resp.Content.ReadAsStringAsync().Result;
                     foreach (string rawLine in txt.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                     {
-                        string[] parts = rawLine.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length >= 2 && string.Equals(parts[parts.Length - 1].TrimStart('*'), assetName, StringComparison.OrdinalIgnoreCase))
+                        string[] parts = rawLine.Trim().Split(new[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length == 2)
                         {
-                            string cand = parts[0].ToLowerInvariant();
-                            if (IsValidSha256Hex(cand)) return cand;
+                            string filePart = parts[1].Trim().TrimStart('*');
+                            if (filePart.StartsWith("./", StringComparison.Ordinal)) filePart = filePart.Substring(2);
+                            if (string.Equals(filePart, assetName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                string cand = parts[0].ToLowerInvariant();
+                                if (IsValidSha256Hex(cand)) return cand;
+                            }
                         }
                     }
                 }

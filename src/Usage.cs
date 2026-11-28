@@ -79,7 +79,7 @@ namespace ClaudeUsageWidget
                 if (!string.IsNullOrEmpty(customPath) && File.Exists(customPath))
                 {
                     p.LoadedCustomFileTime = File.GetLastWriteTimeUtc(customPath);
-                    string rawCustom = File.ReadAllText(customPath, Encoding.UTF8);
+                    string rawCustom = Paths.ReadAllTextShared(customPath);
                     string err = ValidateCustomJson(rawCustom);
                     if (err != null)
                     {
@@ -102,7 +102,7 @@ namespace ClaudeUsageWidget
 
         private static void LoadList(string path, List<Price> dest)
         {
-            Dictionary<string, object> root = J.Parse(File.ReadAllText(path, Encoding.UTF8));
+            Dictionary<string, object> root = J.Parse(Paths.ReadAllTextShared(path));
             IList models = J.Arr(root, "models");
             if (models != null)
                 foreach (object o in models)
@@ -337,7 +337,7 @@ namespace ClaudeUsageWidget
     internal class UsageScanner
     {
         private const int KeepDays = 30;   // jendela pindai; "7 hari" dan "hari ini" dihitung dari subsetnya
-        private const int CacheFormatVersion = 3;
+        private const int CacheFormatVersion = 4;
         /// <summary>Folder 'projects' yang dipindai (default + folder tambahan + WSL). Diisi TrayApp.</summary>
         public Func<List<string>> Roots;
         public Func<List<string>> GeminiCliRoots;
@@ -436,6 +436,7 @@ namespace ClaudeUsageWidget
             }
         }
         private readonly object _gate = new object();
+        private readonly byte[] _readBuf = new byte[1 << 20];
         private Pricing _pricing;
         private long _skipped;
         private DateTime _lastRecord = DateTime.MinValue;
@@ -640,7 +641,11 @@ namespace ClaudeUsageWidget
                     ce = new CachedFileEntry();
                     _diskCache[f] = ce;
                 }
-                if (fi.Length == off) { _offsets[f] = off; return; }
+                if (fi.Length == off || (known && hasCached && ce != null && ce.Length == fi.Length && ce.LastWriteUtcTicks == fi.LastWriteTimeUtc.Ticks))
+                {
+                    _offsets[f] = off;
+                    return;
+                }
 
                 if (ce == null) { ce = new CachedFileEntry(); _diskCache[f] = ce; }
                 _activeCache = ce;
@@ -744,10 +749,10 @@ namespace ClaudeUsageWidget
         {
             const int Chunk = 1 << 20;
             using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan))
+            using (MemoryStream carry = new MemoryStream())
             {
                 fs.Seek(offset, SeekOrigin.Begin);
-                byte[] buf = new byte[Chunk];
-                MemoryStream carry = new MemoryStream();
+                byte[] buf = _readBuf;
                 long consumed = offset;          // posisi setelah baris lengkap terakhir
                 int n;
                 while ((n = fs.Read(buf, 0, buf.Length)) > 0)
@@ -773,7 +778,7 @@ namespace ClaudeUsageWidget
                         start = i + 1;
                     }
                     if (start < n) carry.Write(buf, start, n - start);
-                    if (carry.Capacity > 64 * Chunk && carry.Length == 0) carry = new MemoryStream();
+                    if (carry.Capacity > 64 * Chunk && carry.Length == 0) carry.Capacity = 4096;
                 }
                 return consumed;   // baris terakhir yang belum lengkap akan dibaca lagi nanti
             }
@@ -812,8 +817,7 @@ namespace ClaudeUsageWidget
             if (line.IndexOf("\"user\"", StringComparison.Ordinal) >= 0 &&
                 (line.IndexOf("\"type\":\"user\"", StringComparison.Ordinal) >= 0 || line.IndexOf("\"type\": \"user\"", StringComparison.Ordinal) >= 0))
             {
-                ProcessClaudeUserLine(line, filePath);
-                return;
+                if (ProcessClaudeUserLine(line, filePath)) return;
             }
 
             // Saring murah sebelum parse JSON.
@@ -860,7 +864,7 @@ namespace ClaudeUsageWidget
                 {
                     string key = (id ?? "") + "|" + (req ?? "");
                     if (_seen.ContainsKey(key)) alreadyCounted = true;
-                    else _seen[key] = local;
+                    else MarkSeen(key, local);
                 }
 
                 if (!alreadyCounted)
@@ -885,9 +889,10 @@ namespace ClaudeUsageWidget
                     {
                         t.Cost = (t.Input * p.Input + t.Output * p.Output + t.CacheWrite5m * p.CacheWrite5m
                                   + t.CacheWrite1h * p.CacheWrite1h + t.CacheRead * p.CacheRead) / 1e6;
-                        t.Saved = (t.CacheRead * (p.Input - p.CacheRead)
-                                   - t.CacheWrite5m * (p.CacheWrite5m - p.Input)
-                                   - t.CacheWrite1h * (p.CacheWrite1h - p.Input)) / 1e6;
+                        double saved = t.CacheRead * (p.Input - p.CacheRead);
+                        if (p.CacheWrite5m > p.Input) saved -= t.CacheWrite5m * (p.CacheWrite5m - p.Input);
+                        if (p.CacheWrite1h > p.Input) saved -= t.CacheWrite1h * (p.CacheWrite1h - p.Input);
+                        t.Saved = saved / 1e6;
                     }
 
                     RecordUsage("Claude", _days, _proj, local, model, proj, rawCwd, t, skey, false);
@@ -922,24 +927,26 @@ namespace ClaudeUsageWidget
         private static bool HasClaudeConfirmTool(string line)
         {
             if (string.IsNullOrEmpty(line)) return false;
+            if (line.IndexOf("\"tool_use\"", StringComparison.Ordinal) < 0) return false;
             return line.IndexOf("\"AskUserQuestion\"", StringComparison.Ordinal) >= 0 ||
                    line.IndexOf("\"ExitPlanMode\"", StringComparison.Ordinal) >= 0;
         }
 
-        private void ProcessClaudeUserLine(string line, string filePath)
+        private bool ProcessClaudeUserLine(string line, string filePath)
         {
-            if (IsBackgroundHelperSession(filePath)) return;
             Dictionary<string, object> o = null;
             try { o = J.Parse(StripField(line, "\"content\":")); } catch { o = null; }
-            if (o == null || J.Str(o, "type") != "user") return;
+            if (o == null || J.Str(o, "type") != "user") return false;
+            if (IsBackgroundHelperSession(filePath)) return true;
             DateTime ts;
             string tsRaw = J.Str(o, "timestamp");
             if (tsRaw == null || !DateTime.TryParse(tsRaw, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out ts))
-                return;
+                return true;
             DateTime local = DateTime.SpecifyKind(ts, DateTimeKind.Utc).ToLocalTime();
             if ((DateTime.Now - local).TotalMinutes <= 30)
                 RecordSessionRunning(SessionKey(filePath), "Claude", ProjectName(J.Str(o, "cwd")), local, false);
+            return true;
         }
 
         private bool ProcessAntigravityActivity(string line, string filePath)
@@ -1035,7 +1042,9 @@ namespace ClaudeUsageWidget
             {
                 string fullPath = Path.Combine(Path.GetDirectoryName(compactPath), "transcript_full.jsonl");
                 if (!File.Exists(fullPath)) return null;
-                string needle = "\"step_index\":" + stepIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string stepDigits = stepIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string needleCompact = "\"step_index\":" + stepDigits;
+                string needleSpaced = "\"step_index\": " + stepDigits;
                 FileInfo fi = new FileInfo(fullPath);
                 long start = Math.Max(0, fi.Length - (2L << 20)); // periksa maks 2 MB terakhir
                 using (FileStream fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
@@ -1048,7 +1057,9 @@ namespace ClaudeUsageWidget
                         string l;
                         while ((l = sr.ReadLine()) != null)
                         {
-                            if (l.IndexOf(needle, StringComparison.Ordinal) >= 0) match = l;
+                            if (l.IndexOf(needleCompact, StringComparison.Ordinal) >= 0 ||
+                                l.IndexOf(needleSpaced, StringComparison.Ordinal) >= 0)
+                                match = l;
                         }
                         return match;
                     }
@@ -1084,7 +1095,7 @@ namespace ClaudeUsageWidget
             long stepIndex = J.Long(o, "step_index");
             string key = "ag|" + (tsRaw ?? "") + "|" + stepIndex + "|" + model;
             if (_seen.ContainsKey(key)) return true;
-            _seen[key] = local;
+            MarkSeen(key, local);
 
             Tally t = new Tally();
             t.Requests = 1;
@@ -1238,7 +1249,7 @@ namespace ClaudeUsageWidget
             string fKey = string.IsNullOrEmpty(filePath) ? "" : Path.GetFileName(filePath);
             string dedupKey = "codex|" + fKey + "|" + tsRaw + "|" + rawInput + "|" + outputTok + "|" + cachedInput;
             if (_seen.ContainsKey(dedupKey)) return true;
-            _seen[dedupKey] = local;
+            MarkSeen(dedupKey, local);
 
             string model = null;
             if (!string.IsNullOrEmpty(filePath)) _codexFileModels.TryGetValue(filePath, out model);
@@ -1457,7 +1468,22 @@ namespace ClaudeUsageWidget
                 foreach (SessionCostRecord sr in _sessionCosts.Values)
                 {
                     if (!IsProviderScanned(sr.Provider)) continue;
-                    if (sr.TotalTokens > 0 || sr.Cost > 0) scList.Add(sr);
+                    if (sr.TotalTokens > 0 || sr.Cost > 0)
+                        scList.Add(new SessionCostRecord
+                        {
+                            SessionId = sr.SessionId,
+                            Provider = sr.Provider,
+                            Project = sr.Project,
+                            TopModel = sr.TopModel,
+                            Input = sr.Input,
+                            CacheRead = sr.CacheRead,
+                            CacheWrite = sr.CacheWrite,
+                            Output = sr.Output,
+                            Requests = sr.Requests,
+                            Cost = sr.Cost,
+                            Saved = sr.Saved,
+                            LastActivity = sr.LastActivity
+                        });
                 }
                 scList.Sort(delegate(SessionCostRecord a, SessionCostRecord b)
                 {
@@ -1767,7 +1793,7 @@ namespace ClaudeUsageWidget
 
             SessionActivity sa = GetOrCreateSession(key, provider, project, cwd);
             if (fromHook) sa.FromHook = false;
-            DateTime stamp = (fromHook || _ready) ? now : (localTs > sa.ConfirmAt ? localTs : sa.ConfirmAt);
+            DateTime stamp = fromHook ? now : (localTs > sa.ConfirmAt ? localTs : sa.ConfirmAt);
             if (stamp == DateTime.MinValue) stamp = now;
             if (fromHook || sa.UpdatedAt <= DateTime.MinValue.AddSeconds(60) || localTs >= sa.UpdatedAt.AddSeconds(-60))
             {
@@ -2153,6 +2179,19 @@ namespace ClaudeUsageWidget
             }
         }
 
+        private void MarkSeen(string key, DateTime local)
+        {
+            _seen[key] = local;
+            if (_activeCache != null) _activeCache.AddSeen(key);
+        }
+
+        private static void AppendRecentCapped(List<long[]> list, long cutoffTicks, long ticks, long tokens)
+        {
+            list.RemoveAll(delegate(long[] x) { return x.Length < 2 || x[0] < cutoffTicks; });
+            while (list.Count >= 500) list.RemoveAt(0);
+            list.Add(new[] { ticks, tokens });
+        }
+
         private void RecordRecentToken(DateTime local, long tokens, bool isAntigravity)
         {
             if (tokens <= 0) return;
@@ -2160,8 +2199,9 @@ namespace ClaudeUsageWidget
             if (isAntigravity) _antigravityRecentTokens.Add(new KeyValuePair<DateTime, long>(local, tokens));
             if (_activeCache != null && (DateTime.Now - local).TotalHours <= 6.0)
             {
-                if (_activeCache.RecentTokens.Count < 500) _activeCache.RecentTokens.Add(new[] { local.Ticks, tokens });
-                if (isAntigravity && _activeCache.RecentAgTokens.Count < 500) _activeCache.RecentAgTokens.Add(new[] { local.Ticks, tokens });
+                long cutoffTicks = DateTime.Now.AddHours(-6).Ticks;
+                AppendRecentCapped(_activeCache.RecentTokens, cutoffTicks, local.Ticks, tokens);
+                if (isAntigravity) AppendRecentCapped(_activeCache.RecentAgTokens, cutoffTicks, local.Ticks, tokens);
             }
         }
 
@@ -2214,19 +2254,22 @@ namespace ClaudeUsageWidget
             t.Output = Math.Max(0, outTok);
             t.CacheRead = Math.Max(0, cacheRead);
             t.CacheWrite5m = Math.Max(0, cacheWrite);
+            Price pr = _pricing.Find(model);
             if (!double.IsNaN(explicitCost) && explicitCost > 0)
             {
                 t.Cost = explicitCost;
+                if (pr != null && t.CacheRead > 0 && pr.Input > pr.CacheRead)
+                    t.Saved = (t.CacheRead * (pr.Input - pr.CacheRead)) / 1e6;
+            }
+            else if (pr == null)
+            {
+                t.UnpricedRequests = 1;
             }
             else
             {
-                Price pr = _pricing.Find(model);
-                if (pr == null) t.UnpricedRequests = 1;
-                else
-                {
-                    t.Cost = (t.Input * pr.Input + t.Output * pr.Output + t.CacheRead * pr.CacheRead + t.CacheWrite5m * pr.CacheWrite5m) / 1e6;
+                t.Cost = (t.Input * pr.Input + t.Output * pr.Output + t.CacheRead * pr.CacheRead + t.CacheWrite5m * pr.CacheWrite5m) / 1e6;
+                if (t.CacheRead > 0 && pr.Input > pr.CacheRead)
                     t.Saved = (t.CacheRead * (pr.Input - pr.CacheRead)) / 1e6;
-                }
             }
             return t;
         }
@@ -2277,15 +2320,6 @@ namespace ClaudeUsageWidget
             }
         }
 
-        internal void ScanClineFile(string f)
-        {
-            lock (_gate)
-            {
-                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
-                ScanWholeJsonFile(f, cutoffUtc, IngestClineUiMessagesJson);
-            }
-        }
-
         private void IngestClineUiMessagesJson(string json, string filePath)
         {
             System.Collections.IList arr = null;
@@ -2323,7 +2357,7 @@ namespace ClaudeUsageWidget
                 double explicitCost = J.Num(meta, "cost");
                 string dedupKey = "cline|" + taskId + "|" + i + "|" + local.Ticks + "|" + inTok + "|" + outTok;
                 if (_seen.ContainsKey(dedupKey)) continue;
-                _seen[dedupKey] = local;
+                MarkSeen(dedupKey, local);
 
                 Tally t = BuildUsageTally(inTok, outTok, cRead, cWrite, explicitCost, model);
                 RecordUsage("Cline", _daysCline, _projCline, local, model, label, null, t, "cline:" + taskId, false);
@@ -2362,15 +2396,6 @@ namespace ClaudeUsageWidget
             }
         }
 
-        internal void ScanCopilotFile(string f)
-        {
-            lock (_gate)
-            {
-                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
-                ScanWholeJsonFile(f, cutoffUtc, IngestCopilotFile);
-            }
-        }
-
         private static string TryReadVsCodeWorkspaceFolder(string sessionJsonPath)
         {
             try
@@ -2380,7 +2405,7 @@ namespace ClaudeUsageWidget
                 if (string.IsNullOrEmpty(wsDir)) return null;
                 string wsFile = Path.Combine(wsDir, "workspace.json");
                 if (!File.Exists(wsFile)) return null;
-                Dictionary<string, object> o = J.Parse(File.ReadAllText(wsFile, Encoding.UTF8));
+                Dictionary<string, object> o = J.Parse(Paths.ReadAllTextShared(wsFile));
                 string folderUri = J.Str(o, "folder");
                 Uri u;
                 if (!string.IsNullOrEmpty(folderUri) && Uri.TryCreate(folderUri, UriKind.Absolute, out u) && u.IsFile)
@@ -2451,7 +2476,7 @@ namespace ClaudeUsageWidget
             double cost = J.Num(meta, "cost");
             string dedupKey = "copilot|" + itemKey + "|" + local.Ticks + "|" + inTok + "|" + outTok;
             if (_seen.ContainsKey(dedupKey)) return;
-            _seen[dedupKey] = local;
+            MarkSeen(dedupKey, local);
 
             long netIn = (cRead > 0 && inTok >= cRead) ? inTok - cRead : inTok;
             Tally t = BuildUsageTally(netIn, outTok, cRead, 0, cost, model);
@@ -2483,15 +2508,6 @@ namespace ClaudeUsageWidget
                         ScanWholeJsonFile(f, cutoffUtc, IngestCustomJsonlFile);
                 }
                 catch (Exception ex) { Log.Write("customjsonl.enum", ex); }
-            }
-        }
-
-        internal void ScanCustomJsonlFile(string f)
-        {
-            lock (_gate)
-            {
-                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
-                ScanWholeJsonFile(f, cutoffUtc, IngestCustomJsonlFile);
             }
         }
 
@@ -2537,7 +2553,7 @@ namespace ClaudeUsageWidget
                 string pathKey = string.IsNullOrEmpty(filePath) ? stem : filePath.Replace('/', '\\').ToLowerInvariant();
                 string dedupKey = "custom|" + pathKey + "|" + i + "|" + local.Ticks + "|" + inTok + "|" + outTok;
                 if (_seen.ContainsKey(dedupKey)) continue;
-                _seen[dedupKey] = local;
+                MarkSeen(dedupKey, local);
 
                 Tally t = BuildUsageTally(inTok, outTok, cRead, cWrite, cost, model);
                 RecordUsage(prov, DaysMapForProvider(prov), ProjMapForProvider(prov), local, model, proj, cwd, t, "custom:" + pathKey, false);
@@ -2573,7 +2589,7 @@ namespace ClaudeUsageWidget
                 try
                 {
                     DiskReadFiles++;
-                    string content = File.ReadAllText(f, Encoding.UTF8);
+                    string content = Paths.ReadAllTextShared(f);
                     parser(content, f);
                 }
                 finally
@@ -2586,24 +2602,6 @@ namespace ClaudeUsageWidget
                 _cacheDirty = true;
             }
             catch (Exception ex) { Log.Write("scan.jsonfile", ex); }
-        }
-
-        internal void ScanGeminiCliFile(string f)
-        {
-            lock (_gate)
-            {
-                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
-                ScanWholeJsonFile(f, cutoffUtc, IngestGeminiCliJson);
-            }
-        }
-
-        internal void ScanOpenCodeMessageFile(string f)
-        {
-            lock (_gate)
-            {
-                DateTime cutoffUtc = DateTime.UtcNow.AddDays(-KeepDays);
-                ScanWholeJsonFile(f, cutoffUtc, IngestOpenCodeJson);
-            }
         }
 
         private void IngestGeminiCliJson(string json, string filePath)
@@ -2648,7 +2646,7 @@ namespace ClaudeUsageWidget
                 string msgId = J.Str(m, "id");
                 string dedupKey = "gemcli|" + sessId + "|" + (msgId ?? (i + "|" + tsRaw + "|" + outputTok));
                 if (_seen.ContainsKey(dedupKey)) continue;
-                _seen[dedupKey] = local;
+                MarkSeen(dedupKey, local);
 
                 Tally t = new Tally();
                 t.Requests = 1;
@@ -2710,35 +2708,15 @@ namespace ClaudeUsageWidget
             string msgId = J.Str(d, "id");
             string dedupKey = "opencode|" + sessId + "|" + (msgId ?? (local.Ticks + "|" + inTok + "|" + outTok));
             if (_seen.ContainsKey(dedupKey)) return;
-            _seen[dedupKey] = local;
+            MarkSeen(dedupKey, local);
 
             string model = J.Str(d, "modelID") ?? J.Str(J.Obj(d, "model"), "id") ?? J.Str(d, "model") ?? "opencode";
             Dictionary<string, object> pathObj = J.Obj(d, "path");
             string cwd = J.Str(pathObj, "cwd") ?? J.Str(d, "cwd");
             string proj = string.IsNullOrEmpty(cwd) ? "OpenCode" : ProjectName(cwd);
 
-            Tally t = new Tally();
-            t.Requests = 1;
-            t.Input = inTok;
-            t.Output = outTok;
-            t.CacheRead = cacheRead;
-            t.CacheWrite5m = cacheWrite;
-
             double explicitCost = J.Num(d, "cost");
-            if (!double.IsNaN(explicitCost) && explicitCost > 0)
-            {
-                t.Cost = explicitCost;
-            }
-            else
-            {
-                Price pr = _pricing.Find(model);
-                if (pr == null) t.UnpricedRequests = 1;
-                else
-                {
-                    t.Cost = (t.Input * pr.Input + t.Output * pr.Output + t.CacheRead * pr.CacheRead + t.CacheWrite5m * pr.CacheWrite5m) / 1e6;
-                    t.Saved = (t.CacheRead * (pr.Input - pr.CacheRead)) / 1e6;
-                }
-            }
+            Tally t = BuildUsageTally(inTok, outTok, cacheRead, cacheWrite, explicitCost, model);
 
             RecordUsage("OpenCode", _daysOpenCode, _projOpenCode, local, model, proj, cwd, t, "oc:" + sessId, false);
             UpdateContext(inTok + cacheRead + cacheWrite, model, local, cwd);
@@ -2856,6 +2834,14 @@ namespace ClaudeUsageWidget
             public List<CachedToolRow> Tools = new List<CachedToolRow>();
             public List<long[]> RecentTokens = new List<long[]>();
             public List<long[]> RecentAgTokens = new List<long[]>();
+            public List<string> SeenKeys = new List<string>();
+
+            public void AddSeen(string key)
+            {
+                if (string.IsNullOrEmpty(key)) return;
+                if (SeenKeys.Count >= 4000) SeenKeys.RemoveAt(0);
+                SeenKeys.Add(key);
+            }
 
             public void MergeTool(string provider, string tool, long calls, long tokens, double cost)
             {
@@ -3029,6 +3015,16 @@ namespace ClaudeUsageWidget
                 for (int i = 0; i < ce.RecentAgTokens.Count; i++)
                     if (ce.RecentAgTokens[i].Length >= 2 && ce.RecentAgTokens[i][0] >= minAg)
                         _antigravityRecentTokens.Add(new KeyValuePair<DateTime, long>(new DateTime(ce.RecentAgTokens[i][0]), ce.RecentAgTokens[i][1]));
+            if (ce.SeenKeys != null)
+            {
+                DateTime seenAt = DateTime.Now;
+                for (int i = 0; i < ce.SeenKeys.Count; i++)
+                {
+                    string k = ce.SeenKeys[i];
+                    if (!string.IsNullOrEmpty(k) && !_seen.ContainsKey(k))
+                        _seen[k] = seenAt;
+                }
+            }
         }
 
         private void LoadCache()
@@ -3037,7 +3033,7 @@ namespace ClaudeUsageWidget
             if (string.IsNullOrEmpty(CacheFilePath) || !File.Exists(CacheFilePath)) return;
             try
             {
-                ScanCacheRoot root = J.Ser.Deserialize<ScanCacheRoot>(File.ReadAllText(CacheFilePath, Encoding.UTF8));
+                ScanCacheRoot root = J.Ser.Deserialize<ScanCacheRoot>(Paths.ReadAllTextShared(CacheFilePath));
                 if (root == null || root.Version != CacheFormatVersion ||
                     !string.Equals(root.PricingStamp, _pricing.Stamp(), StringComparison.Ordinal) ||
                     root.TrackProjects != TrackProjects || root.ScanFlags != CurrentScanFlags() || root.Files == null)

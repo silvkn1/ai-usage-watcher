@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Media;
+using System.Threading.Tasks;
 
 namespace ClaudeUsageWidget
 {
@@ -8,7 +9,9 @@ namespace ClaudeUsageWidget
     internal static class AudioAlert
     {
         private const long MaxWavBytes = 5 * 1024 * 1024;
-        public static string CustomWavPath { get; set; }
+        private static readonly object Gate = new object();
+        private static volatile string _customWavPath;
+        public static string CustomWavPath { get { return _customWavPath; } set { _customWavPath = value; } }
 
         internal static bool IsValidWavFile(string path)
         {
@@ -18,31 +21,53 @@ namespace ClaudeUsageWidget
                 string trimmed = path.Trim();
                 if (!trimmed.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) return false;
                 FileInfo fi = new FileInfo(trimmed);
-                return fi.Exists && fi.Length > 44 && fi.Length <= MaxWavBytes;
+                if (!fi.Exists || fi.Length <= 44 || fi.Length > MaxWavBytes) return false;
+                byte[] hdr = new byte[12];
+                using (FileStream fs = new FileStream(trimmed, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    if (fs.Read(hdr, 0, 12) < 12) return false;
+                }
+                return hdr[0] == 'R' && hdr[1] == 'I' && hdr[2] == 'F' && hdr[3] == 'F' &&
+                       hdr[8] == 'W' && hdr[9] == 'A' && hdr[10] == 'V' && hdr[11] == 'E';
             }
             catch { return false; }
         }
 
-        private static void PlayOrFallback(SystemSound fallback)
+        public static void PlayFile(string path)
         {
-            string p = CustomWavPath;
+            PlayOrFallback(path, SystemSounds.Asterisk);
+        }
+
+        private static void PlayOrFallback(string path, SystemSound fallback)
+        {
+            string p = path;
             if (IsValidWavFile(p))
             {
-                try
+                string clean = p.Trim();
+                Task.Run(delegate
                 {
-                    using (SoundPlayer sp = new SoundPlayer(p.Trim()))
-                        sp.Play();
-                    return;
-                }
-                catch { }
+                    try
+                    {
+                        lock (Gate)
+                        {
+                            using (SoundPlayer sp = new SoundPlayer(clean))
+                                sp.PlaySync();
+                        }
+                    }
+                    catch
+                    {
+                        try { if (fallback != null) fallback.Play(); } catch { }
+                    }
+                });
+                return;
             }
             try { if (fallback != null) fallback.Play(); } catch { }
         }
 
-        public static void PlayPrompt() { PlayOrFallback(SystemSounds.Asterisk); }
+        public static void PlayPrompt() { PlayOrFallback(_customWavPath, SystemSounds.Asterisk); }
 
-        public static void PlayWarning() { PlayOrFallback(SystemSounds.Exclamation); }
+        public static void PlayWarning() { PlayOrFallback(_customWavPath, SystemSounds.Exclamation); }
 
-        public static void PlayNotify() { PlayOrFallback(SystemSounds.Beep); }
+        public static void PlayNotify() { PlayOrFallback(_customWavPath, SystemSounds.Beep); }
     }
 }

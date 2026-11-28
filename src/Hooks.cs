@@ -51,8 +51,18 @@ namespace ClaudeUsageWidget
             else if (o == null) sb.Append("null");
             else if (o is bool) sb.Append((bool)o ? "true" : "false");
             else if (o is string) sb.Append(Str((string)o));
-            else if (o is double) sb.Append(((double)o).ToString("R", CultureInfo.InvariantCulture));
-            else sb.Append(Convert.ToString(o, CultureInfo.InvariantCulture));
+            else if (o is double)
+            {
+                double dv = (double)o;
+                sb.Append((double.IsNaN(dv) || double.IsInfinity(dv)) ? "null" : dv.ToString("R", CultureInfo.InvariantCulture));
+            }
+            else if (o is float)
+            {
+                float fv = (float)o;
+                sb.Append((float.IsNaN(fv) || float.IsInfinity(fv)) ? "null" : fv.ToString("R", CultureInfo.InvariantCulture));
+            }
+            else if (o is int || o is long || o is decimal) sb.Append(Convert.ToString(o, CultureInfo.InvariantCulture));
+            else sb.Append(Str(Convert.ToString(o, CultureInfo.InvariantCulture) ?? ""));
         }
 
         private static string Str(string s)
@@ -162,6 +172,7 @@ namespace ClaudeUsageWidget
         /// <summary>Null bila sukses; selain itu pesan galat (berkas tidak diubah).</summary>
         public static string Install(string exePath)
         {
+            if (string.IsNullOrWhiteSpace(exePath)) return "executable path is required";
             return Modify(true, exePath);
         }
 
@@ -265,26 +276,41 @@ namespace ClaudeUsageWidget
         public static void Write(string kind, long elapsedSeconds, long tsUnix, string sid = null)
         {
             Paths.Ensure();
-            string sidPart = string.IsNullOrEmpty(sid) ? "" : ",\"sid\":\"" + sid + "\"";
-            AtomicFile.Write(Paths.NotifyFile,
-                "{\"kind\":\"" + kind + "\",\"elapsed\":" + elapsedSeconds.ToString(CultureInfo.InvariantCulture)
-                + ",\"ts\":" + tsUnix.ToString(CultureInfo.InvariantCulture) + sidPart + "}");
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["kind"] = kind ?? "";
+            d["elapsed"] = elapsedSeconds;
+            d["ts"] = tsUnix;
+            if (!string.IsNullOrEmpty(sid)) d["sid"] = sid;
+            AtomicFile.Write(Paths.NotifyFile, J.Ser.Serialize(d));
         }
 
-        /// <summary>Baca lalu hapus peristiwa; null bila tidak ada atau rusak.</summary>
+        /// <summary>Klaim atomik lalu baca &amp; hapus peristiwa; null bila tidak ada atau rusak.</summary>
         public static Dictionary<string, object> TryTake()
         {
+            string claim = null;
             try
             {
                 string f = Paths.NotifyFile;
                 if (!File.Exists(f)) return null;
-                string txt;
-                using (FileStream fs = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                using (StreamReader r = new StreamReader(fs, Encoding.UTF8)) txt = r.ReadToEnd();
-                try { File.Delete(f); } catch { }
-                return J.Parse(txt);
+                claim = f + ".take." + Guid.NewGuid().ToString("N");
+                try
+                {
+                    File.Move(f, claim);
+                    return J.Parse(Paths.ReadAllTextShared(claim));
+                }
+                catch (FileNotFoundException) { return null; }
+                catch (UnauthorizedAccessException)
+                {
+                    string txt = Paths.ReadAllTextShared(f);
+                    try { File.Delete(f); } catch { }
+                    return J.Parse(txt);
+                }
             }
             catch { return null; }
+            finally
+            {
+                if (claim != null) { try { if (File.Exists(claim)) File.Delete(claim); } catch { } }
+            }
         }
     }
 
@@ -371,7 +397,18 @@ namespace ClaudeUsageWidget
                 Task<string> t = Task.Run(delegate
                 {
                     using (Stream s = Console.OpenStandardInput())
-                    using (StreamReader r = new StreamReader(s, new UTF8Encoding(false))) return r.ReadToEnd();
+                    using (StreamReader r = new StreamReader(s, new UTF8Encoding(false)))
+                    {
+                        char[] buf = new char[65536];
+                        int total = 0;
+                        while (total < buf.Length)
+                        {
+                            int n = r.Read(buf, total, buf.Length - total);
+                            if (n <= 0) break;
+                            total += n;
+                        }
+                        return new string(buf, 0, total);
+                    }
                 });
                 return t.Wait(timeoutMs) ? t.Result : "";
             }

@@ -43,7 +43,15 @@ function sendWidgetCommand(cmd) {
             vscode.window.showWarningMessage('AI Usage Watcher data folder not found: ' + dir);
             return false;
         }
-        fs.writeFileSync(cmdPath, JSON.stringify({ cmd: cmd, ts: Date.now() }), 'utf8');
+        const payload = JSON.stringify({ cmd: cmd, ts: Date.now() });
+        const tmpPath = cmdPath + '.tmp.' + process.pid + '.' + Date.now();
+        try {
+            fs.writeFileSync(tmpPath, payload, 'utf8');
+            fs.renameSync(tmpPath, cmdPath);
+        } catch (e) {
+            try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+            fs.writeFileSync(cmdPath, payload, 'utf8');
+        }
         return true;
     } catch (e) {
         vscode.window.showErrorMessage('Failed to send command to AI Usage Watcher: ' + e.message);
@@ -77,7 +85,12 @@ function updateStatusBar() {
 
     try {
         const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
-        if (!raw.trim()) return;
+        if (!raw.trim()) {
+            statusBarItem.text = '$(dashboard) AI: No Data';
+            statusBarItem.tooltip = 'AI Usage Watcher status file is empty.';
+            statusBarItem.show();
+            return;
+        }
         const data = JSON.parse(raw);
 
         const parts = [];
@@ -174,8 +187,10 @@ function updateStatusBar() {
 function buildStatusClipboardSummary() {
     const filePath = getStatusFilePath();
     if (!fs.existsSync(filePath)) return 'AI Usage Watcher: status file not found.';
-    const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').trim();
+    if (!raw) return 'AI Usage Watcher: status file is empty.';
     const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object') return 'AI Usage Watcher: invalid status data.';
     const lines = ['AI Usage Watcher Summary'];
     if (typeof d.claude_5h_percent === 'number') lines.push(`- Claude: 5h ${d.claude_5h_percent}% | 7d ${d.claude_7d_percent ?? 'n/a'}%`);
     if (typeof d.antigravity_5h_percent === 'number') lines.push(`- Antigravity: 5h ${d.antigravity_5h_percent}% | 7d ${d.antigravity_7d_percent ?? 'n/a'}%`);
@@ -187,6 +202,7 @@ function buildStatusClipboardSummary() {
 
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBarItem.name = 'AI Usage Watcher';
     statusBarItem.command = 'aiUsageWatcher.menu';
     context.subscriptions.push(statusBarItem);
 
@@ -238,27 +254,47 @@ function activate(context) {
     });
     context.subscriptions.push(menuCmd);
 
+    let watchedTarget = null;
+    function bindWatcher() {
+        const targetPath = getStatusFilePath();
+        const watchTarget = fs.existsSync(targetPath) ? targetPath : path.dirname(targetPath);
+        const isHome = watchTarget === os.homedir();
+        if (isHome) return; // Avoid high-churn fs.watch on %USERPROFILE% before status file exists.
+        if (fileWatcher && watchedTarget === watchTarget) return;
+        if (fileWatcher) {
+            try { fileWatcher.close(); } catch (e) {}
+            fileWatcher = null;
+        }
+        try {
+            if (fs.existsSync(watchTarget)) {
+                watchedTarget = watchTarget;
+                fileWatcher = fs.watch(watchTarget, (event, filename) => {
+                    if (!filename || (filename.indexOf('status') !== -1 && !filename.endsWith('.tmp'))) {
+                        if (watchDebounce) clearTimeout(watchDebounce);
+                        watchDebounce = setTimeout(updateStatusBar, 120);
+                    }
+                });
+                fileWatcher.on('error', () => {
+                    try { if (fileWatcher) fileWatcher.close(); } catch (e) {}
+                    fileWatcher = null;
+                    watchedTarget = null;
+                });
+            }
+        } catch (e) {
+            fileWatcher = null;
+            watchedTarget = null;
+        }
+    }
+
     // Initial render
     updateStatusBar();
+    bindWatcher();
 
-    // Poll every 5 seconds for live responsiveness
-    pollTimer = setInterval(updateStatusBar, 5000);
-
-    // Watch status file if exists or directory
-    const targetPath = getStatusFilePath();
-    try {
-        const watchDir = path.dirname(targetPath);
-        if (fs.existsSync(watchDir)) {
-            fileWatcher = fs.watch(watchDir, (event, filename) => {
-                if (filename && filename.indexOf('status') !== -1 && !filename.endsWith('.tmp')) {
-                    if (watchDebounce) clearTimeout(watchDebounce);
-                    watchDebounce = setTimeout(updateStatusBar, 120);
-                }
-            });
-        }
-    } catch (e) {
-        // Fallback to polling
-    }
+    // Poll every 5 seconds for live responsiveness & re-bind watcher if status file appears later
+    pollTimer = setInterval(() => {
+        updateStatusBar();
+        bindWatcher();
+    }, 5000);
 }
 
 function deactivate() {

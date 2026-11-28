@@ -60,13 +60,26 @@ namespace ClaudeUsageWidget
             if (ip.AddressFamily == AddressFamily.InterNetworkV6)
             {
                 if (ip.IsIPv6LinkLocal || ip.IsIPv6Multicast || ip.IsIPv6SiteLocal) return true;
-                byte[] b6 = ip.GetAddressBytes();
-                if ((b6[0] & 0xFE) == 0xFC) return true; // fc00::/7 ULA
                 if (ip.IsIPv4MappedToIPv6) return IsPrivateOrReservedIp(ip.MapToIPv4());
+                byte[] b6 = ip.GetAddressBytes();
+                if (b6.Length != 16) return true;
+                if ((b6[0] & 0xFE) == 0xFC) return true; // fc00::/7 ULA
+                if (b6[0] == 0x20 && b6[1] == 0x02) return true; // 2002::/16 6to4
+                if (b6[0] == 0x20 && b6[1] == 0x01 && b6[2] == 0x00 && b6[3] == 0x00) return true; // 2001::/32 Teredo
+                if (b6[0] == 0x00 && b6[1] == 0x64 && b6[2] == 0xff && b6[3] == 0x9b && b6[4] == 0x00 && b6[5] == 0x01) return true; // 64:ff9b:1::/48 NAT64 local
+                bool prefixZero12 = true;
+                for (int i = 0; i < 12; i++) if (b6[i] != 0) { prefixZero12 = false; break; }
+                if (prefixZero12) return true; // ::/96 unspecified / IPv4-compatible
+                if (b6[0] == 0x00 && b6[1] == 0x64 && b6[2] == 0xff && b6[3] == 0x9b)
+                {
+                    bool nat64Zero = true;
+                    for (int i = 4; i < 12; i++) if (b6[i] != 0) { nat64Zero = false; break; }
+                    if (nat64Zero) return true; // 64:ff9b::/96 NAT64
+                }
                 return ip.Equals(IPAddress.IPv6Any);
             }
             byte[] b = ip.GetAddressBytes();
-            if (b.Length != 4) return false;
+            if (b.Length != 4) return true;
             if (b[0] == 0) return true;                                  // 0.0.0.0/8
             if (b[0] == 10) return true;                                 // 10.0.0.0/8
             if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return true;   // 100.64.0.0/10 CGNAT
@@ -97,7 +110,7 @@ namespace ClaudeUsageWidget
                 error = "Webhook URL must not embed credentials.";
                 return false;
             }
-            string host = uri.DnsSafeHost ?? "";
+            string host = (uri.DnsSafeHost ?? "").TrimEnd('.');
             if (string.IsNullOrEmpty(host) || uri.IsLoopback ||
                 string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
                 host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
@@ -187,7 +200,7 @@ namespace ClaudeUsageWidget
             catch (Exception ex)
             {
                 string err = ex.GetType().Name + ": " + ex.Message;
-                RecordError(err, ex);
+                RecordError(ex.GetType().Name, ex);
                 return err;
             }
         }

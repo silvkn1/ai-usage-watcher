@@ -402,15 +402,15 @@ namespace ClaudeUsageWidget
 
         public void SnapTo(string position, string monitorDeviceName)
         {
-            if (!string.IsNullOrEmpty(monitorDeviceName))
-                MonitorName = monitorDeviceName;
+            MonitorName = monitorDeviceName ?? "";
             Edge = position;
             _dockTop = true;
-            PositionDocked();
+            _expanded = false;
+            EnsureHoverTimer();
+            Relayout();
             DockCenterX = Left + Width / 2;
             DockCenterY = Top + Height / 2;
             if (PositionCommitted != null) PositionCommitted(this, EventArgs.Empty);
-            Invalidate();
         }
 
         public void SetData(ViewModel vm)
@@ -446,7 +446,7 @@ namespace ClaudeUsageWidget
         }
 
         // ---------- tata letak sebagai daftar baris ----------
-        private enum Kind { Title, Text, Bar, Small, Sep, Spark, Pill, DualCards, ContextBar, SessionChips }
+        private enum Kind { Title, Text, Small, Sep, Spark, Pill, DualCards, ContextBar, SessionChips }
 
         private class CardCol
         {
@@ -466,9 +466,8 @@ namespace ClaudeUsageWidget
             public string Left, Right;
             public Color Color = Palette.Text;
             public double Percent = -1;
-            public double Marker = -1;          // posisi penanda laju (0..1) searah dengan isi bar
             public double TargetLine;           // garis batas harian pada grafik Spark
-            public bool Warn, Faded, ClickDone, ClickSessionMenu, HasTerminalBtn;
+            public bool Warn, ClickDone, ClickSessionMenu, HasTerminalBtn;
             public double[] Series;             // untuk Kind.Spark
             public DayStat[] Days;              // data harian di balik Series
             public CardCol LeftCol, RightCol;   // untuk Kind.DualCards dan Kind.Pill
@@ -859,46 +858,6 @@ namespace ClaudeUsageWidget
             return Opts.ShowRemaining ? L.T("pct.left", 100 - used) : used + "%";
         }
 
-        private static void AddLimit(List<Row> rows, string label, LimitWindow w, DateTime captured, double windowSecs, bool stale, Color? customColor = null)
-        {
-            if (!w.Available) { Row na = new Row(Kind.Text, label, L.T("unavailable")); na.Color = Palette.Dim; rows.Add(na); return; }
-            if (w.IsStale)
-            {
-                Row st = new Row(Kind.Text, label, L.T("alreadyreset", Fmt.Clock(w.ResetsAt)));
-                st.Color = Palette.Dim; rows.Add(st); return;
-            }
-            int used = (int)Math.Round(w.UsedPercent);
-            Row r = new Row(Kind.Bar, Opts.ShowRemaining ? L.T("limit.left", label, 100 - used) : label + "  " + used + "%",
-                w.ResetsAt == DateTime.MinValue ? "" : L.T("resetin.at", Fmt.Until(w.ResetsAt), Fmt.Clock(w.ResetsAt)));
-            r.Percent = Opts.ShowRemaining ? 100 - w.UsedPercent : w.UsedPercent;   // isi bar mengikuti mode
-            r.Color = (w.UsedPercent >= 80) ? Palette.Red : (w.UsedPercent >= 50 ? Palette.Amber : (customColor.HasValue ? customColor.Value : Palette.Green));
-            r.Faded = stale;
-            double e = Pace.ElapsedAt(w, DateTime.Now, windowSecs);
-            if (!double.IsNaN(e)) r.Marker = Opts.ShowRemaining ? 1 - e : e;          // penanda ikut arah isi bar
-            rows.Add(r);
-
-            TimeSpan hit;
-            if (Pace.TryForecast(w, captured, windowSecs, stale, out hit))
-            {
-                Row f = new Row(Kind.Small, hit < TimeSpan.FromMinutes(1) ? L.T("pace.now") : L.T("pace.hit", Fmt.Until(DateTime.Now + hit)), null);
-                f.Warn = true;
-                rows.Add(f);
-            }
-        }
-
-        private static void AddModels(List<Row> rows, Dictionary<string, Tally> d, int max)
-        {
-            List<KeyValuePair<string, Tally>> list = new List<KeyValuePair<string, Tally>>(d);
-            list.Sort(delegate(KeyValuePair<string, Tally> a, KeyValuePair<string, Tally> b) { return b.Value.Total.CompareTo(a.Value.Total); });
-            int n = 0;
-            foreach (KeyValuePair<string, Tally> kv in list)
-            {
-                if (n++ >= max) break;
-                string cost = kv.Value.UnpricedRequests > 0 && kv.Value.Cost == 0 ? "?" : "≈" + Fmt.Usd(kv.Value.Cost);
-                rows.Add(new Row(Kind.Small, "   " + ShortModel(kv.Key) + "  " + Fmt.Tokens(kv.Value.Total), cost));
-            }
-        }
-
         private static string ShortModel(string m)
         {
             if (string.IsNullOrEmpty(m)) return m;
@@ -928,7 +887,6 @@ namespace ClaudeUsageWidget
                 case Kind.ContextBar: return (int)(24 * s);
                 case Kind.SessionChips: return (int)(22 * s);
                 case Kind.Title: return (int)(22 * s);
-                case Kind.Bar: return (int)(30 * s);
                 case Kind.Spark: return (int)(50 * s);
                 case Kind.Small: return (int)(16 * s);
                 case Kind.Sep: return (int)(9 * s);
@@ -967,20 +925,54 @@ namespace ClaudeUsageWidget
             int minW, maxW = int.MaxValue;
             if (ShowCompact)
             {
+                Row pillRow = null;
+                foreach (Row r in rows) { if (r.Kind == Kind.Pill) { pillRow = r; break; } }
                 bool costRunway = string.Equals(Opts.MiniPillMode, "cost_runway", StringComparison.OrdinalIgnoreCase);
-                bool dual = false;
-                foreach (Row r in rows) { if (r.Kind == Kind.Pill && r.LeftCol != null && r.RightCol != null) { dual = true; break; } }
+                bool hasLeft = pillRow != null && pillRow.LeftCol != null;
+                bool hasRight = pillRow != null && pillRow.RightCol != null;
+                bool dual = hasLeft && hasRight;
+                int floorW;
                 if (costRunway)
-                    minW = Opts.CurrencyCustomEnabled ? (int)(225 * s) : (int)(200 * s);
+                    floorW = Opts.CurrencyCustomEnabled ? (int)(225 * s) : (int)(200 * s);
                 else if (dual)
-                    minW = Opts.CurrencyCustomEnabled ? (int)(250 * s) : (int)(225 * s);
+                    floorW = Opts.CurrencyCustomEnabled ? (int)(250 * s) : (int)(225 * s);
                 else
-                    minW = Opts.CurrencyCustomEnabled ? (int)(170 * s) : (int)(150 * s);
-                if (_vm != null && _vm.Usage != null && _vm.Usage.Sessions != null)
+                    floorW = Opts.CurrencyCustomEnabled ? (int)(170 * s) : (int)(150 * s);
+                int measW = 0;
+                using (Graphics g = CreateGraphics())
                 {
-                    using (Graphics g = CreateGraphics())
-                        minW += MeasureSessionBadgeWidth(g, _vm.Usage.Sessions, s);
+                    int segPad = (int)(3 * s) * 2 + (int)(4 * s);
+                    int badgeW = (_vm != null && _vm.Usage != null && _vm.Usage.Sessions != null)
+                        ? MeasureSessionBadgeWidth(g, _vm.Usage.Sessions, s)
+                        : 0;
+                    floorW += badgeW;
+                    string costText = _vm != null && _vm.Usage != null ? Fmt.UsdShort(_vm.Usage.TodayTotal.Cost) : "$0.00";
+                    int costW = TextRenderer.MeasureText(g, costText, _fBody, new Size(400, 30), TextFormatFlags.NoPadding).Width + segPad;
+                    SessionStatusSummary sess = _vm != null && _vm.Usage != null ? _vm.Usage.Sessions : null;
+                    if (costRunway && _vm != null && _vm.Usage != null)
+                    {
+                        double rwMins = RunwayEstimator.EstimateMinutes(_vm.Limits, _vm.Usage);
+                        string rwText = rwMins > 0 ? L.T("pill.runway", Fmt.Runway(rwMins)) : Fmt.Tokens(_vm.Usage.TodayTotal.Total);
+                        int rwW = TextRenderer.MeasureText(g, rwText, _fBody, new Size(400, 30), TextFormatFlags.NoPadding).Width + segPad;
+                        measW = Math.Max(costW, rwW) * 2 + badgeW + (int)(2 * s);
+                    }
+                    else if (dual)
+                    {
+                        int s1 = MeasurePillSegWidth(g, pillRow.LeftCol, sess, s, segPad);
+                        int s2 = MeasurePillSegWidth(g, pillRow.RightCol, sess, s, segPad);
+                        measW = Math.Max(s1, Math.Max(s2, costW)) * 3 + badgeW + (int)(4 * s);
+                    }
+                    else if (hasLeft || hasRight)
+                    {
+                        int s1 = MeasurePillSegWidth(g, hasLeft ? pillRow.LeftCol : pillRow.RightCol, sess, s, segPad);
+                        measW = Math.Max(s1, costW) * 2 + badgeW + (int)(2 * s);
+                    }
+                    else
+                    {
+                        measW = TextRenderer.MeasureText(g, L.T("set.noproviders"), _fBody, new Size(400, 30), TextFormatFlags.NoPadding).Width + segPad + badgeW;
+                    }
                 }
+                minW = Math.Max(floorW, measW);
             }
             else
             {
@@ -1225,6 +1217,15 @@ namespace ClaudeUsageWidget
                 w += TextRenderer.MeasureText(g, "✓" + sess.DoneCount, _fSmall, new Size(200, 30), TextFormatFlags.NoPadding).Width;
             }
             return w;
+        }
+
+        private int MeasurePillSegWidth(Graphics g, CardCol col, SessionStatusSummary sess, float s, int segPad)
+        {
+            if (col == null) return segPad;
+            bool provRun, provConfirm, provDone;
+            GetProviderSessionFlags(col, sess, out provRun, out provConfirm, out provDone);
+            int dotW = (provConfirm || provRun || provDone) ? (Math.Max(4, (int)Math.Round(5f * s)) + (int)(3 * s)) : 0;
+            return TextRenderer.MeasureText(g, PillText(col), _fBody, new Size(400, 30), TextFormatFlags.NoPadding).Width + dotW + segPad;
         }
 
         private void DrawPillSegmentLabel(Graphics g, CardCol col, SessionStatusSummary sess, int x, int y, int w, int rh, float s)
@@ -1609,8 +1610,8 @@ namespace ClaudeUsageWidget
                 }
                 Font f = FontFor(r);
                 bool dimKind = r.Kind == Kind.Small || r.Kind == Kind.Spark;
-                Color left = dimKind ? (r.Warn ? Palette.Amber : (r.Color != Palette.Text ? r.Color : Palette.Dim)) : (r.Kind == Kind.Bar ? Palette.Text : r.Color);
-                int textH = r.Kind == Kind.Bar ? (int)(18 * s) : (r.Kind == Kind.Spark ? (int)(16 * s) : rh);
+                Color left = dimKind ? (r.Warn ? Palette.Amber : (r.Color != Palette.Text ? r.Color : Palette.Dim)) : r.Color;
+                int textH = r.Kind == Kind.Spark ? (int)(16 * s) : rh;
                 Rectangle rect = new Rectangle(x, y, right - x, textH);
                 string leftText = r.Left, rightText = r.Right;
                 if (r.Kind == Kind.Title && !_popup)
@@ -1662,22 +1663,7 @@ namespace ClaudeUsageWidget
                     int menuW = _pillDoneRect.IsEmpty ? rect.Width : Math.Max(10, _pillDoneRect.Left - rect.X);
                     _sessRowRect = new Rectangle(rect.X, rect.Y, menuW, rect.Height);
                 }
-                if (r.Kind == Kind.Bar)
-                {
-                    int bh = Math.Max(4, (int)(6 * s));
-                    int by = y + textH + (int)(2 * s);
-                    using (SolidBrush tb = new SolidBrush(Palette.Track)) g.FillRectangle(tb, x, by, right - x, bh);
-                    int fw = (int)((right - x) * Math.Max(0, Math.Min(100, r.Percent)) / 100.0);
-                    Color fc = r.Faded ? ThemeUtil.Blend(r.Color, Palette.Track, 0.55) : r.Color;   // snapshot basi: pudar
-                    using (SolidBrush fb = new SolidBrush(fc)) g.FillRectangle(fb, x, by, fw, bh);
-                    if (r.Marker >= 0)   // penanda laju: posisi waktu yang sudah berlalu
-                    {
-                        int mx = x + (int)((right - x) * Math.Max(0, Math.Min(1, r.Marker)));
-                        using (Pen mp = new Pen(Palette.Text, Math.Max(1.5f, 1.5f * s)))
-                            g.DrawLine(mp, mx, by - 2 * s, mx, by + bh + 2 * s);
-                    }
-                }
-                else if (r.Kind == Kind.Spark && r.Series != null && r.Series.Length > 0)
+                if (r.Kind == Kind.Spark && r.Series != null && r.Series.Length > 0)
                 {
                     int top = y + textH + (int)(3 * s), bottom = y + rh - (int)(3 * s);
                     int n = r.Series.Length;
@@ -1857,53 +1843,63 @@ namespace ClaudeUsageWidget
             _cardRects.Add(new KeyValuePair<string, Rectangle>(col.Title, rect));
         }
 
+        private bool IsInteractiveRectHit(Point loc)
+        {
+            if (!_popup && !_titleSettingsRect.IsEmpty && _titleSettingsRect.Contains(loc)) return true;
+            if (!_popup && !_titleModeRect.IsEmpty && _titleModeRect.Contains(loc)) return true;
+            if (!_popup && !_dockTop && !_titleCompactRect.IsEmpty && _titleCompactRect.Contains(loc)) return true;
+            if (!_pillDoneRect.IsEmpty && _pillDoneRect.Contains(loc)) return true;
+            if ((!_pillSessionRect.IsEmpty && _pillSessionRect.Contains(loc)) ||
+                (!_sessRowRect.IsEmpty && _sessRowRect.Contains(loc))) return true;
+            if (!_cardsSwitchRect.IsEmpty && _cardsSwitchRect.Contains(loc)) return true;
+            if (!_ctxCopyRect.IsEmpty && _ctxCopyRect.Contains(loc)) return true;
+            if (!_ctxTermRect.IsEmpty && _ctxTermRect.Contains(loc)) return true;
+            return false;
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left && e.Clicks == 1)
+            if (e.Button == MouseButtons.Left && IsInteractiveRectHit(e.Location))
             {
-                if (!_popup && !_titleSettingsRect.IsEmpty && _titleSettingsRect.Contains(e.Location))
+                if (e.Clicks == 1)
                 {
-                    if (SettingsRequested != null) SettingsRequested(this, EventArgs.Empty);
-                    return;
+                    if (!_popup && !_titleSettingsRect.IsEmpty && _titleSettingsRect.Contains(e.Location))
+                    {
+                        if (SettingsRequested != null) SettingsRequested(this, EventArgs.Empty);
+                    }
+                    else if (!_popup && !_titleModeRect.IsEmpty && _titleModeRect.Contains(e.Location))
+                    {
+                        if (PresetCycleRequested != null) PresetCycleRequested(this, EventArgs.Empty);
+                    }
+                    else if (!_popup && !_dockTop && !_titleCompactRect.IsEmpty && _titleCompactRect.Contains(e.Location))
+                    {
+                        if (CompactToggled != null) CompactToggled(this, EventArgs.Empty);
+                    }
+                    else if (!_pillDoneRect.IsEmpty && _pillDoneRect.Contains(e.Location))
+                    {
+                        if (DoneSessionsClicked != null) DoneSessionsClicked(this, EventArgs.Empty);
+                    }
+                    else if ((!_pillSessionRect.IsEmpty && _pillSessionRect.Contains(e.Location)) ||
+                             (!_sessRowRect.IsEmpty && _sessRowRect.Contains(e.Location)))
+                    {
+                        if (SessionMenuRequested != null) SessionMenuRequested(this, e);
+                    }
+                    else if (!_cardsSwitchRect.IsEmpty && _cardsSwitchRect.Contains(e.Location))
+                    {
+                        CardPage++;
+                        Relayout();
+                    }
+                    else if (!_ctxCopyRect.IsEmpty && _ctxCopyRect.Contains(e.Location))
+                    {
+                        if (CopyCompactRequested != null) CopyCompactRequested(this, EventArgs.Empty);
+                    }
+                    else if (!_ctxTermRect.IsEmpty && _ctxTermRect.Contains(e.Location))
+                    {
+                        if (OpenActiveTerminalRequested != null) OpenActiveTerminalRequested(this, EventArgs.Empty);
+                    }
                 }
-                if (!_popup && !_titleModeRect.IsEmpty && _titleModeRect.Contains(e.Location))
-                {
-                    if (PresetCycleRequested != null) PresetCycleRequested(this, EventArgs.Empty);
-                    return;
-                }
-                if (!_popup && !_dockTop && !_titleCompactRect.IsEmpty && _titleCompactRect.Contains(e.Location))
-                {
-                    if (CompactToggled != null) CompactToggled(this, EventArgs.Empty);
-                    return;
-                }
-                if (!_pillDoneRect.IsEmpty && _pillDoneRect.Contains(e.Location))
-                {
-                    if (DoneSessionsClicked != null) DoneSessionsClicked(this, EventArgs.Empty);
-                    return;
-                }
-                if ((!_pillSessionRect.IsEmpty && _pillSessionRect.Contains(e.Location)) ||
-                    (!_sessRowRect.IsEmpty && _sessRowRect.Contains(e.Location)))
-                {
-                    if (SessionMenuRequested != null) SessionMenuRequested(this, e);
-                    return;
-                }
-                if (!_cardsSwitchRect.IsEmpty && _cardsSwitchRect.Contains(e.Location))
-                {
-                    CardPage++;
-                    Relayout();
-                    return;
-                }
-                if (!_ctxCopyRect.IsEmpty && _ctxCopyRect.Contains(e.Location))
-                {
-                    if (CopyCompactRequested != null) CopyCompactRequested(this, EventArgs.Empty);
-                    return;
-                }
-                if (!_ctxTermRect.IsEmpty && _ctxTermRect.Contains(e.Location))
-                {
-                    if (OpenActiveTerminalRequested != null) OpenActiveTerminalRequested(this, EventArgs.Empty);
-                    return;
-                }
+                return;
             }
             if (_popup) return;
             if (e.Button != MouseButtons.Left) return;

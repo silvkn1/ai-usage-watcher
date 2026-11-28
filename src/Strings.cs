@@ -24,9 +24,9 @@ namespace ClaudeUsageWidget
         public static void Set(string lang)
         {
             _pack = null; _packCulture = null;
-            if (lang == "id") { Lang = "id"; return; }
+            if (string.Equals(lang, "id", StringComparison.OrdinalIgnoreCase)) { Lang = "id"; return; }
             Lang = "en";
-            if (string.IsNullOrEmpty(lang) || lang == "en") return;
+            if (string.IsNullOrEmpty(lang) || string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase)) return;
             LangPackInfo info = LangPacks.Find(lang);
             if (info == null) return;
             Dictionary<string, string> strings; CultureInfo culture;
@@ -93,7 +93,6 @@ namespace ClaudeUsageWidget
             { "codex.limits",   new[] { "Codex limits: 5h {0} · 7d {1}", "Limit Codex: 5j {0} · 7h {1}" } },
             { "ollama.online",  new[] { "Ollama: Online ({0} models)", "Ollama: Online ({0} model)" } },
             { "ollama.online.vram", new[] { "Ollama: Online ({0} models · {1} loaded · {2} GB)", "Ollama: Online ({0} model · {1} aktif · {2} GB)" } },
-            { "ctx.bar",        new[] { "Context: {0} / 200k ({1}%)", "Konteks: {0} / 200k ({1}%)" } },
             { "ctx.bar.cap",    new[] { "Context: {0} / {1} ({2}%)", "Konteks: {0} / {1} ({2}%)" } },
             { "ctx.copy",       new[] { "/compact", "/compact" } },
             { "ctx.term",       new[] { ">_", ">_" } },
@@ -319,7 +318,6 @@ namespace ClaudeUsageWidget
             { "sess.running",     new[] { "Running ({0}): {1}", "Sedang berjalan ({0}): {1}" } },
             { "sess.confirm",     new[] { "Needs confirmation ({0}): {1}", "Perlu konfirmasi ({0}): {1}" } },
             { "sess.done",        new[] { "Done to check ({0}): {1}", "Selesai siap dicek ({0}): {1}" } },
-            { "sess.line",        new[] { "Sessions: {0}", "Sesi: {0}" } },
             { "sess.chips.lbl",   new[] { "Sessions", "Sesi" } },
             { "sess.chip.confirm",new[] { "? {0} confirm", "? {0} konfirmasi" } },
             { "sess.chip.run",    new[] { "● {0} active", "● {0} aktif" } },
@@ -540,7 +538,7 @@ namespace ClaudeUsageWidget
             { "wizard.btn.back",       new[] { "< Back", "< Kembali" } },
             { "wizard.btn.next",       new[] { "Next >", "Lanjut >" } },
             { "wizard.btn.finish",     new[] { "Finish & Start!", "Selesai & Mulai!" } },
-            { "wizard.done.tip",       new[] { "AI Usage Watcher is active! Docked at the top screen edge.", "AI Usage Watcher aktif! Menempel di tepi atas layar." } },
+            { "wizard.done.tip",       new[] { "AI Usage Watcher is active! Click the tray icon or hover the widget to view usage.", "AI Usage Watcher aktif! Klik ikon tray atau arahkan kursor ke widget untuk melihat pemakaian." } },
 
             // ---- profil, cache alert, audio wav, forecast, filter & scanner baru ----
             { "tray.profiles",         new[] { "Switch Profile", "Ganti Profil" } },
